@@ -13,6 +13,8 @@
 #log-scroll {
     flex-grow: 1;
     flex-shrink: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 #log-scroll .unity-scroll-view__content-container {
@@ -80,6 +82,7 @@
 /* Autocomplete dropdown */
 #autocomplete-container {
     flex-direction: column;
+    flex-shrink: 0;
     background-color: rgba(20, 20, 28, 0.95);
     border-bottom-width: 1px;
     border-bottom-color: rgba(80, 160, 255, 0.2);
