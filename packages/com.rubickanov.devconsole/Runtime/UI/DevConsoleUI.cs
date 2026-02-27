@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UIElements;
 
 namespace Rubickanov.DevConsole
@@ -134,7 +135,7 @@ namespace Rubickanov.DevConsole
         private void Update()
         {
             var settings = DevConsoleSettings.GetOrCreate();
-            if (settings.UseBuiltInToggle && Input.GetKeyDown(settings.ToggleKey))
+            if (settings.UseBuiltInToggle && Keyboard.current[settings.ToggleKey].wasPressedThisFrame)
                 Toggle();
 
             if (_needsScrollToBottom)

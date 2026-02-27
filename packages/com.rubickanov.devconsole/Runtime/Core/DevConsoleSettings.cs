@@ -1,5 +1,6 @@
 using System.IO;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace Rubickanov.DevConsole
 {
@@ -8,12 +9,12 @@ namespace Rubickanov.DevConsole
         private const string SettingsPath = "ProjectSettings/DevConsoleSettings.json";
 
         [SerializeField] private bool useBuiltInToggle = true;
-        [SerializeField] private KeyCode toggleKey = KeyCode.BackQuote;
+        [SerializeField] private Key toggleKey = Key.Backquote;
         [Range(0.1f, 0.9f)]
         [SerializeField] private float consoleHeight = 0.4f;
 
         public bool UseBuiltInToggle => useBuiltInToggle;
-        public KeyCode ToggleKey => toggleKey;
+        public Key ToggleKey => toggleKey;
         public float ConsoleHeight => consoleHeight;
 
         private static DevConsoleSettings _instance;
