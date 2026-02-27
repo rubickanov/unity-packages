@@ -12,6 +12,9 @@ namespace Rubickanov.DevConsole.Netcode
     /// </summary>
     public class NetworkCommandBridge : NetworkBehaviour
     {
+        /// <summary>Client ID of the player whose command is currently executing on the server. Null when executing locally.</summary>
+        public static ulong? ExecutingClientId { get; private set; }
+
         /// <summary>Server-authoritative flag controlling whether cheat-protected commands are allowed.</summary>
         public readonly NetworkVariable<bool> CheatsEnabled = new(
             false,
@@ -110,14 +113,21 @@ namespace Rubickanov.DevConsole.Netcode
             var filter = CommandRegistry.Instance.PreExecuteFilter;
             CommandRegistry.Instance.PreExecuteFilter = null;
 
-            var result = CommandRegistry.Instance.Execute(rawInput);
+            ExecutingClientId = senderId;
+            try
+            {
+                var result = CommandRegistry.Instance.Execute(rawInput);
 
-            CommandRegistry.Instance.PreExecuteFilter = filter;
-
-            // Send result back to the requesting client
-            var message = result.Message ?? "";
-            SendCommandResultRpc(message, result.Success,
-                RpcTarget.Single(senderId, RpcTargetUse.Temp));
+                // Send result back to the requesting client
+                var message = result.Message ?? "";
+                SendCommandResultRpc(message, result.Success,
+                    RpcTarget.Single(senderId, RpcTargetUse.Temp));
+            }
+            finally
+            {
+                ExecutingClientId = null;
+                CommandRegistry.Instance.PreExecuteFilter = filter;
+            }
         }
 
         [Rpc(SendTo.SpecifiedInParams)]

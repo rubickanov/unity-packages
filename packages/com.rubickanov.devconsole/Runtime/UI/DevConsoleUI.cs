@@ -82,11 +82,12 @@ namespace Rubickanov.DevConsole
             if (Instance != null && Instance != this)
             {
                 Debug.LogWarning("[DevConsole] Duplicate DevConsoleUI detected, destroying this one.");
-                Destroy(this);
+                Destroy(gameObject);
                 return;
             }
 
             Instance = this;
+            DontDestroyOnLoad(gameObject);
             _history = new CommandHistory();
             CommandRegistry.Instance.Initialize();
 
