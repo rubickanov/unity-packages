@@ -7,10 +7,10 @@ namespace Rubickanov.DevConsole
 {
     /// <summary>UI Toolkit-based dev console. Attach to a GameObject with UIDocument.</summary>
     [RequireComponent(typeof(UIDocument))]
-    public class DevConsoleUI : MonoBehaviour
+    public class DevConsoleUIToolkit : MonoBehaviour
     {
         /// <summary>Singleton instance. Null if console is not in the scene.</summary>
-        public static DevConsoleUI Instance { get; private set; }
+        public static DevConsoleUIToolkit Instance { get; private set; }
 
         private VisualElement _root;
         private ScrollView _logScroll;
