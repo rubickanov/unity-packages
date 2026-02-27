@@ -1,0 +1,12 @@
+{
+    "name": "com.rubickanov.acs.network",
+    "version": "1.0.0",
+    "displayName": "ACS Network",
+    "description": "Netcode for GameObjects extension for ACS. Provides EntityNetworkComponent base class.",
+    "unity": "2021.3",
+    "keywords": ["acs", "entity", "network", "netcode"],
+    "author": { "name": "Rubickanov" },
+    "dependencies": {
+        "com.rubickanov.acs": "1.0.0"
+    }
+}

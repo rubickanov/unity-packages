@@ -7,9 +7,9 @@ Shared Unity packages.
 | Package | Description |
 |---------|-------------|
 | `com.rubickanov.acs` | Aspect-Component System |
+| `com.rubickanov.acs.network` | ACS Netcode extension |
 | `com.rubickanov.audio` | Audio service |
 | `com.rubickanov.behaviortree` | Behavior tree editor & runtime |
-| `com.rubickanov.camera` | Cinemachine camera service |
 | `com.rubickanov.devconsole` | In-game developer console |
 | `com.rubickanov.loading` | Loading pipeline |
 | `com.rubickanov.localization` | Localization service |
@@ -20,16 +20,22 @@ Shared Unity packages.
 
 ## Installation
 
-Add to `Packages/manifest.json`:
+Unity Package Manager → Add package from git URL:
 
-```json
-"com.rubickanov.ui": "git+ssh://git@github.com/rubickanov-org/unity-packages.git?path=packages/com.rubickanov.ui"
+```
+git+ssh://git@github.com/rubickanov-org/unity-packages.git?path=packages/<package-name>
 ```
 
-Pin to a specific commit:
+Or HTTPS:
 
-```json
-"com.rubickanov.ui": "git+ssh://git@github.com/rubickanov-org/unity-packages.git?path=packages/com.rubickanov.ui#a1b2c3d"
+```
+https://github.com/rubickanov-org/unity-packages.git?path=packages/<package-name>
 ```
 
-Requires SSH key with access to this repo.
+Replace `<package-name>` with the package from the table above (e.g. `com.rubickanov.ui`).
+
+Pin to a specific commit by appending `#<hash>`:
+
+```
+git+ssh://git@github.com/rubickanov-org/unity-packages.git?path=packages/com.rubickanov.ui#a1b2c3d
+```
