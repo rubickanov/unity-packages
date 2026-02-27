@@ -1,0 +1,18 @@
+{
+    "name": "LoggingEditor",
+    "rootNamespace": "Rubickanov.Logging.Editor",
+    "references": [
+        "GUID:d63e3a82efc44e23af2c3fc73698686f"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

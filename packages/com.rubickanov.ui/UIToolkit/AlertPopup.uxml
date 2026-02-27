@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement class="overlay" picking-mode="Position">
+        <ui:VisualElement class="panel">
+            <ui:Label name="title-label" class="subtitle" />
+            <ui:Label name="message-label" style="margin-bottom: 20px; max-width: 360px; -unity-text-align: middle-center; white-space: normal;" />
+            <ui:VisualElement style="flex-direction: row;">
+                <ui:Button name="ok-btn" class="btn btn-primary" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

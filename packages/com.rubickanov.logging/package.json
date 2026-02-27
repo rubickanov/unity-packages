@@ -1,0 +1,9 @@
+{
+  "name": "com.rubickanov.logging",
+  "version": "1.0.0",
+  "displayName": "Logging",
+  "description": "ZLogger-based logging factory with file rotation, platform-specific outputs, and Unity log interception.",
+  "unity": "2022.3",
+  "author": { "name": "rubickanov" },
+  "keywords": ["logging", "zlogger", "diagnostics"]
+}

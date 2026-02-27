@@ -1,0 +1,17 @@
+{
+  "name": "com.rubickanov.behaviortree",
+  "version": "1.0.0",
+  "displayName": "Behavior Tree",
+  "description": "Serializable behavior tree framework for Unity. Visual editor, blackboard, subtrees, and SerializeReference-based polymorphic serialization.",
+  "unity": "2022.3",
+  "author": {
+    "name": "rubickanov"
+  },
+  "keywords": [
+    "ai",
+    "behavior-tree",
+    "bt",
+    "blackboard",
+    "decision"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+    "name": "Audio.Runtime",
+    "rootNamespace": "Rubickanov.Audio",
+    "references": [
+        "GUID:f51ebe6a0ceec4240a699833d6309b23",
+        "GUID:410695d7dc094da8862fa28e8ad88826"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

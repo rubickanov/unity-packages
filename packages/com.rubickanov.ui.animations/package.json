@@ -1,0 +1,9 @@
+{
+  "name": "com.rubickanov.ui.animations",
+  "version": "1.0.0",
+  "displayName": "UI Animations",
+  "description": "LitMotion-based view animations for UI Framework.",
+  "unity": "2022.3",
+  "author": { "name": "rubickanov" },
+  "keywords": [ "ui", "animation", "litmotion" ]
+}

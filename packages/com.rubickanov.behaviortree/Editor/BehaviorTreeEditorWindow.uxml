@@ -1,0 +1,18 @@
+<UXML xmlns="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <Style src="BehaviorTreeEditorStyles.uss" />
+    <uie:Toolbar name="toolbar">
+        <uie:ObjectField name="asset-field" allow-scene-objects="false" />
+        <uie:ToolbarSpacer style="flex-grow: 1;" />
+        <uie:ToolbarButton name="btn-layout" text="Auto Layout" />
+        <uie:ToolbarButton name="btn-minimap" text="Minimap" />
+        <uie:ToolbarButton name="btn-center" text="Center" />
+    </uie:Toolbar>
+    <TwoPaneSplitView name="split-view" fixed-pane-index="0"
+                       fixed-pane-initial-dimension="300" orientation="Horizontal">
+        <VisualElement name="inspector-container">
+            <Label text="Inspector" class="panel-header" />
+            <ScrollView name="inspector-scroll" />
+        </VisualElement>
+        <VisualElement name="graph-container" style="flex-grow: 1;" />
+    </TwoPaneSplitView>
+</UXML>

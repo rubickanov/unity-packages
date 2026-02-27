@@ -1,0 +1,9 @@
+{
+  "name": "com.rubickanov.localization",
+  "version": "1.0.0",
+  "displayName": "Localization",
+  "description": "Localization service with reactive updates, locale persistence via delegates, and strongly-typed key generation.",
+  "unity": "2022.3",
+  "author": { "name": "rubickanov" },
+  "keywords": ["localization", "i18n", "reactive", "locale"]
+}

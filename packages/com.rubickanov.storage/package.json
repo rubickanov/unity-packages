@@ -1,0 +1,9 @@
+{
+  "name": "com.rubickanov.storage",
+  "version": "1.0.0",
+  "displayName": "Storage",
+  "description": "Key-value storage service with pluggable backends: PlayerPrefs, file-based, encrypted decorator.",
+  "unity": "2022.3",
+  "author": { "name": "rubickanov" },
+  "keywords": ["storage", "settings", "persistence", "key-value"]
+}
