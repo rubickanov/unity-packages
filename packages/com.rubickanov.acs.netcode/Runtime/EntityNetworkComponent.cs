@@ -1,6 +1,6 @@
 using Unity.Netcode;
 
-namespace Rubickanov.ACS.Runtime.Network
+namespace Rubickanov.ACS.Runtime.Netcode
 {
     /// <summary>
     /// Base class for networked entity components. Subscribe in OnNetworkSpawn, unsubscribe in OnNetworkDespawn.

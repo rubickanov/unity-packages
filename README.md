@@ -7,10 +7,11 @@ Shared Unity packages.
 | Package | Description |
 |---------|-------------|
 | `com.rubickanov.acs` | Aspect-Component System |
-| `com.rubickanov.acs.network` | ACS Netcode extension |
+| `com.rubickanov.acs.netcode` | ACS Netcode extension |
 | `com.rubickanov.audio` | Audio service |
 | `com.rubickanov.behaviortree` | Behavior tree editor & runtime |
 | `com.rubickanov.devconsole` | In-game developer console |
+| `com.rubickanov.devconsole.netcode` | DevConsole Netcode extension (domains, cheat protection) |
 | `com.rubickanov.loading` | Loading pipeline |
 | `com.rubickanov.localization` | Localization service |
 | `com.rubickanov.logging` | ZLogger integration |

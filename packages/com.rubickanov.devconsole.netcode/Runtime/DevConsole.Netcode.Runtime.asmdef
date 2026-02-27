@@ -1,10 +1,7 @@
 {
-    "name": "ACS.Runtime.Network",
-    "rootNamespace": "Rubickanov.ACS.Runtime.Network",
-    "references": [
-        "GUID:c318aa71effcd0148ade1233ecf216cc",
-        "GUID:1491147abca9d7d4bb7105af628b223e"
-    ],
+    "name": "DevConsole.Netcode.Runtime",
+    "rootNamespace": "Rubickanov.DevConsole.Netcode",
+    "references": ["DevConsole.Runtime", "Unity.Netcode.Runtime"],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
