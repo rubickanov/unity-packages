@@ -1,0 +1,24 @@
+name: Generate Docs
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate documentation
+        run: |
+          chmod +x docs/generate.sh
+          docs/generate.sh
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: docs/_site/
+          retention-days: 30

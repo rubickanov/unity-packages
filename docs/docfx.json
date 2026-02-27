@@ -1,0 +1,33 @@
+{
+  "metadata": [
+    {
+      "src": [
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.acs/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.acs/Runtime/Network" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.audio/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.behaviortree/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.loading/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.localization/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.logging/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.storage/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.storage/Unity" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.ui.animations/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.ui/Runtime" },
+        { "files": ["**/*.cs"], "src": "../packages/com.rubickanov.ui/UIToolkit" }
+      ],
+      "dest": "api",
+      "allowCompilationErrors": true
+    }
+  ],
+  "build": {
+    "content": [
+      { "files": ["api/**.yml", "api/index.md"] },
+      { "files": ["**.md", "**/toc.yml"], "exclude": ["_site/**"] }
+    ],
+    "dest": "_site",
+    "globalMetadata": {
+      "_appTitle": "Rubickanov Unity Packages — API",
+      "_enableSearch": true
+    }
+  }
+}
