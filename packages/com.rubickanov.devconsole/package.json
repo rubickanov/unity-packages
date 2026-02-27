@@ -1,0 +1,9 @@
+{
+    "name": "com.rubickanov.devconsole",
+    "version": "1.0.0",
+    "displayName": "Dev Console",
+    "description": "In-game developer console with auto-discovery, autocomplete, and ScriptableObject integration.",
+    "unity": "2021.3",
+    "keywords": ["console", "debug", "cheat", "developer", "tools"],
+    "author": { "name": "Rubickanov" }
+}

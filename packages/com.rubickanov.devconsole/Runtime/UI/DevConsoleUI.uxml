@@ -1,0 +1,13 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
+    <Style src="project://database/Assets/Scripts/DevConsole/Runtime/UI/DevConsoleUI.uss?fileID=7433441132597879392&amp;guid=6714b11e7a47a4c4590490b5fbbea385&amp;type=3#DevConsoleUI"/>
+    <ui:VisualElement name="dev-console-root">
+        <ui:ScrollView name="log-scroll" mode="Vertical">
+            <ui:VisualElement name="log-container"/>
+        </ui:ScrollView>
+        <ui:VisualElement name="autocomplete-container"/>
+        <ui:VisualElement name="input-row">
+            <ui:Label name="prompt-label" text="&gt; "/>
+            <ui:TextField name="command-input"/>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

@@ -5,10 +5,6 @@ on:
     branches: [master]
   workflow_dispatch:
 
-env:
-  DOTNET_ROOT: /usr/lib/dotnet
-  PATH: /home/rubickanov/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
 jobs:
   docs:
     runs-on: self-hosted
