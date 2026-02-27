@@ -1,3 +1,6 @@
 _site/
-api/*.yml
-api/.manifest
+api/
+guides/
+docfx.json
+index.md
+toc.yml
