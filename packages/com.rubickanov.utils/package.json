@@ -1,0 +1,10 @@
+{
+  "name": "com.rubickanov.utils",
+  "version": "1.0.0",
+  "displayName": "Utils",
+  "description": "Shared utilities: deterministic random, circular buffer, object pooling, description attribute with custom inspector.",
+  "unity": "2022.3",
+  "author": { "name": "rubickanov" },
+  "keywords": ["utils", "pool", "random", "deterministic"],
+  "testables": []
+}
