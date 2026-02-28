@@ -1,0 +1,22 @@
+{
+  "name": "com.rubickanov.motor",
+  "version": "2.0.0",
+  "displayName": "Character Motor",
+  "description": "Modular character motor with pure C# simulation. Supports Rigidbody and Kinematic (CapsuleCast) bodies, singleplayer and multiplayer (prediction/reconciliation). Camera-agnostic: FPS, TopDown, Third-Person.",
+  "unity": "2022.3",
+  "documentationUrl": "",
+  "license": "MIT",
+  "keywords": [
+    "motor",
+    "controller",
+    "rigidbody",
+    "kinematic",
+    "multiplayer",
+    "prediction",
+    "character",
+    "movement"
+  ],
+  "author": {
+    "name": "rubickanov"
+  }
+}
