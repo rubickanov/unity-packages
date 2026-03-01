@@ -41,7 +41,7 @@ namespace Rubickanov.EQS
             for (int i = 0; i < count; i++)
             {
                 if (!alive[i]) continue;
-                rawScores[i] = Score(context, in items[i]);
+                rawScores[i] = Score(context, items[i]);
             }
         }
     }

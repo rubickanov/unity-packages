@@ -1,4 +1,4 @@
-# com.rubickanov.utils
+# Utils
 
 Shared utilities: deterministic random, circular buffer, object pooling, description attribute with custom inspector.
 

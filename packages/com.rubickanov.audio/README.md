@@ -1,4 +1,4 @@
-# com.rubickanov.audio
+# Audio
 
 Audio service with SFX pooling, music crossfade, pitch variation, and AudioMixer-based volume control.
 

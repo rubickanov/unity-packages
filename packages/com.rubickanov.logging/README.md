@@ -1,4 +1,4 @@
-# com.rubickanov.logging
+# Logging
 
 ZLogger-based logging factory with file rotation, platform-specific outputs, and Unity log interception.
 

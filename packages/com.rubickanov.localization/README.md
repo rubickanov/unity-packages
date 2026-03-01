@@ -1,4 +1,4 @@
-# com.rubickanov.localization
+# Localization
 
 Localization service with reactive locale tracking, `LocalizedString` caching, and strongly-typed key generation. Wraps Unity Localization.
 

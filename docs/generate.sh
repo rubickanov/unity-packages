@@ -92,10 +92,19 @@ while IFS= read -r readme_path; do
     # Strip com.rubickanov. prefix for slug
     slug="${pkg_name#com.rubickanov.}"
 
-    cp "$readme_path" "$DOCS_DIR/guides/$slug.md"
-    guide_toc_entries+=("- name: $slug"$'\n'"  href: $slug.md")
+    # Read displayName from package.json, fall back to slug
+    display_name="$slug"
+    if [[ -f "$pkg_dir/package.json" ]]; then
+        dn="$(grep '"displayName"' "$pkg_dir/package.json" | head -1 | sed 's/.*: *"\(.*\)".*/\1/')"
+        if [[ -n "$dn" ]]; then
+            display_name="$dn"
+        fi
+    fi
 
-    echo "  Guide: $slug ($slug.md)"
+    cp "$readme_path" "$DOCS_DIR/guides/$slug.md"
+    guide_toc_entries+=("- name: $display_name"$'\n'"  href: $slug.md")
+
+    echo "  Guide: $display_name ($slug.md)"
 done < <(find "$PACKAGES_DIR" -maxdepth 2 -name "README.md" -type f | sort)
 
 if [[ ${#guide_toc_entries[@]} -gt 0 ]]; then

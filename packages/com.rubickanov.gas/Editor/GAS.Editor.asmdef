@@ -1,0 +1,22 @@
+{
+    "name": "GAS.Editor",
+    "rootNamespace": "Rubickanov.GAS.Editor",
+    "references": [
+        "GAS.Runtime",
+        "GAS.Unity",
+        "GameplayTags.Runtime",
+        "GameplayTags.Unity",
+        "GameplayTags.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

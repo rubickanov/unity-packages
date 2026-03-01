@@ -1,0 +1,20 @@
+{
+    "name": "com.rubickanov.gas",
+    "version": "1.0.0",
+    "displayName": "Gameplay Ability System",
+    "description": "Data-driven gameplay effects system. Attribute modifiers with duration, periodicity, and tag-based conditions.",
+    "unity": "2022.3",
+    "author": {
+        "name": "rubickanov"
+    },
+    "keywords": [
+        "gameplay",
+        "effects",
+        "attributes",
+        "modifiers",
+        "buffs"
+    ],
+    "dependencies": {
+        "com.rubickanov.gameplaytags": "1.0.0"
+    }
+}

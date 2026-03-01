@@ -1,4 +1,4 @@
-# com.rubickanov.storage
+# Storage
 
 Key-value storage service with pluggable backends. Sync reads, async writes.
 

@@ -1,4 +1,4 @@
-# com.rubickanov.ui
+# UI Framework
 
 Backend-agnostic UI framework with view lifecycle, layer management, and dialog system.
 

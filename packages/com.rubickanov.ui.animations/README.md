@@ -1,4 +1,4 @@
-# com.rubickanov.ui.animations
+# UI Animations
 
 LitMotion-based view animations for the UI framework.
 
