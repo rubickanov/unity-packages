@@ -24,6 +24,12 @@ namespace Rubickanov.Motor.Modules
 
         public override void Simulate(float deltaTime)
         {
+            // External forces always apply, even when default physics is skipped
+            if (State.ExternalForce.sqrMagnitude > 0.001f)
+                Body.AddForce(State.ExternalForce, ForceMode.VelocityChange);
+
+            if (State.SkipDefaultPhysics) return;
+
             Vector3 target = State.DesiredVelocity * State.SpeedMultiplier;
 
             if (State.IsGrounded)
@@ -63,10 +69,6 @@ namespace Rubickanov.Motor.Modules
 
                 Body.AddForce(Vector3.down * g, ForceMode.Acceleration);
             }
-
-            // External forces (explosions, recoil, etc.)
-            if (State.ExternalForce.sqrMagnitude > 0.001f)
-                Body.AddForce(State.ExternalForce, ForceMode.VelocityChange);
         }
     }
 }

@@ -12,7 +12,7 @@ namespace Rubickanov.Motor
         bool IsActive { get; set; }
 
         /// <summary>Called once when the module is added to a simulation.</summary>
-        void Initialize(MotorState state, IMotorBody body);
+        void Initialize(MotorState state, IMotorBody body, IModuleResolver resolver);
 
         /// <summary>Deterministic simulation step. Called from FixedUpdate or network tick.</summary>
         void Simulate(float deltaTime);

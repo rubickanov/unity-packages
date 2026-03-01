@@ -9,7 +9,7 @@ namespace Rubickanov.Utils
     /// Built on top of <see cref="ObjectPool{T}"/>.
     /// </summary>
     /// <remarks>
-    /// When <see cref="Get"/> is called at full capacity, the oldest item is passed to the
+    /// When <see cref="Get(Vector3,Quaternion)"/> is called at full capacity, the oldest item is passed to the
     /// <c>onEvict</c> callback. If no callback is provided, the item is released back to the
     /// pool immediately. Use the callback for fade-out or other deferred release — call
     /// <see cref="Release"/> when done.
@@ -18,11 +18,15 @@ namespace Rubickanov.Utils
     {
         private readonly ObjectPool<T> _pool;
         private readonly LinkedList<T> _active = new();
+        private readonly Dictionary<T, LinkedListNode<T>> _nodeMap = new();
         private readonly int _maxActive;
         private readonly Action<T, Action<T>>? _onEvict;
 
         /// <summary>Number of items currently in active use (not counting items being evicted).</summary>
         public int ActiveCount => _active.Count;
+
+        /// <summary>Number of instances currently sitting in the underlying pool (inactive).</summary>
+        public int PooledCount => _pool.PooledCount;
 
         /// <summary>
         /// Creates a new evicting pool.
@@ -49,6 +53,20 @@ namespace Rubickanov.Utils
         }
 
         /// <summary>
+        /// Gets an item from the pool without changing its transform, evicting the oldest if at capacity.
+        /// </summary>
+        public T Get()
+        {
+            if (_active.Count >= _maxActive)
+                EvictOldest();
+
+            var item = _pool.Get();
+            var node = _active.AddLast(item);
+            _nodeMap[item] = node;
+            return item;
+        }
+
+        /// <summary>
         /// Gets an item from the pool, evicting the oldest if at capacity.
         /// </summary>
         public T Get(Vector3 position, Quaternion rotation)
@@ -57,7 +75,8 @@ namespace Rubickanov.Utils
                 EvictOldest();
 
             var item = _pool.Get(position, rotation);
-            _active.AddLast(item);
+            var node = _active.AddLast(item);
+            _nodeMap[item] = node;
             return item;
         }
 
@@ -66,7 +85,8 @@ namespace Rubickanov.Utils
         /// </summary>
         public void Release(T item)
         {
-            _active.Remove(item);
+            if (_nodeMap.Remove(item, out var node))
+                _active.Remove(node);
             _pool.Release(item);
         }
 
@@ -74,12 +94,14 @@ namespace Rubickanov.Utils
         public void Dispose()
         {
             _active.Clear();
+            _nodeMap.Clear();
             _pool.Dispose();
         }
 
         private void EvictOldest()
         {
             var oldest = _active.First!.Value;
+            _nodeMap.Remove(oldest);
             _active.RemoveFirst();
 
             if (_onEvict != null)

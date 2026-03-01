@@ -14,11 +14,13 @@ namespace Rubickanov.Motor
 
         protected MotorState State { get; private set; } = default!;
         protected IMotorBody Body { get; private set; } = default!;
+        protected IModuleResolver Resolver { get; private set; } = default!;
 
-        public void Initialize(MotorState state, IMotorBody body)
+        public void Initialize(MotorState state, IMotorBody body, IModuleResolver resolver)
         {
             State = state;
             Body = body;
+            Resolver = resolver;
             OnInitialize();
         }
 

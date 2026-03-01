@@ -24,10 +24,21 @@ namespace Rubickanov.Motor.Modules
     {
         [SerializeField] private float _walkSpeed = 6f;
         [SerializeField] private MovementOrientation _orientation = MovementOrientation.Transform;
+        [SerializeField] private bool _allowVerticalMovement;
 
         public override int Priority => 0;
 
         private Transform? _orientationSource;
+
+        /// <summary>
+        /// When true, uses raw forward/right vectors preserving the Y component.
+        /// Enable for swimming, flying, or other 3D movement modes.
+        /// </summary>
+        public bool AllowVerticalMovement
+        {
+            get => _allowVerticalMovement;
+            set => _allowVerticalMovement = value;
+        }
 
         /// <summary>How movement input is interpreted.</summary>
         public MovementOrientation Orientation
@@ -65,8 +76,16 @@ namespace Rubickanov.Motor.Modules
             else
             {
                 var source = _orientationSource != null ? _orientationSource : Body.Transform;
-                forward = Vector3.ProjectOnPlane(source.forward, Vector3.up).normalized;
-                right = Vector3.ProjectOnPlane(source.right, Vector3.up).normalized;
+                if (_allowVerticalMovement)
+                {
+                    forward = source.forward;
+                    right = source.right;
+                }
+                else
+                {
+                    forward = Vector3.ProjectOnPlane(source.forward, Vector3.up).normalized;
+                    right = Vector3.ProjectOnPlane(source.right, Vector3.up).normalized;
+                }
             }
 
             Vector3 direction = forward * input.y + right * input.x;

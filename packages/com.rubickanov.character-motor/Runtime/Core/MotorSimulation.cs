@@ -8,7 +8,7 @@ namespace Rubickanov.Motor
     /// Pure C# simulation runner. Holds state, modules, and body reference.
     /// Can be ticked from FixedUpdate (singleplayer) or from a network tick system (multiplayer).
     /// </summary>
-    public class MotorSimulation
+    public class MotorSimulation : IModuleResolver
     {
         private readonly IMotorBody _body;
         private readonly MotorState _state;
@@ -34,7 +34,7 @@ namespace Rubickanov.Motor
             _modules.Sort((a, b) => a.Priority.CompareTo(b.Priority));
 
             foreach (var m in _modules)
-                m.Initialize(_state, _body);
+                m.Initialize(_state, _body, this);
         }
 
         /// <summary>
@@ -102,7 +102,7 @@ namespace Rubickanov.Motor
         /// <summary>Add a module at runtime. It will be initialized and sorted.</summary>
         public void AddModule(IMotorModule module)
         {
-            module.Initialize(_state, _body);
+            module.Initialize(_state, _body, this);
             _modules.Add(module);
             _modules.Sort((a, b) => a.Priority.CompareTo(b.Priority));
         }
@@ -132,6 +132,7 @@ namespace Rubickanov.Motor
                 IsSprinting = _state.IsSprinting,
                 IsCrouching = _state.IsCrouching,
                 IsInAir = _state.IsInAir,
+                SkipDefaultPhysics = _state.SkipDefaultPhysics,
             };
 
             var writer = new ModuleStateWriter(64);
@@ -163,6 +164,7 @@ namespace Rubickanov.Motor
             _state.IsSprinting = snapshot.IsSprinting;
             _state.IsCrouching = snapshot.IsCrouching;
             _state.IsInAir = snapshot.IsInAir;
+            _state.SkipDefaultPhysics = snapshot.SkipDefaultPhysics;
 
             if (snapshot.ModuleStates is { Length: > 0 })
             {

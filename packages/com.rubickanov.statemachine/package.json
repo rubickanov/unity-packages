@@ -1,0 +1,10 @@
+{
+  "name": "com.rubickanov.statemachine",
+  "version": "1.0.0",
+  "displayName": "State Machine",
+  "description": "Generic finite state machine with hierarchical support, deferred transitions, and zero-allocation runtime.",
+  "unity": "2022.3",
+  "author": { "name": "rubickanov" },
+  "keywords": ["fsm", "statemachine", "hsm"],
+  "testables": []
+}

@@ -19,5 +19,6 @@ namespace Rubickanov.Motor
         bool IsSprinting { get; }
         bool IsCrouching { get; }
         bool IsInAir { get; }
+        bool SkipDefaultPhysics { get; }
     }
 }

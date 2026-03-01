@@ -33,6 +33,7 @@ namespace Rubickanov.Motor
         public bool IsSprinting;
         public bool IsCrouching;
         public bool IsInAir;
+        public bool SkipDefaultPhysics;
 
         // -- IReadOnlyMotorState --
         Vector2 IReadOnlyMotorState.MoveInput => MoveInput;
@@ -46,6 +47,7 @@ namespace Rubickanov.Motor
         bool IReadOnlyMotorState.IsSprinting => IsSprinting;
         bool IReadOnlyMotorState.IsCrouching => IsCrouching;
         bool IReadOnlyMotorState.IsInAir => IsInAir;
+        bool IReadOnlyMotorState.SkipDefaultPhysics => SkipDefaultPhysics;
 
         /// <summary>Applies input struct to state fields.</summary>
         public void ApplyInput(MotorInput input)
@@ -65,6 +67,7 @@ namespace Rubickanov.Motor
             SpeedMultiplier = 1f;
             GravityMultiplier = 1f;
             ExternalForce = Vector3.zero;
+            SkipDefaultPhysics = false;
         }
     }
 }
