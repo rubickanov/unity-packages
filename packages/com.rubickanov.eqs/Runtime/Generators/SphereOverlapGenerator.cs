@@ -14,21 +14,26 @@ namespace Rubickanov.EQS
         [SerializeField] private LayerMask _layerMask = ~0;
         [SerializeField] private int _maxResults = 32;
 
-        private static readonly Collider[] Buffer = new Collider[64];
+        private Collider[]? _buffer;
 
         public override void Generate(EQSQueryContext context, List<EQSItem> results)
         {
-            int count = Physics.OverlapSphereNonAlloc(
-                context.QuerierPosition, _radius, Buffer, _layerMask);
+            if (_buffer == null || _buffer.Length < _maxResults)
+                _buffer = new Collider[_maxResults];
 
-            int limit = Mathf.Min(count, Mathf.Min(_maxResults, Buffer.Length));
+            int count = Physics.OverlapSphereNonAlloc(
+                context.QuerierPosition, _radius, _buffer, _layerMask);
+
+            int limit = Mathf.Min(count, _buffer.Length);
 
             for (int i = 0; i < limit; i++)
             {
-                var col = Buffer[i];
+                var col = _buffer[i];
                 if (col.gameObject == context.QuerierObject) continue;
                 results.Add(new EQSItem(col.transform.position, col.gameObject));
             }
+
+            Array.Clear(_buffer, 0, count);
         }
     }
 }

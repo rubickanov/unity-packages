@@ -12,9 +12,11 @@ namespace Rubickanov.EQS
     {
         [SerializeField] private float _weight = 1f;
         [SerializeField] private EQSTestScoreMode _scoreMode = EQSTestScoreMode.Score;
+        [SerializeField] private bool _normalize;
 
         public float Weight => _weight;
         public EQSTestScoreMode ScoreMode => _scoreMode;
+        public bool Normalize => _normalize;
 
         /// <summary>
         /// Scores a single item. Must return a value in [0, 1].

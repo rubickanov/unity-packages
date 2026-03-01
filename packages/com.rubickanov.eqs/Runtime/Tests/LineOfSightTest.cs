@@ -23,7 +23,7 @@ namespace Rubickanov.EQS
 
             if (dist < 0.01f) return 1f;
 
-            bool blocked = Physics.Raycast(origin, dir.normalized, dist, _obstacleMask);
+            bool blocked = Physics.Raycast(origin, dir.normalized, dist, _obstacleMask, QueryTriggerInteraction.Ignore);
             if (blocked) return _filterOnFail ? -1f : 0f;
             return 1f;
         }

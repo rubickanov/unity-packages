@@ -10,12 +10,22 @@ namespace Rubickanov.EQS
         public readonly bool Success;
         public readonly IReadOnlyList<EQSScoredItem> Items;
 
-        public EQSScoredItem? BestItem => Items.Count > 0 ? Items[0] : null;
-
         public EQSQueryResult(bool success, IReadOnlyList<EQSScoredItem> items)
         {
             Success = success;
             Items = items;
+        }
+
+        public bool TryGetBest(out EQSScoredItem item)
+        {
+            if (Items.Count > 0)
+            {
+                item = Items[0];
+                return true;
+            }
+
+            item = default;
+            return false;
         }
     }
 }

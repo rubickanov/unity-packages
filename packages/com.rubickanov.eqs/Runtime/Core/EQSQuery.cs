@@ -17,13 +17,14 @@ namespace Rubickanov.EQS
         private readonly List<EQSItem> _items = new();
         private float[]? _scores;
         private bool[]? _alive;
+        private float[]? _rawTestScores;
         private int _currentTestIndex;
         private int _currentItemIndex;
 
         private List<EQSScoredItem>? _resultItems;
         private EQSQueryResult _result;
 
-        private static readonly Stopwatch Stopwatch = new();
+        private readonly Stopwatch _stopwatch = new();
 
         public EQSQueryStatus Status => _status;
 
@@ -69,6 +70,9 @@ namespace Rubickanov.EQS
             if (_alive == null || _alive.Length < count)
                 _alive = new bool[count];
 
+            if (_rawTestScores == null || _rawTestScores.Length < count)
+                _rawTestScores = new float[count];
+
             for (int i = 0; i < count; i++)
                 _alive[i] = true;
 
@@ -89,7 +93,7 @@ namespace Rubickanov.EQS
             if (_status != EQSQueryStatus.Scoring)
                 return _status is EQSQueryStatus.Complete or EQSQueryStatus.Failed;
 
-            Stopwatch.Restart();
+            _stopwatch.Restart();
 
             var tests = _config.Tests;
             int itemCount = _items.Count;
@@ -97,14 +101,25 @@ namespace Rubickanov.EQS
             while (_currentTestIndex < tests.Count)
             {
                 var test = tests[_currentTestIndex];
+
+                if (test == null)
+                {
+                    _currentItemIndex = 0;
+                    _currentTestIndex++;
+                    continue;
+                }
+
+                bool filterOnly = test.ScoreMode == EQSTestScoreMode.FilterOnly;
+                bool normalize = test.Normalize && !filterOnly;
                 float weight = test.Weight;
                 bool inverse = test.ScoreMode == EQSTestScoreMode.InverseScore;
 
+                // First pass: score all items for this test
                 while (_currentItemIndex < itemCount)
                 {
-                    if (Stopwatch.Elapsed.TotalMilliseconds > budgetMs)
+                    if (_stopwatch.Elapsed.TotalMilliseconds > budgetMs)
                     {
-                        Stopwatch.Stop();
+                        _stopwatch.Stop();
                         return false;
                     }
 
@@ -120,21 +135,54 @@ namespace Rubickanov.EQS
                     if (raw < 0f)
                     {
                         _alive[_currentItemIndex] = false;
+                        _rawTestScores![_currentItemIndex] = -1f;
                     }
                     else
                     {
-                        if (inverse) raw = 1f - raw;
-                        _scores![_currentItemIndex] += raw * weight;
+                        _rawTestScores![_currentItemIndex] = raw;
                     }
 
                     _currentItemIndex++;
+                }
+
+                // Test complete — normalize if needed and accumulate scores
+                if (!filterOnly)
+                {
+                    float min = float.MaxValue;
+                    float max = float.MinValue;
+
+                    if (normalize)
+                    {
+                        for (int i = 0; i < itemCount; i++)
+                        {
+                            if (!_alive![i]) continue;
+                            float v = _rawTestScores![i];
+                            if (v < min) min = v;
+                            if (v > max) max = v;
+                        }
+                    }
+
+                    float range = max - min;
+
+                    for (int i = 0; i < itemCount; i++)
+                    {
+                        if (!_alive![i]) continue;
+
+                        float score = _rawTestScores![i];
+
+                        if (normalize && range > 0f)
+                            score = (score - min) / range;
+
+                        if (inverse) score = 1f - score;
+                        _scores![i] += score * weight;
+                    }
                 }
 
                 _currentItemIndex = 0;
                 _currentTestIndex++;
             }
 
-            Stopwatch.Stop();
+            _stopwatch.Stop();
 
             _status = EQSQueryStatus.Complete;
             BuildResult();
@@ -187,7 +235,7 @@ namespace Rubickanov.EQS
 
             _resultItems.Sort(static (a, b) => b.Score.CompareTo(a.Score));
 
-            _result = new EQSQueryResult(_resultItems.Count > 0, _resultItems);
+            _result = new EQSQueryResult(_resultItems.Count > 0, _resultItems.ToArray());
         }
     }
 }

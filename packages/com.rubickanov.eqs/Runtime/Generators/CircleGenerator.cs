@@ -14,6 +14,9 @@ namespace Rubickanov.EQS
         [SerializeField] private float _radius = 8f;
         [SerializeField] private int _pointCount = 8;
         [SerializeField] private bool _aroundReference;
+        [SerializeField] private bool _projectToGround;
+        [SerializeField] private LayerMask _groundMask = ~0;
+        [SerializeField] private float _raycastHeight = 50f;
 
         public override void Generate(EQSQueryContext context, List<EQSItem> results)
         {
@@ -27,7 +30,17 @@ namespace Rubickanov.EQS
             {
                 float angle = angleStep * i * Mathf.Deg2Rad;
                 Vector3 offset = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * _radius;
-                results.Add(new EQSItem(center + offset));
+                Vector3 point = center + offset;
+
+                if (_projectToGround)
+                {
+                    var ray = new Ray(point + Vector3.up * _raycastHeight, Vector3.down);
+                    if (!Physics.Raycast(ray, out var hit, _raycastHeight * 2f, _groundMask))
+                        continue;
+                    point = hit.point;
+                }
+
+                results.Add(new EQSItem(point));
             }
         }
     }
