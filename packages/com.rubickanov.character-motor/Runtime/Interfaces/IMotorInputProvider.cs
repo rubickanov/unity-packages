@@ -17,6 +17,5 @@ namespace Rubickanov.Motor
         bool JumpPressed { get; }
         bool SprintHeld { get; }
         bool CrouchPressed { get; }
-        Vector2 LookInput => Vector2.zero;
     }
 }

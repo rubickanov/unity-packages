@@ -14,5 +14,13 @@ namespace Rubickanov.EQS
 
         public EQSGenerator? Generator => _generator;
         public IReadOnlyList<EQSTest> Tests => _tests;
+
+        private void OnValidate()
+        {
+            if (_generator == null)
+                Debug.LogWarning($"[EQS] {name}: Generator is not assigned.", this);
+            if (_tests.Count == 0)
+                Debug.LogWarning($"[EQS] {name}: No tests configured.", this);
+        }
     }
 }

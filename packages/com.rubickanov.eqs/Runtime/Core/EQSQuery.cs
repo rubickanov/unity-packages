@@ -115,34 +115,53 @@ namespace Rubickanov.EQS
                 bool inverse = test.ScoreMode == EQSTestScoreMode.InverseScore;
 
                 // First pass: score all items for this test
-                while (_currentItemIndex < itemCount)
+                if (test.PreferBatch)
                 {
-                    if (_stopwatch.Elapsed.TotalMilliseconds > budgetMs)
-                    {
-                        _stopwatch.Stop();
-                        return false;
-                    }
+                    // Batch path — score all items in one call
+                    test.ScoreBatch(_context, _items, _alive!, _rawTestScores!, itemCount);
 
-                    if (!_alive![_currentItemIndex])
+                    for (int i = 0; i < itemCount; i++)
                     {
+                        if (!_alive![i]) continue;
+                        if (_rawTestScores![i] < 0f)
+                        {
+                            _alive[i] = false;
+                            _rawTestScores[i] = -1f;
+                        }
+                    }
+                }
+                else
+                {
+                    // Per-item path with budget checking
+                    while (_currentItemIndex < itemCount)
+                    {
+                        if (_stopwatch.Elapsed.TotalMilliseconds > budgetMs)
+                        {
+                            _stopwatch.Stop();
+                            return false;
+                        }
+
+                        if (!_alive![_currentItemIndex])
+                        {
+                            _currentItemIndex++;
+                            continue;
+                        }
+
+                        var item = _items[_currentItemIndex];
+                        float raw = test.Score(_context, in item);
+
+                        if (raw < 0f)
+                        {
+                            _alive[_currentItemIndex] = false;
+                            _rawTestScores![_currentItemIndex] = -1f;
+                        }
+                        else
+                        {
+                            _rawTestScores![_currentItemIndex] = raw;
+                        }
+
                         _currentItemIndex++;
-                        continue;
                     }
-
-                    var item = _items[_currentItemIndex];
-                    float raw = test.Score(_context, in item);
-
-                    if (raw < 0f)
-                    {
-                        _alive[_currentItemIndex] = false;
-                        _rawTestScores![_currentItemIndex] = -1f;
-                    }
-                    else
-                    {
-                        _rawTestScores![_currentItemIndex] = raw;
-                    }
-
-                    _currentItemIndex++;
                 }
 
                 // Test complete — normalize if needed and accumulate scores
@@ -176,6 +195,27 @@ namespace Rubickanov.EQS
                         if (inverse) score = 1f - score;
                         _scores![i] += score * weight;
                     }
+                }
+
+                // Early exit by domination: prune items that can't possibly win
+                float remainingWeight = 0f;
+                for (int t = _currentTestIndex + 1; t < tests.Count; t++)
+                {
+                    var ft = tests[t];
+                    if (ft == null || ft.ScoreMode == EQSTestScoreMode.FilterOnly) continue;
+                    remainingWeight += ft.Weight;
+                }
+
+                if (remainingWeight > 0f)
+                {
+                    float bestScore = float.MinValue;
+                    for (int i = 0; i < itemCount; i++)
+                        if (_alive![i] && _scores![i] > bestScore) bestScore = _scores[i];
+
+                    if (bestScore > float.MinValue)
+                        for (int i = 0; i < itemCount; i++)
+                            if (_alive![i] && _scores![i] + remainingWeight < bestScore)
+                                _alive[i] = false;
                 }
 
                 _currentItemIndex = 0;

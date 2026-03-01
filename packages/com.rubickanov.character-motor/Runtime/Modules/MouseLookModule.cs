@@ -3,6 +3,11 @@ using UnityEngine;
 
 namespace Rubickanov.Motor.Modules
 {
+    public struct LookInputData
+    {
+        public Vector2 Look;
+    }
+
     /// <summary>
     /// Mouse look with vertical clamp. Rotates the motor body horizontally
     /// and applies vertical pitch to a camera transform.
@@ -44,10 +49,11 @@ namespace Rubickanov.Motor.Modules
 
         public override void Simulate(float deltaTime)
         {
-            if (!_deterministicYaw) return;
-            if (State.LookInput.x == 0f) return;
+            if (!_deterministicYaw || State.InputExtensions == null) return;
+            var look = State.InputExtensions.Get<LookInputData>();
+            if (look.Look.x == 0f) return;
 
-            Body.Rotate(Vector3.up, State.LookInput.x * _sensitivity, Space.World);
+            Body.Rotate(Vector3.up, look.Look.x * _sensitivity, Space.World);
         }
 
         public override void VisualUpdate(float deltaTime)

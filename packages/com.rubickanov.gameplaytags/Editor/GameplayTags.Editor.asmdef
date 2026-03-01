@@ -1,0 +1,19 @@
+{
+    "name": "GameplayTags.Editor",
+    "rootNamespace": "Rubickanov.GameplayTags.Editor",
+    "references": [
+        "GameplayTags.Runtime",
+        "GameplayTags.Unity"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

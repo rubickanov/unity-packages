@@ -32,6 +32,7 @@ namespace Rubickanov.Motor
         private MotorSimulation _simulation = default!;
         private IMotorBody _body = default!;
         private IMotorInputProvider? _inputProvider;
+        private Func<InputExtensions?>? _inputExtensionsProvider;
 
         // Speed modifiers from external sources
         private readonly Dictionary<object, float> _speedModifiers = new();
@@ -79,6 +80,20 @@ namespace Rubickanov.Motor
         public void ClearInputProvider()
         {
             _inputProvider = null;
+        }
+
+        /// <summary>
+        /// Set a provider for extensible input data.
+        /// The provider is called each tick to populate <see cref="MotorInput.Extensions"/>.
+        /// </summary>
+        public void SetInputExtensionsProvider(Func<InputExtensions?> provider)
+        {
+            _inputExtensionsProvider = provider;
+        }
+
+        public void ClearInputExtensionsProvider()
+        {
+            _inputExtensionsProvider = null;
         }
 
         /// <summary>Get a module by type.</summary>
@@ -167,9 +182,10 @@ namespace Rubickanov.Motor
             if (_inputProvider != null)
             {
                 input.Move = _inputProvider.MoveInput;
-                input.Look = _inputProvider.LookInput;
                 input.Sprint = _inputProvider.SprintHeld;
             }
+
+            input.Extensions = _inputExtensionsProvider?.Invoke();
 
             // Use buffered pulses
             input.Jump = _jumpBuffered;

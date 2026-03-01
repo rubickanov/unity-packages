@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Rubickanov.EQS
@@ -23,5 +24,25 @@ namespace Rubickanov.EQS
         /// Return a negative value to discard the item (filter).
         /// </summary>
         public abstract float Score(EQSQueryContext context, in EQSItem item);
+
+        /// <summary>
+        /// When true, the query engine will call <see cref="ScoreBatch"/> instead of per-item <see cref="Score"/>.
+        /// </summary>
+        public virtual bool PreferBatch => false;
+
+        /// <summary>
+        /// Scores all alive items in one call. Override for vectorized or Physics batch operations.
+        /// Default implementation loops over <see cref="Score"/>.
+        /// </summary>
+        public virtual void ScoreBatch(
+            EQSQueryContext context, IReadOnlyList<EQSItem> items,
+            bool[] alive, float[] rawScores, int count)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (!alive[i]) continue;
+                rawScores[i] = Score(context, in items[i]);
+            }
+        }
     }
 }

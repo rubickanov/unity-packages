@@ -10,9 +10,9 @@ namespace Rubickanov.Motor
     public struct MotorInput
     {
         public Vector2 Move;
-        public Vector2 Look;
         public bool Jump;
         public bool Sprint;
         public bool Crouch;
+        public InputExtensions? Extensions;
     }
 }

@@ -22,6 +22,6 @@ namespace Rubickanov.Motor
         bool IsSliding { get; }
         bool SkipDefaultPhysics { get; }
         Vector3 GroundVelocity { get; }
-        Vector2 LookInput { get; }
+        InputExtensions? InputExtensions { get; }
     }
 }

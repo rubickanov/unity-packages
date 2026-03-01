@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Rubickanov.EQS
@@ -26,6 +27,20 @@ namespace Rubickanov.EQS
 
             item = default;
             return false;
+        }
+
+        public IReadOnlyList<EQSScoredItem> TopN(int n, float minScore = 0f)
+        {
+            if (Items.Count == 0 || n <= 0) return Array.Empty<EQSScoredItem>();
+
+            var result = new List<EQSScoredItem>(Math.Min(n, Items.Count));
+            for (int i = 0; i < Items.Count && result.Count < n; i++)
+            {
+                if (Items[i].Score >= minScore)
+                    result.Add(Items[i]);
+            }
+
+            return result;
         }
     }
 }
