@@ -19,6 +19,7 @@ namespace Rubickanov.Motor.Modules
 
         private float _currentHeight;
         private bool _isCrouching;
+        private bool _wasCrouching;
 
         /// <summary>
         /// Camera height offset caused by crouching.
@@ -48,20 +49,20 @@ namespace Rubickanov.Motor.Modules
 
             if (_isCrouching)
                 State.SpeedMultiplier *= _crouchSpeedMultiplier;
+
+            // Height transition (deterministic — must run in Simulate, not VisualUpdate)
+            float target = _isCrouching ? _crouchHeight : _standHeight;
+            _currentHeight = Mathf.MoveTowards(_currentHeight, target, _crouchTransitionSpeed * deltaTime);
+            Body.SetCapsuleHeight(_currentHeight);
+
+            if (_isCrouching != _wasCrouching)
+                CrouchChanged?.Invoke(_isCrouching);
+            _wasCrouching = _isCrouching;
         }
 
         public override void VisualUpdate(float deltaTime)
         {
-            bool wasC = _isCrouching;
-
-            float target = _isCrouching ? _crouchHeight : _standHeight;
-            _currentHeight = Mathf.MoveTowards(_currentHeight, target, _crouchTransitionSpeed * deltaTime);
-
-            Body.SetCapsuleHeight(_currentHeight);
             CameraHeightOffset = _currentHeight - _standHeight;
-
-            if (wasC != _isCrouching)
-                CrouchChanged?.Invoke(_isCrouching);
         }
 
         private bool CanStand()
