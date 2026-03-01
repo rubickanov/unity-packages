@@ -22,7 +22,9 @@ namespace Rubickanov.Motor
         public bool IsSprinting;
         public bool IsCrouching;
         public bool IsInAir;
+        public bool IsSliding;
         public bool SkipDefaultPhysics;
+        public Vector3 GroundVelocity;
 
         // Module states (serialized sequentially by priority order)
         public byte[]? ModuleStates;

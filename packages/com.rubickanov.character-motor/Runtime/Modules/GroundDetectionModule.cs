@@ -34,12 +34,19 @@ namespace Rubickanov.Motor.Modules
                 State.GroundNormal = hit.normal;
                 State.GroundAngle = angle;
                 State.IsGrounded = angle <= _maxSlopeAngle;
+
+                var attachedRb = hit.collider.attachedRigidbody;
+                if (attachedRb != null && State.IsGrounded)
+                    State.GroundVelocity = attachedRb.GetPointVelocity(hit.point);
+                else
+                    State.GroundVelocity = Vector3.zero;
             }
             else
             {
                 State.IsGrounded = false;
                 State.GroundNormal = Vector3.up;
                 State.GroundAngle = 0f;
+                State.GroundVelocity = Vector3.zero;
             }
 
             State.IsInAir = !State.IsGrounded;

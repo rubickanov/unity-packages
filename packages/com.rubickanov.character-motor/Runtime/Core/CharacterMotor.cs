@@ -22,6 +22,9 @@ namespace Rubickanov.Motor
         [Header("Modules")]
         [SerializeReference] private List<IMotorModule> _modules = new();
 
+        [Header("Debug")]
+        [SerializeField] private bool _drawGizmos;
+
         // ══════════════════════════════════════════════════════════
         //  Private state
         // ══════════════════════════════════════════════════════════
@@ -164,6 +167,7 @@ namespace Rubickanov.Motor
             if (_inputProvider != null)
             {
                 input.Move = _inputProvider.MoveInput;
+                input.Look = _inputProvider.LookInput;
                 input.Sprint = _inputProvider.SprintHeld;
             }
 
@@ -175,6 +179,49 @@ namespace Rubickanov.Motor
 
             return input;
         }
+
+#if UNITY_EDITOR
+        private void OnDrawGizmos()
+        {
+            if (!_drawGizmos || _simulation == null) return;
+
+            var state = _simulation.State;
+            Vector3 pos = _body.Position;
+            Vector3 feetPos = pos + Vector3.up * 0.05f;
+
+            // Ground sphere — green if grounded, red if airborne
+            Gizmos.color = state.IsGrounded ? Color.green : Color.red;
+            Gizmos.DrawWireSphere(feetPos, 0.15f);
+
+            if (state.IsGrounded)
+            {
+                // Ground normal
+                Gizmos.color = Color.green;
+                Gizmos.DrawLine(feetPos, feetPos + state.GroundNormal * 0.5f);
+            }
+
+            // Current velocity — blue arrow
+            Gizmos.color = Color.blue;
+            DrawArrowGizmo(pos, pos + state.CurrentVelocity * 0.3f);
+
+            // Desired velocity — yellow arrow
+            Gizmos.color = Color.yellow;
+            DrawArrowGizmo(pos, pos + state.DesiredVelocity * 0.3f);
+        }
+
+        private static void DrawArrowGizmo(Vector3 from, Vector3 to)
+        {
+            Gizmos.DrawLine(from, to);
+            Vector3 dir = (to - from);
+            if (dir.sqrMagnitude < 0.001f) return;
+
+            float headLength = Mathf.Min(0.15f, dir.magnitude * 0.3f);
+            Vector3 right = Quaternion.LookRotation(dir) * Quaternion.Euler(0, 150, 0) * Vector3.forward;
+            Vector3 left = Quaternion.LookRotation(dir) * Quaternion.Euler(0, -150, 0) * Vector3.forward;
+            Gizmos.DrawLine(to, to + right * headLength);
+            Gizmos.DrawLine(to, to + left * headLength);
+        }
+#endif
 
         private void FlushExternalState()
         {

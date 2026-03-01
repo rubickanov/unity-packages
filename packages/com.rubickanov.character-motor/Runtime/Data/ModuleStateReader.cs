@@ -37,6 +37,11 @@ namespace Rubickanov.Motor
             return value;
         }
 
+        public Vector2 ReadVector2()
+        {
+            return new Vector2(ReadFloat(), ReadFloat());
+        }
+
         public Vector3 ReadVector3()
         {
             return new Vector3(ReadFloat(), ReadFloat(), ReadFloat());

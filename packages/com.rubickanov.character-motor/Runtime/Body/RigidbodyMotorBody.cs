@@ -42,6 +42,7 @@ namespace Rubickanov.Motor
         public Vector3 Position => _rb.position;
         public Quaternion Rotation => _rb.rotation;
         public Vector3 Velocity => _rb.linearVelocity;
+        public float CapsuleHeight => _capsule.height;
 
         public void BeginFrame(MotorState state, float deltaTime)
         {

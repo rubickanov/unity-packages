@@ -6,13 +6,15 @@ namespace Rubickanov.Motor.Modules
     /// <summary>
     /// Mouse look with vertical clamp. Rotates the motor body horizontally
     /// and applies vertical pitch to a camera transform.
-    /// Runs in VisualUpdate (not part of deterministic simulation).
+    /// Runs in VisualUpdate (not part of deterministic simulation) unless
+    /// <see cref="_deterministicYaw"/> is enabled.
     /// </summary>
     [Serializable]
-    public class MouseLookModule : MotorModuleBase
+    public class MouseLookModule : MotorModuleBase, IStatefulModule
     {
         [SerializeField] private float _sensitivity = 2f;
         [SerializeField] private float _verticalClamp = 89f;
+        [SerializeField] private bool _deterministicYaw;
 
         public override int Priority => -50;
 
@@ -40,6 +42,14 @@ namespace Rubickanov.Motor.Modules
             _cameraTransform = cameraTransform;
         }
 
+        public override void Simulate(float deltaTime)
+        {
+            if (!_deterministicYaw) return;
+            if (State.LookInput.x == 0f) return;
+
+            Body.Rotate(Vector3.up, State.LookInput.x * _sensitivity, Space.World);
+        }
+
         public override void VisualUpdate(float deltaTime)
         {
             if (_lookInputProvider == null) return;
@@ -47,9 +57,12 @@ namespace Rubickanov.Motor.Modules
             var look = _lookInputProvider();
             if (look.sqrMagnitude < 0.0001f) return;
 
-            // Horizontal — rotate the body
-            float yaw = look.x * _sensitivity;
-            Body.Rotate(Vector3.up, yaw, Space.World);
+            // Horizontal — rotate the body (only when not handled deterministically)
+            if (!_deterministicYaw)
+            {
+                float yaw = look.x * _sensitivity;
+                Body.Rotate(Vector3.up, yaw, Space.World);
+            }
 
             // Vertical — pitch
             _pitch -= look.y * _sensitivity;
@@ -57,6 +70,16 @@ namespace Rubickanov.Motor.Modules
 
             if (_cameraTransform != null)
                 _cameraTransform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+        }
+
+        public void SaveState(ref ModuleStateWriter writer)
+        {
+            writer.Write(_pitch);
+        }
+
+        public void RestoreState(ref ModuleStateReader reader)
+        {
+            _pitch = reader.ReadFloat();
         }
     }
 }

@@ -132,7 +132,9 @@ namespace Rubickanov.Motor
                 IsSprinting = _state.IsSprinting,
                 IsCrouching = _state.IsCrouching,
                 IsInAir = _state.IsInAir,
+                IsSliding = _state.IsSliding,
                 SkipDefaultPhysics = _state.SkipDefaultPhysics,
+                GroundVelocity = _state.GroundVelocity,
             };
 
             var writer = new ModuleStateWriter(64);
@@ -164,7 +166,9 @@ namespace Rubickanov.Motor
             _state.IsSprinting = snapshot.IsSprinting;
             _state.IsCrouching = snapshot.IsCrouching;
             _state.IsInAir = snapshot.IsInAir;
+            _state.IsSliding = snapshot.IsSliding;
             _state.SkipDefaultPhysics = snapshot.SkipDefaultPhysics;
+            _state.GroundVelocity = snapshot.GroundVelocity;
 
             if (snapshot.ModuleStates is { Length: > 0 })
             {

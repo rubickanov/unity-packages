@@ -45,6 +45,12 @@ namespace Rubickanov.Motor
             _position += 4;
         }
 
+        public void Write(Vector2 value)
+        {
+            Write(value.x);
+            Write(value.y);
+        }
+
         public void Write(Vector3 value)
         {
             Write(value.x);

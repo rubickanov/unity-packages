@@ -56,6 +56,25 @@ namespace Rubickanov.Motor.Editor
             for (int i = 0; i < _modules.arraySize; i++)
                 DrawModule(i);
 
+            // Check priority order
+            bool outOfOrder = false;
+            int lastPriority = int.MinValue;
+            for (int i = 0; i < _modules.arraySize; i++)
+            {
+                var obj = _modules.GetArrayElementAtIndex(i).managedReferenceValue;
+                if (obj is IMotorModule m)
+                {
+                    if (m.Priority < lastPriority)
+                    {
+                        outOfOrder = true;
+                        break;
+                    }
+                    lastPriority = m.Priority;
+                }
+            }
+            if (outOfOrder)
+                EditorGUILayout.HelpBox("Modules are not sorted by priority. Serialized order does not affect execution — the simulation sorts by Priority at runtime.", MessageType.Info);
+
             EditorGUILayout.Space(4);
             DrawAddButton();
 
@@ -67,6 +86,8 @@ namespace Rubickanov.Motor.Editor
             var element = _modules.GetArrayElementAtIndex(index);
             var obj = element.managedReferenceValue;
             string typeName = obj != null ? obj.GetType().Name : "(null)";
+            if (obj is IMotorModule module)
+                typeName = $"{typeName}  (Priority: {module.Priority})";
             bool expanded = _foldouts.Contains(index);
 
             EditorGUILayout.BeginHorizontal();

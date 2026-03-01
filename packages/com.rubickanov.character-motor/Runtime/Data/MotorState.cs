@@ -33,7 +33,14 @@ namespace Rubickanov.Motor
         public bool IsSprinting;
         public bool IsCrouching;
         public bool IsInAir;
+        public bool IsSliding;
         public bool SkipDefaultPhysics;
+
+        // -- Platform --
+        public Vector3 GroundVelocity;
+
+        // -- Look --
+        public Vector2 LookInput;
 
         // -- IReadOnlyMotorState --
         Vector2 IReadOnlyMotorState.MoveInput => MoveInput;
@@ -47,7 +54,10 @@ namespace Rubickanov.Motor
         bool IReadOnlyMotorState.IsSprinting => IsSprinting;
         bool IReadOnlyMotorState.IsCrouching => IsCrouching;
         bool IReadOnlyMotorState.IsInAir => IsInAir;
+        bool IReadOnlyMotorState.IsSliding => IsSliding;
         bool IReadOnlyMotorState.SkipDefaultPhysics => SkipDefaultPhysics;
+        Vector3 IReadOnlyMotorState.GroundVelocity => GroundVelocity;
+        Vector2 IReadOnlyMotorState.LookInput => LookInput;
 
         /// <summary>Applies input struct to state fields.</summary>
         public void ApplyInput(MotorInput input)
@@ -56,6 +66,7 @@ namespace Rubickanov.Motor
             JumpPressed = input.Jump;
             SprintHeld = input.Sprint;
             CrouchPressed = input.Crouch;
+            LookInput = input.Look;
         }
 
         /// <summary>
@@ -68,6 +79,8 @@ namespace Rubickanov.Motor
             GravityMultiplier = 1f;
             ExternalForce = Vector3.zero;
             SkipDefaultPhysics = false;
+            IsSliding = false;
+            GroundVelocity = Vector3.zero;
         }
     }
 }

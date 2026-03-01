@@ -18,6 +18,12 @@ namespace Rubickanov.Motor.Modules
         public override int Priority => 20;
 
         private float _pendingStepUp;
+        private float _initialCapsuleHeight;
+
+        protected override void OnInitialize()
+        {
+            _initialCapsuleHeight = Body.CapsuleHeight;
+        }
 
         public override void Simulate(float deltaTime)
         {
@@ -39,7 +45,7 @@ namespace Rubickanov.Motor.Modules
             Vector3 moveDir = State.DesiredVelocity.normalized;
             if (moveDir.sqrMagnitude < 0.01f) return;
 
-            float maxStep = _maxStepHeight;
+            float maxStep = _maxStepHeight * (Body.CapsuleHeight / _initialCapsuleHeight);
             float checkDepth = _stepCheckDepth;
             Vector3 feetPos = Body.Position;
 
@@ -86,11 +92,13 @@ namespace Rubickanov.Motor.Modules
         public void SaveState(ref ModuleStateWriter writer)
         {
             writer.Write(_pendingStepUp);
+            writer.Write(_initialCapsuleHeight);
         }
 
         public void RestoreState(ref ModuleStateReader reader)
         {
             _pendingStepUp = reader.ReadFloat();
+            _initialCapsuleHeight = reader.ReadFloat();
         }
     }
 }

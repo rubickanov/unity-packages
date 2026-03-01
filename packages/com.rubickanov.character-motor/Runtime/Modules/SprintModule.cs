@@ -22,9 +22,12 @@ namespace Rubickanov.Motor.Modules
 
         public override void Simulate(float deltaTime)
         {
+            bool hasForwardInput = State.MoveInput.sqrMagnitude > 0.01f
+                && Vector2.Dot(State.MoveInput.normalized, Vector2.up) > 0.5f;
+
             bool canSprint = State.SprintHeld
                           && State.IsGrounded
-                          && State.MoveInput.y > 0.5f
+                          && hasForwardInput
                           && !State.IsCrouching;
 
             State.IsSprinting = canSprint;

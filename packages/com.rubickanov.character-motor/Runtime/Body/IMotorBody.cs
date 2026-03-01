@@ -14,6 +14,7 @@ namespace Rubickanov.Motor
         Vector3 Position { get; }
         Quaternion Rotation { get; }
         Vector3 Velocity { get; }
+        float CapsuleHeight { get; }
 
         /// <summary>Called by simulation before modules tick. Syncs body → state.</summary>
         void BeginFrame(MotorState state, float deltaTime);

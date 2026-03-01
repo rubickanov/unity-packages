@@ -15,6 +15,7 @@ namespace Rubickanov.Motor.Modules
         [SerializeField] private float _deceleration = 120f;
         [SerializeField] private float _airControlForce = 4f;
         [SerializeField] private float _maxAirSpeed = 8f;
+        [SerializeField] private float _airDrag = 0.5f;
 
         [Header("Gravity")]
         [SerializeField] private float _gravity = 28f;
@@ -37,6 +38,9 @@ namespace Rubickanov.Motor.Modules
                 // Project onto ground plane — prevents jittering on slopes
                 target = Vector3.ProjectOnPlane(target, State.GroundNormal);
 
+                if (State.GroundVelocity.sqrMagnitude > 0.001f)
+                    target += State.GroundVelocity;
+
                 Vector3 currentHorizontal = new Vector3(Body.Velocity.x, 0f, Body.Velocity.z);
                 Vector3 diff = target - currentHorizontal;
 
@@ -56,6 +60,12 @@ namespace Rubickanov.Motor.Modules
 
                 if (horizontal.magnitude < _maxAirSpeed)
                     Body.AddForce(airForce, ForceMode.Acceleration);
+
+                if (_airDrag > 0f)
+                {
+                    Vector3 dragForce = -horizontal * _airDrag;
+                    Body.AddForce(dragForce, ForceMode.Acceleration);
+                }
             }
 
             // Gravity

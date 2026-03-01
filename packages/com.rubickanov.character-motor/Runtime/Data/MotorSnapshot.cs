@@ -16,6 +16,7 @@ namespace Rubickanov.Motor
         public readonly bool IsCrouching;
         public readonly Vector3 GroundNormal;
         public readonly float GroundAngle;
+        public readonly bool IsSliding;
 
         public MotorSnapshot(MotorState state)
         {
@@ -26,6 +27,7 @@ namespace Rubickanov.Motor
             IsCrouching = state.IsCrouching;
             GroundNormal = state.GroundNormal;
             GroundAngle = state.GroundAngle;
+            IsSliding = state.IsSliding;
         }
     }
 }
