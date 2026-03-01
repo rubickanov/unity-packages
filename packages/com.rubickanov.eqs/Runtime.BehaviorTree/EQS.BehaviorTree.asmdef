@@ -1,0 +1,17 @@
+{
+    "name": "EQS.BehaviorTree",
+    "rootNamespace": "Rubickanov.EQS",
+    "references": [
+        "GUID:c157ff19ee042ada3926b6524d1770e7",
+        "GUID:fba6ad2d52a8cc94d89577bc958510f2"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
