@@ -11,7 +11,7 @@ namespace Rubickanov.DevConsole
     /// <summary>Central registry for all console commands. Discovers attributed methods and allows runtime registration.</summary>
     public class CommandRegistry
     {
-        private static CommandRegistry _instance;
+        private static CommandRegistry? _instance;
         public static CommandRegistry Instance => _instance ??= new CommandRegistry();
 
         private readonly Dictionary<string, RegisteredCommand> _commands = new();
@@ -25,7 +25,7 @@ namespace Rubickanov.DevConsole
         public IReadOnlyDictionary<string, RegisteredCommand> Commands => _commands;
 
         /// <summary>Optional filter invoked before command execution. Return non-null to override.</summary>
-        public Func<RegisteredCommand, string[], ExecutionResult?> PreExecuteFilter;
+        public Func<RegisteredCommand, string[], ExecutionResult?>? PreExecuteFilter;
 
         /// <summary>Discovers and registers all commands. Safe to call multiple times (no-op after first).</summary>
         public void Initialize()
@@ -41,8 +41,8 @@ namespace Rubickanov.DevConsole
         }
 
         /// <summary>Registers a command at runtime. Handler receives string args and returns an optional message.</summary>
-        public void Register(string name, Func<string[], string> handler, string description = "",
-            string category = "General", IAutoCompleteProvider[] argProviders = null)
+        public void Register(string name, Func<string[], string?> handler, string description = "",
+            string category = "General", IAutoCompleteProvider?[]? argProviders = null)
         {
             _commands[name.ToLowerInvariant()] = new RegisteredCommand
             {
@@ -59,7 +59,7 @@ namespace Rubickanov.DevConsole
 
         /// <summary>Registers a command at runtime with no return value.</summary>
         public void Register(string name, Action<string[]> action, string description = "",
-            string category = "General", IAutoCompleteProvider[] argProviders = null)
+            string category = "General", IAutoCompleteProvider?[]? argProviders = null)
         {
             Register(name, args =>
             {
@@ -80,6 +80,7 @@ namespace Rubickanov.DevConsole
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 var asmName = assembly.GetName().Name;
+                if (asmName == null) continue;
                 if (asmName.StartsWith("System") || asmName.StartsWith("Unity") ||
                     asmName.StartsWith("mscorlib") || asmName.StartsWith("Mono") ||
                     asmName.StartsWith("Microsoft") || asmName.StartsWith("netstandard"))
@@ -105,7 +106,7 @@ namespace Rubickanov.DevConsole
         {
             var parameters = method.GetParameters();
             var autoCompleteAttrs = method.GetCustomAttributes<AutoCompleteAttribute>().ToArray();
-            var providers = new IAutoCompleteProvider[parameters.Length];
+            var providers = new IAutoCompleteProvider?[parameters.Length];
 
             foreach (var ac in autoCompleteAttrs)
                 if (ac.ArgumentIndex < providers.Length)
@@ -133,13 +134,13 @@ namespace Rubickanov.DevConsole
             };
         }
 
-        private IAutoCompleteProvider GetOrCreateProvider(Type providerType, params object[] args)
+        private IAutoCompleteProvider? GetOrCreateProvider(Type providerType, params object[] args)
         {
             if (args.Length > 0)
             {
                 try
                 {
-                    return (IAutoCompleteProvider)Activator.CreateInstance(providerType, args);
+                    return (IAutoCompleteProvider?)Activator.CreateInstance(providerType, args);
                 }
                 catch (Exception e)
                 {
@@ -152,8 +153,9 @@ namespace Rubickanov.DevConsole
             {
                 try
                 {
-                    provider = (IAutoCompleteProvider)Activator.CreateInstance(providerType, args);
-                    _providerCache[providerType] = provider;
+                    provider = (IAutoCompleteProvider?)Activator.CreateInstance(providerType, args);
+                    if (provider != null)
+                        _providerCache[providerType] = provider;
                 }
                 catch (Exception e)
                 {
@@ -168,13 +170,15 @@ namespace Rubickanov.DevConsole
         public struct ExecutionResult
         {
             public bool Success;
-            public string Message;
-            public static ExecutionResult Ok(string msg = "") => new() { Success = true, Message = msg };
+            public string? Message;
+            public static ExecutionResult Ok(string? msg = "") => new() { Success = true, Message = msg };
             public static ExecutionResult Error(string msg) => new() { Success = false, Message = msg };
         }
 
         /// <summary>Parses and executes a raw command string.</summary>
-        public ExecutionResult Execute(string rawInput)
+        public ExecutionResult Execute(string rawInput) => Execute(rawInput, 0);
+
+        private ExecutionResult Execute(string rawInput, int aliasDepth)
         {
             if (string.IsNullOrWhiteSpace(rawInput)) return ExecutionResult.Error("Empty command.");
 
@@ -183,6 +187,19 @@ namespace Rubickanov.DevConsole
 
             var cmdName = tokens[0].ToLowerInvariant();
             var args = tokens[1..];
+
+            // Alias expansion
+            if (!_commands.ContainsKey(cmdName) && AliasRegistry.Instance.TryResolve(cmdName, out var aliasCommand))
+            {
+                if (aliasDepth >= 8)
+                    return ExecutionResult.Error("Alias recursion limit reached (max 8).");
+
+                // Substitute: alias value + remaining args
+                var expanded = args.Length > 0
+                    ? aliasCommand + " " + string.Join(" ", args)
+                    : aliasCommand;
+                return Execute(expanded, aliasDepth + 1);
+            }
 
             if (!_commands.TryGetValue(cmdName, out var cmd))
                 return ExecutionResult.Error($"Unknown command: '{cmdName}'. Type 'help' for available commands.");
@@ -212,7 +229,7 @@ namespace Rubickanov.DevConsole
         private ExecutionResult ExecuteReflection(RegisteredCommand cmd, string[] args)
         {
             var parameters = cmd.Parameters;
-            var parsedArgs = new object[parameters.Length];
+            var parsedArgs = new object?[parameters.Length];
 
             for (int i = 0; i < parameters.Length; i++)
             {
@@ -223,7 +240,7 @@ namespace Rubickanov.DevConsole
                             $"Cannot parse '{args[i]}' as {parameters[i].ParameterType.Name} for '{parameters[i].Name}'.\nUsage: {cmd.GetUsageString()}");
                 }
                 else if (parameters[i].HasDefaultValue)
-                    parsedArgs[i] = parameters[i].DefaultValue;
+                    parsedArgs[i] = parameters[i].DefaultValue!;
                 else
                     return ExecutionResult.Error(
                         $"Missing required argument '{parameters[i].Name}'.\nUsage: {cmd.GetUsageString()}");
@@ -231,7 +248,7 @@ namespace Rubickanov.DevConsole
 
             try
             {
-                var result = cmd.Method.Invoke(null, parsedArgs);
+                var result = cmd.Method!.Invoke(null, parsedArgs);
                 return result != null ? ExecutionResult.Ok(result.ToString()) : ExecutionResult.Ok();
             }
             catch (TargetInvocationException e)
@@ -244,7 +261,7 @@ namespace Rubickanov.DevConsole
             }
         }
 
-        private static bool TryParseArg(string input, Type targetType, out object result)
+        private static bool TryParseArg(string input, Type targetType, out object? result)
         {
             result = null;
             try
@@ -264,6 +281,18 @@ namespace Rubickanov.DevConsole
                 if (targetType == typeof(float))
                 {
                     result = float.Parse(input, CultureInfo.InvariantCulture);
+                    return true;
+                }
+
+                if (targetType == typeof(ulong))
+                {
+                    result = ulong.Parse(input);
+                    return true;
+                }
+
+                if (targetType == typeof(long))
+                {
+                    result = long.Parse(input);
                     return true;
                 }
 

@@ -25,10 +25,10 @@ namespace Rubickanov.DevConsole
         public static RingBufferView Entries => new(Buffer, _head, _count);
 
         /// <summary>Fired when a new entry is added.</summary>
-        public static event Action<LogEntry> OnLogAdded;
+        public static event Action<LogEntry>? OnLogAdded;
 
         /// <summary>Fired when the log is cleared.</summary>
-        public static event Action OnCleared;
+        public static event Action? OnCleared;
 
         /// <summary>Logs a message to the console.</summary>
         public static void Log(string message, LogType type = LogType.Info)

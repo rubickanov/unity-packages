@@ -10,16 +10,20 @@ namespace Rubickanov.DevConsole
     public class DevConsoleUIToolkit : MonoBehaviour
     {
         /// <summary>Singleton instance. Null if console is not in the scene.</summary>
-        public static DevConsoleUIToolkit Instance { get; private set; }
+        public static DevConsoleUIToolkit? Instance { get; private set; }
 
-        private VisualElement _root;
-        private ScrollView _logScroll;
-        private VisualElement _logContainer;
-        private TextField _commandInput;
-        private VisualElement _autocompleteContainer;
+        private VisualElement _root = default!;
+        private ScrollView _logScroll = default!;
+        private VisualElement _logContainer = default!;
+        private TextField _commandInput = default!;
+        private VisualElement _autocompleteContainer = default!;
 
-        private CommandHistory _history;
+        private CommandHistory _history = default!;
         private bool _isVisible;
+
+        /// <summary>Whether the console is currently visible.</summary>
+        public bool IsVisible => _isVisible;
+
         private bool _needsScrollToBottom;
 
         // Autocomplete state

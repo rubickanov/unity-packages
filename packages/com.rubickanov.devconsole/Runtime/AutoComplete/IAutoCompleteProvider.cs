@@ -9,6 +9,6 @@ namespace Rubickanov.DevConsole
         void GetSuggestions(string partial, List<string> results);
 
         /// <summary>Short hint shown in usage string (e.g. "&lt;true|false&gt;"). Null to use parameter name.</summary>
-        string Hint => null;
+        string? Hint => null;
     }
 }

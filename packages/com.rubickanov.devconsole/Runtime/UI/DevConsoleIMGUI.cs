@@ -11,10 +11,10 @@ namespace Rubickanov.DevConsole
         private const float ConsoleHeightRatio = 0.5f;
         private const string InputControlName = "DevConsoleInput";
 
-        private static DevConsoleIMGUI _instance;
+        private static DevConsoleIMGUI? _instance;
 
-        public static DevConsoleIMGUI Instance => _instance;
-        public static event Action<bool> Toggled;
+        public static DevConsoleIMGUI? Instance => _instance;
+        public static event Action<bool>? Toggled;
         public static bool IsOpen => _instance != null && _instance._isOpen;
 
         private bool _isOpen;
@@ -37,8 +37,8 @@ namespace Rubickanov.DevConsole
         private GUIStyle _inputStyle = default!;
         private GUIStyle _suggestionStyle = default!;
         private GUIStyle _suggestionActiveStyle = default!;
-        private Texture2D _bgTexture;
-        private Texture2D _inputBgTexture;
+        private Texture2D? _bgTexture;
+        private Texture2D? _inputBgTexture;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
@@ -157,7 +157,7 @@ namespace Rubickanov.DevConsole
             float inputRowHeight = 28f;
             float logHeight = consoleHeight - suggestionRowHeight - inputRowHeight;
 
-            GUI.DrawTexture(new Rect(0, 0, Screen.width, consoleHeight), _bgTexture);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, consoleHeight), _bgTexture!);
 
             DrawLogArea(logHeight);
             DrawSuggestions(logHeight, suggestionRowHeight);
@@ -349,7 +349,7 @@ namespace Rubickanov.DevConsole
         private void DrawInput(float y, float height)
         {
             var inputRect = new Rect(0, y, Screen.width, height);
-            GUI.DrawTexture(inputRect, _inputBgTexture);
+            GUI.DrawTexture(inputRect, _inputBgTexture!);
 
             GUI.Label(new Rect(6, y + 4, 14, height), ">", _logStyle);
 

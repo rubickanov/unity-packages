@@ -17,7 +17,7 @@ namespace Rubickanov.DevConsole
         public Key ToggleKey => toggleKey;
         public float ConsoleHeight => consoleHeight;
 
-        private static DevConsoleSettings _instance;
+        private static DevConsoleSettings? _instance;
 
         public static DevConsoleSettings GetOrCreate()
         {

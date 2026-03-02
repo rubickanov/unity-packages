@@ -8,11 +8,17 @@ namespace Rubickanov.DevConsole
     {
         private readonly List<string> _history = new();
         private int _cursor = -1;
-        private string _savedInput;
+        private string? _savedInput;
         private const int MaxHistory = 100;
         private const string PrefsKey = "DevConsole_History";
 
-        public CommandHistory() { Load(); }
+        /// <summary>The most recently created CommandHistory instance.</summary>
+        public static CommandHistory? Current { get; private set; }
+
+        /// <summary>Read-only view of all history entries (oldest first).</summary>
+        public IReadOnlyList<string> Entries => _history;
+
+        public CommandHistory() { Load(); Current = this; }
 
         public void Add(string command)
         {
@@ -24,7 +30,7 @@ namespace Rubickanov.DevConsole
             Save();
         }
 
-        public string NavigateUp(string currentInput)
+        public string? NavigateUp(string currentInput)
         {
             if (_history.Count == 0) return null;
             if (_cursor == -1) { _savedInput = currentInput; _cursor = _history.Count - 1; }
@@ -32,7 +38,7 @@ namespace Rubickanov.DevConsole
             return _history[_cursor];
         }
 
-        public string NavigateDown()
+        public string? NavigateDown()
         {
             if (_cursor == -1) return null;
             _cursor++;
