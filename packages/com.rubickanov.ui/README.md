@@ -1,125 +1,53 @@
 # UI Framework
 
-Backend-agnostic UI framework with view lifecycle, layer management, and dialog system.
+Backend-agnostic UI framework with view lifecycle, layer management, and dialog system. Ships with UI Toolkit and UGUI backends.
 
-## Structure
+## Dependencies
+
+- `UniTask` — async view lifecycle (show/hide/bind)
+- `R3` — reactive bindings in UIToolkit/UGUI backends and ViewModelBase
+
+## Architecture
 
 ```
-UI/
-├── Runtime/          # Core abstractions (noEngineReferences)
-│   ├── IView.cs              # View contract: Bind, Show/Hide, ShowAsync/HideAsync
-│   ├── IViewFactory.cs       # Backend-specific view creation + layer attachment
-│   ├── IUIService.cs         # Screen/popup lifecycle, view registry
-│   ├── IDialogService.cs     # Confirm/Alert/Modal dialogs
-│   ├── IViewAnimation.cs     # Animation abstraction: PlayShowAsync/PlayHideAsync
-│   ├── IAnimationTarget.cs   # Float-based animation target (no engine refs)
-│   ├── NoneAnimation.cs      # No-op animation (instant show/hide)
-│   ├── UIService.cs          # Single backend-agnostic implementation
-│   ├── ViewModelBase.cs      # Disposable base for view models
-│   ├── UILayer.cs            # Screen, HUD, Popup, Overlay
-│   ├── ScopedViewRegistration.cs  # Auto-unregister on dispose
-│   ├── NullUIService.cs      # No-op for server builds
-│   └── NullDialogService.cs  # No-op for server builds
-├── UIToolkit/        # UI Toolkit backend
-│   ├── UIToolkitViewBase.cs   # Non-generic base: OnInitialize, ShowAsync/HideAsync
-│   ├── UIToolkitView.cs       # Generic View<TViewModel> with reactive bindings
-│   ├── UIToolkitViewFactory.cs # Creates views, loads UXML, calls Initialize, attaches to layers
-│   ├── UIToolkitAnimationTarget.cs # Maps IAnimationTarget → VisualElement styles
-│   ├── UIToolkitDialogService.cs # IDialogService via popup views
-│   ├── ConfirmPopup.cs/.uxml  # Confirm dialog
-│   ├── AlertPopup.cs/.uxml    # Alert dialog
-│   ├── ConfirmViewModel.cs    # UniTaskCompletionSource<bool>
-│   └── AlertViewModel.cs      # UniTaskCompletionSource
-└── Animations/       # LitMotion-based animations (separate package)
-    └── Runtime/
-        ├── FadeAnimation.cs       # Opacity 0↔1
-        ├── ScaleAnimation.cs      # Scale from startScale↔1
-        ├── SlideAnimation.cs      # Translate from offset↔0 (4 directions)
-        ├── CompositeAnimation.cs  # UniTask.WhenAll on multiple animations
-        └── ViewAnimations.cs      # Static factory: Fade, Scale, FadeAndScale, etc.
+IUIService (screen/popup lifecycle)
+├── UIService          — backend-agnostic implementation
+└── NullUIService      — no-op for server/headless builds
+
+IViewFactory (view creation + layer attachment)
+├── UIToolkitViewFactory — UI Toolkit backend
+└── UGUIViewFactory      — UGUI backend
+
+IDialogService (confirm/alert/modal)
+├── UIToolkitDialogService — popup-based dialogs
+└── NullDialogService      — no-op for server builds
+
+IView (view contract)
+├── UIToolkitViewBase → UIToolkitView<TViewModel>
+└── UGUIViewBase      → UGUIView<TViewModel>
 ```
 
 ## Assemblies
 
-| Assembly | Namespace | Dependencies | Engine |
-|---|---|---|---|
-| `UI.Runtime` | `Rubickanov.UI` | UniTask | No |
-| `UI.UIToolkit` | `Rubickanov.UI.UIToolkit` | UI.Runtime, UniTask, R3 | Yes |
-| `UI.Animations` | `Rubickanov.UI.Animations` | UI.Runtime, UniTask, LitMotion | Yes |
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **UI.Runtime** | No | Core abstractions: IView, IUIService, IDialogService, UIService, ViewModelBase |
+| **UI.UIToolkit** | Yes | UI Toolkit backend: UIToolkitView, UIToolkitViewFactory, dialog views |
+| **UI.UGUI** | Yes | UGUI backend: UGUIView, UGUIViewFactory |
 
-## Usage
+## Core Concepts
 
-### Registering views
+**IView** — View contract with `Bind`, `Show`/`Hide`, `ShowAsync`/`HideAsync`, and `Destroy`. Backend-agnostic -- no Root property at this level.
 
-```csharp
-// Global (lives forever)
-await ui.Register<LoadingScreen>(UILayer.Screen);
+**UILayer** — Enum defining render order: `Screen`, `HUD`, `Popup`, `Overlay`. Each layer is a separate container in the UI document.
 
-// Scoped (auto-unregister on dispose)
-var views = new ScopedViewRegistration(ui);
-await views.Register<HudView>(UILayer.HUD);
-// views.Dispose() unregisters all
-```
+**ViewModelBase** — Disposable base class for view models. Provides `CreateProperty<T>()`, `CreateCommand()`, `CreateSubject<T>()`, and `AddDisposable()`. All created state is auto-disposed with the VM.
 
-### Creating a view
+**UIToolkitView\<TViewModel\>** — Generic view base with typed ViewModel access and binding helpers. Manages two cleanup mechanisms: **DisposableBag** for R3 subscriptions and an unbind list for UI Toolkit events. Both are cleared automatically on hide.
 
-```csharp
-public class MyView : UIToolkitView<MyViewModel>
-{
-    protected override UniTask OnBind()
-    {
-        Bind(ViewModel.Health, h => Root.Q<Label>("hp").text = $"{h}");
-        BindButton(Root.Q<Button>("btn"), () => ViewModel.DoSomething());
-        return UniTask.CompletedTask;
-    }
+## Quick Start
 
-    protected override void OnViewHide() { }  // called before unbind
-    protected override void OnUnbind() { }     // cleanup subscriptions
-}
-```
-
-### View lifecycle
-
-```
-new() → Root set → OnInitialize() → [OnBind() → OnShowAsync() → OnHideAsync() → OnHide()]* → Destroy()
-                   ▲ once            ▲ repeats per show/hide cycle
-```
-
-- **`OnInitialize()`** — called once after `Root` is set (during `Register`). Cache element references and animation targets here.
-- **`OnBind()`** — called each time the view is shown with a new ViewModel. Set up bindings.
-- **`OnShowAsync(root, duration)`** — called after display is set to Flex. Play show animations.
-- **`OnHideAsync(root, duration)`** — called before display is set to None. Play hide animations.
-- **`OnViewHide()`** — called after hide animation completes. Cleanup before unbind.
-- **`OnUnbind()`** — called after all bindings are cleared. Final cleanup.
-
-### Binding helpers (UIToolkitView)
-
-| Helper | Description | Cleanup |
-|--------|-------------|---------|
-| `Bind<T>(Observable<T>, Action<T>)` | One-way: ViewModel → UI | `DisposableBag` (R3) |
-| `BindTextField(TextField, ReactiveProperty<string>)` | Two-way | `DisposableBag` + unbind list |
-| `BindSlider(Slider, ReactiveProperty<float>)` | Two-way | `DisposableBag` + unbind list |
-| `BindToggle(Toggle, ReactiveProperty<bool>)` | Two-way | `DisposableBag` + unbind list |
-| `BindDropdown(DropdownField, ReactiveProperty<int>, choices)` | Two-way | `DisposableBag` + unbind list |
-| `BindButton(Button, Action)` | Click handler | unbind list |
-| `BindValueChanged<TElement, TValue>(element, handler)` | Value change | unbind list |
-| `TrackUnbind(Action)` | Manual cleanup | unbind list |
-
-Two cleanup mechanisms:
-- **`DisposableBag`** — for R3 `Observable` subscriptions (returns `IDisposable`)
-- **unbind list** — for UI Toolkit events (`clicked`, `RegisterValueChangedCallback`) that use `+=`/`-=` and don't return `IDisposable`
-
-Both are cleared automatically on `Hide()`.
-
-### Dialogs
-
-```csharp
-bool confirmed = await dialogs.ShowConfirm("Exit", "Are you sure?", "Quit", "Cancel");
-await dialogs.ShowAlert("Error", message);
-using var modal = dialogs.ShowModal("Loading", "Please wait...");
-```
-
-### DI wiring (VContainer)
+1. Register services in your LifetimeScope:
 
 ```csharp
 // Client
@@ -132,28 +60,90 @@ builder.Register<NullUIService>(Lifetime.Singleton).As<IUIService>();
 builder.Register<NullDialogService>(Lifetime.Singleton).As<IDialogService>();
 ```
 
-## ViewModel
+2. Register and show a view:
 
-### Rules
+```csharp
+await ui.Register<HudView>(UILayer.HUD);
+await ui.ShowScreen<HudView>(new HudViewModel(health, ammo));
+```
 
-- **State** — only via `CreateProperty<T>()`, `CreateCommand()`, `CreateSubject<T>()`. Auto-disposed with the VM.
-- **Services in constructor** — allowed when VM consumes them directly (e.g. `SettingsViewModel` ← `IAudioService`).
-- **Commands** — `CreateCommand(action)` with action passed in constructor. The creator decides what happens, VM wraps it.
-- **Foreign reactive state** — expose as `ReadOnlyReactiveProperty<T>` or `Observable<T>`. Never expose someone else's writable property.
-- **No View types** — VM must not reference VisualElement, MonoBehaviour, or any UI Toolkit types.
-- **Escape hatch** — `AddDisposable(IDisposable)` for anything that doesn't fit the helpers above.
+## Usage
 
-### Helpers (ViewModelBase)
+### View Lifecycle
 
-| Helper | Returns | Use case |
-|--------|---------|----------|
-| `CreateProperty<T>(initial)` | `ReactiveProperty<T>` | Observable state with current value |
-| `CreateCommand(action?)` | `ReactiveCommand` | UI action (button click) |
-| `CreateCommand<T>(action?)` | `ReactiveCommand<T>` | UI action with payload |
-| `CreateSubject<T>()` | `Subject<T>` | One-shot event, no stored value |
-| `AddDisposable(disposable)` | — | Manual disposal tracking |
+```
+new() -> Root set -> OnInitialize() -> [OnBind() -> OnShowAsync() -> OnHideAsync() -> OnViewHide() -> OnUnbind()]* -> Destroy()
+                     ^ once             ^ repeats per show/hide cycle
+```
 
-### Example
+- `OnInitialize()` — called once after `Root` is set (during `Register`). Cache element references and animation targets here.
+- `OnBind()` — called each time the view is shown with a new ViewModel. Set up bindings.
+- `OnShowAsync(root, duration)` — called after display is set to Flex. Play show animations.
+- `OnHideAsync(root, duration)` — called before display is set to None. Play hide animations.
+- `OnViewHide()` — called after hide animation completes. Cleanup before unbind.
+- `OnUnbind()` — called after all bindings are cleared. Final cleanup.
+
+### Creating a View
+
+```csharp
+public class HudView : UIToolkitView<HudViewModel>
+{
+    protected override UniTask OnBind()
+    {
+        Bind(ViewModel.Health, h => Root.Q<Label>("hp").text = $"{h}");
+        BindButton(Root.Q<Button>("reload-btn"), () => ViewModel.Reload.Execute(Unit.Default));
+        return UniTask.CompletedTask;
+    }
+
+    protected override void OnViewHide() { }
+    protected override void OnUnbind() { }
+}
+```
+
+### Registering Views
+
+```csharp
+// Global (lives forever)
+await ui.Register<LoadingScreen>(UILayer.Screen);
+
+// Scoped (auto-unregister on dispose)
+var views = new ScopedViewRegistration(ui);
+await views.Register<HudView>(UILayer.HUD);
+await views.Register<PausePopup>(UILayer.Popup);
+// views.Dispose() unregisters all
+```
+
+### Showing and Hiding
+
+```csharp
+// Screens (one active at a time)
+await ui.ShowScreen<HudView>(new HudViewModel(health, ammo));
+ui.HideScreen<HudView>();                  // instant
+await ui.HideScreenAsync<HudView>();       // animated
+ui.HideAllScreens();
+
+// Popups (stacked)
+await ui.ShowPopup<PausePopup>(new PauseViewModel(onResume, onSettings, onQuit));
+ui.HidePopup<PausePopup>();                // instant
+await ui.HidePopupAsync<PausePopup>();     // animated
+ui.HideTopPopup();                         // instant, topmost
+await ui.HideTopPopupAsync();              // animated, topmost
+```
+
+### Binding Helpers
+
+| Helper | Description | Cleanup |
+|--------|-------------|---------|
+| `Bind<T>(Observable<T>, Action<T>)` | One-way: ViewModel to UI | DisposableBag (R3) |
+| `BindTextField(TextField, ReactiveProperty<string>)` | Two-way | DisposableBag + unbind list |
+| `BindSlider(Slider, ReactiveProperty<float>)` | Two-way | DisposableBag + unbind list |
+| `BindToggle(Toggle, ReactiveProperty<bool>)` | Two-way | DisposableBag + unbind list |
+| `BindDropdown(DropdownField, ReactiveProperty<int>, choices)` | Two-way | DisposableBag + unbind list |
+| `BindButton(Button, Action)` | Click handler | unbind list |
+| `BindValueChanged<TElement, TValue>(element, handler)` | Value change | unbind list |
+| `TrackUnbind(Action)` | Manual cleanup | unbind list |
+
+### Creating a ViewModel
 
 ```csharp
 public class PauseViewModel : ViewModelBase
@@ -169,29 +159,29 @@ public class PauseViewModel : ViewModelBase
         Quit = CreateCommand(onQuit);
     }
 }
-
-// Creator:
-var vm = new PauseViewModel(ClosePause, OpenSettings, QuitGame);
-
-// View:
-BindButton(Root.Q<Button>("resume-btn"), () => ViewModel.Resume.Execute(Unit.Default));
 ```
 
-### Patterns
+### ViewModel Helpers
 
-| Pattern | When | Example |
-|---------|------|---------|
-| `CreateProperty<T>` | VM owns the state | `LoadingViewModel.Progress` |
-| `ReadOnlyReactiveProperty<T>` (upcast) | VM exposes someone else's state | `MainMenuViewModel.Phase` (from MenuFlow) |
-| `CreateCommand(action)` | UI triggers creator's logic | `PauseViewModel.Resume` |
-| Service in constructor | VM delegates to infrastructure | `SettingsViewModel` ← `IAudioService` |
-| Pass-through methods | Simple delegation, no state | `MainMenuViewModel.FindMatch()` |
+| Helper | Returns | Use case |
+|--------|---------|----------|
+| `CreateProperty<T>(initial)` | `ReactiveProperty<T>` | Observable state with current value |
+| `CreateCommand(action?)` | `ReactiveCommand` | UI action (button click) |
+| `CreateCommand<T>(action?)` | `ReactiveCommand<T>` | UI action with payload |
+| `CreateSubject<T>()` | `Subject<T>` | One-shot event, no stored value |
+| `AddDisposable(disposable)` | -- | Manual disposal tracking |
 
-## Animations
+### Dialogs
 
-Views show/hide instantly by default (no override). Override `OnShowAsync`/`OnHideAsync` to add transitions.
+```csharp
+bool confirmed = await dialogs.ShowConfirm("Exit", "Are you sure?", "Quit", "Cancel");
+await dialogs.ShowAlert("Error", message);
+using var modal = dialogs.ShowModal("Loading", "Please wait...");
+```
 
-### Simple — single animation on root
+### Animations
+
+Views show/hide instantly by default. Override `OnShowAsync`/`OnHideAsync` to add transitions.
 
 ```csharp
 public class PausePopup : UIToolkitView<PauseViewModel>
@@ -204,7 +194,7 @@ public class PausePopup : UIToolkitView<PauseViewModel>
 }
 ```
 
-### Per-element — background + content separately
+Per-element animations use cached **UIToolkitAnimationTarget** instances:
 
 ```csharp
 private UIToolkitAnimationTarget _overlay = default!;
@@ -224,7 +214,7 @@ protected override async UniTask OnShowAsync(IAnimationTarget root, float durati
 }
 ```
 
-### Custom animation class
+Custom animations implement **IViewAnimation**:
 
 ```csharp
 public class BounceAnimation : IViewAnimation
@@ -234,28 +224,58 @@ public class BounceAnimation : IViewAnimation
 }
 ```
 
-### Animated vs instant hide
+### Cursor Visibility
+
+**UIService** exposes `SetVisibilityCallback(Action<bool>)` to notify when UI is shown or fully hidden. Wire in your DI registration:
 
 ```csharp
-_ui.HidePopup<PausePopup>();              // instant (escape key, scene transitions)
-await _ui.HidePopupAsync<PausePopup>();   // animated
+builder.RegisterBuildCallback(resolver =>
+{
+    var ui = (UIService)resolver.Resolve<IUIService>();
+    var cursor = resolver.Resolve<ICursorService>();
+    ui.SetVisibilityCallback(visible => cursor.SetVisible(visible));
+});
 ```
-
-### Available presets (ViewAnimations)
-
-| Preset | Description |
-|--------|-------------|
-| `None` | Instant (no animation) |
-| `Fade` | Opacity 0↔1 |
-| `Scale` | Scale 0.8↔1 |
-| `FadeAndScale` | Fade + Scale combined |
-| `SlideFromLeft/Right/Top/Bottom` | Translate from offset↔0 |
-| `Combine(...)` | Parallel composition of any animations |
 
 ## Design Decisions
 
-- **IView has no Root** — backend-agnostic. `UIToolkitViewBase` adds `VisualElement Root`.
-- **IViewFactory** owns all DOM operations — creation, UXML loading, layer attachment.
-- **UIService is backend-agnostic** — delegates to IViewFactory, uses `Action<bool>` callback for cursor state.
-- **IDialogService is separate** — modals are views (ConfirmPopup/AlertPopup), not inline VisualElements.
-- **UxmlLoader delegate** instead of IAssetService — no dependency on asset loading infrastructure.
+- **IView has no Root** — keeps the interface backend-agnostic. **UIToolkitViewBase** adds `VisualElement Root`, **UGUIViewBase** adds its own root.
+- **IViewFactory owns all DOM operations** — creation, UXML loading, layer attachment. Views do not manage their own DOM placement.
+- **UIService is backend-agnostic** — delegates to **IViewFactory**, uses `Action<bool>` callback for cursor state instead of depending on a cursor service.
+- **IDialogService is separate from IUIService** — modals are implemented as popup views (**ConfirmPopup**/**AlertPopup**), not inline VisualElements.
+- **UxmlLoader delegate instead of IAssetService** — **UIToolkitViewFactory** takes a `UxmlLoader` delegate, avoiding a hard dependency on any asset loading strategy.
+
+## File Structure
+
+```
+com.rubickanov.ui/
+├── Runtime/
+│   ├── IView.cs
+│   ├── IUIService.cs
+│   ├── IViewFactory.cs
+│   ├── IDialogService.cs
+│   ├── IViewAnimation.cs
+│   ├── IAnimationTarget.cs
+│   ├── NoneAnimation.cs
+│   ├── UIService.cs
+│   ├── ViewModelBase.cs
+│   ├── UILayer.cs
+│   ├── ScopedViewRegistration.cs
+│   ├── NullUIService.cs
+│   └── NullDialogService.cs
+├── UIToolkit/
+│   ├── UIToolkitViewBase.cs
+│   ├── UIToolkitView.cs
+│   ├── UIToolkitViewFactory.cs
+│   ├── UIToolkitAnimationTarget.cs
+│   ├── UIToolkitDialogService.cs
+│   ├── ConfirmPopup.cs / ConfirmPopup.uxml
+│   ├── AlertPopup.cs / AlertPopup.uxml
+│   ├── ConfirmViewModel.cs
+│   └── AlertViewModel.cs
+└── UGUI/
+    ├── UGUIViewBase.cs
+    ├── UGUIView.cs
+    ├── UGUIViewFactory.cs
+    └── UGUIAnimationTarget.cs
+```

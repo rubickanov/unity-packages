@@ -1,31 +1,62 @@
 # Dev Console
 
-In-game developer console for Unity with attribute-based command auto-discovery, autocomplete, and persistent history.
+In-game developer console with attribute-based command auto-discovery, autocomplete, and persistent history.
 
-## Features
+## Dependencies
 
-- **Auto-discovery** — mark any static method with `[ConsoleCommand]` and it's registered automatically
-- **Autocomplete** — tab-completion for command names and arguments, with pluggable providers
-- **Persistent history** — command history saved across sessions via PlayerPrefs
-- **Zero-alloc hot path** — autocomplete and input handling produce no GC allocations
-- **UI Toolkit** — retained-mode UI with pooled elements, hidden when inactive = zero CPU cost
+- `com.unity.inputsystem` — keyboard input for toggle key
+
+## Architecture
+
+```
+[ConsoleCommand] attribute (on static methods)
+        |
+        v
+  CommandRegistry (singleton, reflection discovery)
+        |
+        v
+  RegisteredCommand (metadata + handler + autocomplete providers)
+        |
+        v
+  DevConsoleUIToolkit / DevConsoleIMGUI (MonoBehaviour frontends)
+        |
+        v
+  ConsoleLog (static ring buffer, 1000 entries)
+```
+
+## Assemblies
+
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **DevConsole.Runtime** | Yes | Commands, autocomplete, console log, UI frontends |
+| **DevConsole.Editor** | Editor | Project Settings provider |
+
+## Core Concepts
+
+**CommandRegistry** — Singleton that discovers all `[ConsoleCommand]`-attributed static methods at startup via reflection. Also supports runtime registration. Handles parsing, argument conversion, and execution.
+
+**ConsoleLog** — Static ring buffer (1000 entries) with typed log levels (`Info`, `Warning`, `Error`, `Success`, `Input`). UI frontends subscribe to `OnLogAdded` / `OnCleared` events.
+
+**IAutoCompleteProvider** — Interface for argument autocomplete. Built-in providers handle `bool` and `enum` types automatically. Custom providers implement `GetSuggestions(string partial, List<string> results)`.
 
 ## Quick Start
 
-1. Add a `UIDocument` component to any GameObject in your scene
-2. Attach the `DevConsoleUI` component to the same GameObject
-3. Press **`~`** (BackQuote) to toggle the console
+1. Add a `UIDocument` component to a GameObject (or use **DevConsoleIMGUI** for an IMGUI-based console).
+2. Attach the **DevConsoleUIToolkit** component to the same GameObject.
+3. Press **`~`** (BackQuote) to toggle the console.
 
-The console auto-discovers commands at startup — no manual registration needed.
+The console auto-discovers commands at startup -- no manual registration needed.
 
-## Defining Commands
+## Usage
+
+### Defining Commands
 
 Add `[ConsoleCommand]` to any static method:
 
 ```csharp
 using Rubickanov.DevConsole;
 
-public static class MyCommands
+public static class GameCommands
 {
     [ConsoleCommand("heal", "Restore player health", "Cheats")]
     public static void Heal(int amount = 100)
@@ -33,21 +64,28 @@ public static class MyCommands
         // your logic here
         ConsoleLog.LogSuccess($"Healed for {amount}");
     }
+
+    [ConsoleCommand("set_timescale", "Set time scale", "Debug")]
+    public static string SetTimeScale(float scale)
+    {
+        Time.timeScale = scale;
+        return $"Time scale set to {scale}";
+    }
 }
 ```
 
-### Supported parameter types
+### Supported Parameter Types
 
 `string`, `int`, `float`, `bool`, `enum`, `Vector3` (as `x,y,z`)
 
-### Return values
+### Return Values
 
 - `void` — no output
 - `string` — printed to console as info message
 
-## Autocomplete Providers
+### Autocomplete Providers
 
-Arguments get autocomplete automatically for `bool` and `enum` types. For custom suggestions, use `[AutoComplete]`:
+`bool` and `enum` parameters get autocomplete automatically. For custom suggestions, use `[AutoComplete]`:
 
 ```csharp
 [ConsoleCommand("set_difficulty", "Set game difficulty", "Game")]
@@ -55,17 +93,17 @@ Arguments get autocomplete automatically for `bool` and `enum` types. For custom
 public static void SetDifficulty(string difficulty) { }
 ```
 
-### Built-in providers
+Built-in providers:
 
 | Provider | Usage |
-|---|---|
-| `BoolAutoCompleteProvider` | Auto-applied to `bool` params |
-| `EnumAutoCompleteProvider` | Auto-applied to `enum` params |
-| `StaticListProvider` | Fixed list of string options |
+|----------|-------|
+| **BoolAutoCompleteProvider** | Auto-applied to `bool` params |
+| **EnumAutoCompleteProvider** | Auto-applied to `enum` params |
+| **StaticListProvider** | Fixed list of string options |
 
-### Custom provider
+### Custom Autocomplete Provider
 
-Implement `IAutoCompleteProvider`:
+Implement **IAutoCompleteProvider**:
 
 ```csharp
 public class PlayerNameProvider : IAutoCompleteProvider
@@ -82,7 +120,7 @@ public class PlayerNameProvider : IAutoCompleteProvider
 }
 ```
 
-## Runtime Registration
+### Runtime Registration
 
 Register commands from code without attributes:
 
@@ -90,32 +128,74 @@ Register commands from code without attributes:
 CommandRegistry.Instance.Register("quit", _ => Application.Quit(), "Exit the game", "System");
 ```
 
-## Console API
+The `Register` overload with `Func<string[], string>` handler allows returning a message:
 
 ```csharp
-DevConsoleUI.Instance.Show();
-DevConsoleUI.Instance.Hide();
-DevConsoleUI.Instance.Toggle();
+CommandRegistry.Instance.Register("ping", args =>
+{
+    return $"Pong! Args: {string.Join(", ", args)}";
+}, "Ping test", "Debug");
 ```
+
+### Console API
 
 ```csharp
-ConsoleLog.Log("message");
-ConsoleLog.LogWarning("warning");
-ConsoleLog.LogError("error");
-ConsoleLog.LogSuccess("success");
+// UI Toolkit frontend
+DevConsoleUIToolkit.Instance.Show();
+DevConsoleUIToolkit.Instance.Hide();
+DevConsoleUIToolkit.Instance.Toggle();
+
+// IMGUI frontend
+DevConsoleIMGUI.Instance  // same API pattern
+DevConsoleIMGUI.Toggled   // event Action<bool>
+DevConsoleIMGUI.IsOpen    // static bool
 ```
 
-## Settings
+### Logging
+
+```csharp
+ConsoleLog.Log("Player spawned");
+ConsoleLog.LogWarning("Low health");
+ConsoleLog.LogError("Connection failed");
+ConsoleLog.LogSuccess("Level complete");
+```
+
+Subscribe to log events:
+
+```csharp
+ConsoleLog.OnLogAdded += entry => Debug.Log(entry.Message);
+ConsoleLog.OnCleared += () => Debug.Log("Console cleared");
+```
+
+### Pre-Execute Filter
+
+**CommandRegistry** exposes `PreExecuteFilter` to intercept commands before execution. Return a non-null `ExecutionResult` to override the default handler:
+
+```csharp
+CommandRegistry.Instance.PreExecuteFilter = (cmd, args) =>
+{
+    if (cmd.Category == "Cheats" && !cheatsEnabled)
+        return CommandRegistry.ExecutionResult.Error("Cheats are disabled.");
+    return null;
+};
+```
+
+### Built-in Commands
+
+| Command | Description |
+|---------|-------------|
+| `help` | List all commands, or `help <command>` for details |
+| `clear` | Clear console output |
+
+### Settings
 
 **Project Settings > Dev Console**:
 
 - **Toggle Key** — key to open/close the console (default: BackQuote)
-- **Use Built-in Toggle** — disable to control via `DevConsoleUI.Instance.Toggle()` from your own input system
-- **Console Height** — fraction of screen height (0.1 – 0.9)
+- **Use Built-in Toggle** — disable to control via `DevConsoleUIToolkit.Instance.Toggle()` from your own input system
+- **Console Height** — fraction of screen height (0.1 -- 0.9)
 
-## Stripping Commands from Release Builds
-
-Wrap commands you don't want in release builds:
+### Stripping Commands from Release Builds
 
 ```csharp
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -124,58 +204,36 @@ public static void GodMode() { }
 #endif
 ```
 
-## Built-in Commands
+## Design Decisions
 
-| Command | Description |
-|---|---|
-| `help` | List all commands, or `help <command>` for details |
-| `clear` | Clear console output |
+- **Two UI frontends** — **DevConsoleUIToolkit** (retained-mode, pooled elements) and **DevConsoleIMGUI** (immediate-mode, zero setup). Pick the one that fits your project.
+- **Static ConsoleLog** — decoupled from UI. Commands log via `ConsoleLog`, any frontend subscribes to `OnLogAdded`. Custom UIs can consume the same buffer.
+- **Reflection-based discovery** — scans non-system assemblies for `[ConsoleCommand]` attributes at startup. Skips `System.*`, `Unity.*`, `Mono.*` prefixes for performance.
+- **PlayerPrefs history** — command history persists across sessions via PlayerPrefs. Simple and sufficient for a dev tool.
+- **Singleton pattern** — both frontends use singleton MonoBehaviour with `DontDestroyOnLoad`. Only one console instance per scene.
 
-## Netcode Extension (optional)
-
-For multiplayer projects using **Netcode for GameObjects**, the `DevConsole.Netcode` package adds CS:GO-style command domains and cheat protection. Without it, the console works in singleplayer mode as before.
-
-See [`DevConsole.Netcode/`](../DevConsole.Netcode/) for details.
-
-### Quick overview
-
-- `[CommandDomain(CommandDomain.Server)]` — command runs only on server; clients send it via RPC
-- `[CommandDomain(CommandDomain.Client)]` — command runs only locally, never sent to server
-- `[CheatProtected]` — command requires `sv_cheats 1`
-- Add `NetworkCommandBridge` component to a networked GameObject to activate
-
-```csharp
-[ConsoleCommand("sv_gravity", "Set gravity", "Server")]
-[CommandDomain(CommandDomain.Server)]
-public static string SetGravity(float value)
-{
-    Physics.gravity = new Vector3(0, -value, 0);
-    return $"Gravity set to {value}";
-}
-
-[ConsoleCommand("god", "Toggle god mode", "Cheats")]
-[CommandDomain(CommandDomain.Server)]
-[CheatProtected]
-public static void GodMode() { /* ... */ }
-
-[ConsoleCommand("cl_showfps", "Toggle FPS counter", "Client")]
-[CommandDomain(CommandDomain.Client)]
-public static void ShowFPS() { /* ... */ }
-```
-
-## Package Structure
+## File Structure
 
 ```
-DevConsole/
-├── package.json
-├── README.md
-├── Editor/
-│   └── DevConsoleSettingsProvider.cs
-└── Runtime/
-    ├── Attributes/
-    ├── AutoComplete/
-    ├── Core/
-    ├── Examples/
-    ├── Resources/UI/
-    └── UI/
+com.rubickanov.devconsole/
+├── Runtime/
+│   ├── Attributes/
+│   │   ├── ConsoleCommandAttribute.cs
+│   │   └── AutoCompleteAttribute.cs
+│   ├── AutoComplete/
+│   │   ├── IAutoCompleteProvider.cs
+│   │   └── BuiltInProviders.cs
+│   ├── Core/
+│   │   ├── CommandRegistry.cs
+│   │   ├── RegisteredCommand.cs
+│   │   ├── ConsoleLog.cs
+│   │   ├── CommandHistory.cs
+│   │   └── DevConsoleSettings.cs
+│   └── UI/
+│       ├── DevConsoleUIToolkit.cs
+│       ├── DevConsoleIMGUI.cs
+│       ├── DevConsoleUI.uxml
+│       └── DevConsoleUI.uss
+└── Editor/
+    └── DevConsoleSettingsProvider.cs
 ```

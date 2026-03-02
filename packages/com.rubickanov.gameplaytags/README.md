@@ -1,27 +1,49 @@
 # Gameplay Tags
 
-Hierarchical gameplay tag system for categorization, filtering, and matching. Inspired by Unreal Engine's FGameplayTag/FGameplayTagContainer.
+Hierarchical tag system for categorization, filtering, and matching. Index-based 4-byte struct tags with parent-chain matching and code generation.
 
-## Features
+## Dependencies
 
-- **Hierarchical matching** — `"Damage.Fire.DoT".Matches("Damage")` returns true
-- **4-byte struct** — `GameplayTag` is a lightweight index-based readonly struct
-- **Zero dependencies** — Runtime assembly has no engine references (pure C#)
-- **Inspector support** — dropdown picker, container drawer, database editor
-- **Code generation** — strongly-typed static constants from tag database
+None.
 
 ## Architecture
 
-| Assembly | Description |
-|----------|-------------|
-| `GameplayTags.Runtime` | Pure C# — `GameplayTag`, `GameplayTagRegistry`, `GameplayTagContainer` |
-| `GameplayTags.Unity` | UnityEngine — `GameplayTagAsset`, `SerializedGameplayTag`, `SerializedGameplayTagContainer` |
-| `GameplayTags.Editor` | Editor — property drawers, database inspector, code generator |
+```
+GameplayTagAsset (ScriptableObject database)
+        │
+        │ BuildRegistry()
+        ▼
+GameplayTagRegistry (singleton, owns hierarchy)
+        │
+        │ Get() / Matches()
+        ▼
+GameplayTag (readonly struct, 4 bytes)
+        │
+        │ collected in
+        ▼
+GameplayTagContainer (sorted list, hierarchical queries)
+```
 
-## Setup
+## Assemblies
 
-1. Create a tag database: **Assets > Create > Config > Gameplay Tags**
-2. Add tags in the inspector (e.g. `Damage.Fire.DoT`, `Status.Stun`)
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **GameplayTags.Runtime** | No | Pure C#: GameplayTag, GameplayTagRegistry, GameplayTagContainer |
+| **GameplayTags.Unity** | Yes | GameplayTagAsset, SerializedGameplayTag, SerializedGameplayTagContainer |
+| **GameplayTags.Editor** | Editor | Dropdown picker, database inspector, code generator |
+
+## Core Concepts
+
+**GameplayTag** — Readonly struct identified by an integer index into the registry. Supports hierarchical matching via `Matches()`: `"Damage.Fire.DoT".Matches("Damage")` returns true.
+
+**GameplayTagRegistry** — Singleton that owns the tag hierarchy, name-to-index mapping, and parent-chain walk. Must be installed at startup.
+
+**GameplayTagContainer** — Mutable sorted collection of tags with `HasTag()` (hierarchical) and `HasTagExact()` (exact) queries. O(log n) exact lookups, O(n * depth) hierarchical queries.
+
+## Quick Start
+
+1. Create a tag database: **Assets > Create > Config > Gameplay Tags**.
+2. Add tags in the inspector (e.g. `Damage.Fire.DoT`, `Status.Stun`).
 3. Install the registry at startup:
 
 ```csharp
@@ -33,116 +55,72 @@ void Awake()
 }
 ```
 
-4. Generate constants: **Tools > Generators > Gameplay Tags**
+4. Generate constants: **Tools > Generators > Gameplay Tags**.
 
 ## Usage
 
-### Runtime queries
+### Hierarchical Matching
+
+`Matches()` returns true if the tag equals or descends from the query:
 
 ```csharp
-// Hierarchical matching
-if (damageTag.Matches(GameTags.Damage.Tag))        // any damage
-if (damageTag.Matches(GameTags.Damage.Fire.Tag))    // fire damage specifically
+var fireDoT = GameTags.Damage.Fire.DoT;
 
-// Container — manual construction
-var tags = new GameplayTagContainer();
-tags.AddTag(GameTags.Status.Stun);
-tags.AddTag(GameTags.Damage.Fire.DoT);
+fireDoT.Matches(GameTags.Damage.Tag);       // true — DoT is a kind of Damage
+fireDoT.Matches(GameTags.Damage.Fire.Tag);  // true — DoT is a kind of Fire
+fireDoT.Matches(GameTags.Damage.Ice.Tag);   // false — not Ice
+```
 
-// Container — factory method
+### Container Queries
+
+**GameplayTagContainer** supports hierarchical and exact queries:
+
+```csharp
 var tags = GameplayTagContainer.From(GameTags.Status.Stun, GameTags.Damage.Fire.DoT);
 
 tags.HasTag(GameTags.Damage.Tag);       // true — DoT descends from Damage
 tags.HasTagExact(GameTags.Damage.Tag);  // false — exact Damage not in container
-tags.ToString();                        // "[Damage.Fire.DoT, Status.Stun]"
 ```
 
-### Inspector fields
+`HasTag()` semantics: returns true if any contained tag equals or descends from the query.
+
+| Container | Query | HasTag | HasTagExact |
+|-----------|-------|--------|-------------|
+| `[Damage.Fire.DoT]` | `Damage` | true | false |
+| `[Damage]` | `Damage.Fire` | false | false |
+| `[Damage.Fire]` | `Damage.Fire` | true | true |
+
+### Multi-Tag Queries
 
 ```csharp
-[SerializeField] private SerializedGameplayTag _requiredTag;
+var active = GameplayTagContainer.From(GameTags.Status.Stun, GameTags.Status.Slow);
+var required = GameplayTagContainer.From(GameTags.Status.Stun);
+var blocked = GameplayTagContainer.From(GameTags.Status.Immune.Tag);
+
+active.HasAll(required);  // true — all required tags satisfied
+active.HasAny(blocked);   // false — no blocked tags present
+```
+
+Exact variants: `HasAllExact()`, `HasAnyExact()`.
+
+### Inspector Fields
+
+Use **SerializedGameplayTag** and **SerializedGameplayTagContainer** for Inspector-configurable tags with dropdown pickers:
+
+```csharp
+[SerializeField] private SerializedGameplayTag _damageType;
 [SerializeField] private SerializedGameplayTagContainer _immunities;
 
 void OnEnable()
 {
-    GameplayTag tag = _requiredTag.Tag;
+    GameplayTag tag = _damageType.Tag;
     GameplayTagContainer immune = _immunities.Container;
 }
 ```
 
-## HasTag semantics
+### Code Generation
 
-`container.HasTag(query)` returns true if the container holds **any tag that equals or descends from** the query.
-
-| Container | Query | Result |
-|-----------|-------|--------|
-| `["Damage.Fire.DoT"]` | `Damage` | `true` |
-| `["Damage"]` | `Damage.Fire` | `false` |
-| `["Damage.Fire"]` | `Damage.Fire` | `true` |
-
-## Examples
-
-### Damage type checking
-
-```csharp
-// Tag hierarchy: Damage > Damage.Fire > Damage.Fire.DoT
-// Hierarchical match — DoT is a kind of Fire damage
-var hitType = GameTags.Damage.Fire.DoT;
-hitType.Matches(GameTags.Damage.Tag);       // true — any damage
-hitType.Matches(GameTags.Damage.Fire.Tag);  // true — fire damage
-hitType.Matches(GameTags.Damage.Ice.Tag);   // false — not ice
-```
-
-### Status / immunity checks
-
-```csharp
-var active = new GameplayTagContainer();
-active.AddTag(GameTags.Status.Immune.Stun);
-active.AddTag(GameTags.Status.Slow);
-
-// Hierarchical — Immune.Stun satisfies Immune query
-active.HasTag(GameTags.Status.Immune.Tag);  // true
-// Exact — the container doesn't have bare Immune
-active.HasTagExact(GameTags.Status.Immune.Tag);  // false
-```
-
-### Ability gating with Inspector-configured tags
-
-```csharp
-// Configured in Inspector via dropdown pickers
-[SerializeField] private SerializedGameplayTagContainer _requiredTags;
-[SerializeField] private SerializedGameplayTagContainer _blockedByTags;
-
-public bool CanActivate(GameplayTagContainer activeTags)
-{
-    // All required tags must be present
-    if (!activeTags.HasAll(_requiredTags.Container))
-        return false;
-
-    // None of the blocked tags may be present
-    if (activeTags.HasAny(_blockedByTags.Container))
-        return false;
-
-    return true;
-}
-```
-
-### Weakness / resistance table
-
-```csharp
-var weaknesses = GameplayTagContainer.From(
-    GameTags.Damage.Fire.Tag,
-    GameTags.Damage.Ice.Tag
-);
-
-// Hierarchical — Fire.DoT is a child of Fire, so it matches
-if (weaknesses.HasTag(incomingDamageType))
-    finalDamage *= 1.5f;
-```
-
-## Code generation
-
-Generated constants follow the tag hierarchy as nested static classes:
+Generated constants mirror the tag hierarchy as nested static classes:
 
 ```csharp
 public static class GameTags
@@ -160,6 +138,44 @@ public static class GameTags
 }
 ```
 
-Configure output path, namespace, and class name in **Project Settings > Gameplay Tags Generator**.
+Configure output path, namespace, and class name in **Project Settings > Gameplay Tags Generator**. Auto-regeneration triggers when the tag database asset is modified.
 
-Auto-regeneration triggers when the tag database asset is modified.
+## Examples
+
+### Ability Gating
+
+```csharp
+[SerializeField] private SerializedGameplayTagContainer _requiredTags;
+[SerializeField] private SerializedGameplayTagContainer _blockedByTags;
+
+public bool CanActivate(GameplayTagContainer activeTags)
+{
+    if (!activeTags.HasAll(_requiredTags.Container))
+        return false;
+
+    if (activeTags.HasAny(_blockedByTags.Container))
+        return false;
+
+    return true;
+}
+```
+
+### Weakness Table
+
+```csharp
+var weaknesses = GameplayTagContainer.From(
+    GameTags.Damage.Fire.Tag,
+    GameTags.Damage.Ice.Tag
+);
+
+// Hierarchical — Fire.DoT is a child of Fire, so it matches
+if (weaknesses.HasTag(incomingDamageType))
+    finalDamage *= 1.5f;
+```
+
+## Design Decisions
+
+- **Index-based struct (4 bytes)** — tags are compared by integer index, not string. Zero allocation at runtime after registry installation.
+- **Singleton registry with Install/Uninstall** — tags are meaningless without a hierarchy. The registry must exist before any tag operations. Explicit lifecycle avoids hidden static state issues.
+- **Serialized wrappers store string paths** — `SerializedGameplayTag` persists the dot-separated path, not the index. Indices can change when tags are added/removed; paths are stable.
+- **Runtime assembly has no engine references** — the core tag/registry/container types are pure C#, usable in server builds without Unity dependencies.

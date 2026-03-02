@@ -1,67 +1,132 @@
 # Localization
 
-Localization service with reactive locale tracking, `LocalizedString` caching, and strongly-typed key generation. Wraps Unity Localization.
+Localization service wrapping Unity Localization with reactive locale tracking, `LocalizedString` caching, and strongly-typed key generation.
+
+## Dependencies
+
+- `R3` — reactive properties and observables
+- `UniTask` — async initialization and locale switching
+- `Unity.Localization` — underlying localization backend
+- `ZLogger` — structured logging
 
 ## Architecture
 
 ```
 ILocalizationService
-├── LocalizationService      — Unity Localization impl with R3 reactive + caching
+├── LocalizationService      — Unity Localization + R3 reactive + caching
 └── NullLocalizationService  — no-op for server/headless builds
 ```
 
-## Key Types
-
-| Type | Description |
-|------|-------------|
-| `ILocalizationService` | Interface for locale management with reactive updates |
-| `LocalizationService` | Implementation backed by Unity Localization, caches `LocalizedString` instances |
-| `NullLocalizationService` | No-op implementation for server builds |
-| `LocalizedValue` | Reactive wrapper that auto-updates on locale change |
-| `LocalizationKey` | Strongly-typed `(Table, Key)` struct for type-safe access |
-| `LangLocale` | Locale descriptor with code, English name, and native name |
-
 ## Assemblies
 
-- **Localization.Runtime** — service interface, implementation, data types. Depends on R3, UniTask, Unity.Localization.
-- **Localization.Editor** — code generator and auto-regeneration postprocessor. Editor-only.
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **Localization.Runtime** | Yes | Service interface, implementation, data types |
+| **Localization.Editor** | Editor | Key generator, auto-regeneration postprocessor, Project Settings panel |
 
-## Usage
+## Core Concepts
 
-### Registration
+**LocalizationKey** — readonly struct combining a table name and entry key (e.g., `"UI"`, `"game_title"`). Used by all lookup methods.
+
+**LocalizedValue** — reactive wrapper that auto-updates its string value when the locale changes. Exposes `Value` as a `ReadOnlyReactiveProperty<string>`.
+
+**LangLocale** — locale descriptor with code, English name, and native name (e.g., `"ru"`, `"Russian"`, `"Русский"`).
+
+## Quick Start
+
+1. Set up Unity Localization with String Tables.
+2. Register in your LifetimeScope, wiring persistence via delegates:
 
 ```csharp
-// In LifetimeScope — wire persistence delegates to your storage backend
 builder.Register<LocalizationService>(Lifetime.Singleton)
     .WithParameter<Func<string?>>(
-        () => storage.GetString("locale"))
+        () => storage.GetString("locale", null))
     .WithParameter<Action<string>>(
         code => storage.SetString("locale", code).Forget())
     .As<ILocalizationService>();
 ```
 
-### Reactive binding
+3. Initialize on startup:
 
 ```csharp
-// Create a reactive localized value — auto-updates on locale change
-LocalizedValue title = localization.Localize(L.Ui.GameTitle);
-title.Value.Subscribe(text => label.text = text);
-
-// One-shot read
-string text = localization.GetString(L.Ui.StartButton);
-
-// Change locale
-await localization.SetLocaleAsync("ru");
+await localizationService.InitializeAsync();
 ```
 
-### Key generation
+## Usage
 
-Generated class provides strongly-typed keys from String Tables:
+### One-Shot Read
+
+```csharp
+string text = localization.GetString(L.Ui.StartButton);
+
+// With format arguments
+string msg = localization.GetString(L.Ui.WelcomeMessage, playerName);
+```
+
+### Reactive Binding
+
+```csharp
+LocalizedValue title = localization.Localize(L.Ui.GameTitle);
+
+// Subscribe to updates (auto-fires on locale change)
+title.Value.Subscribe(text => label.text = text);
+
+// Read current value directly
+string current = title.CurrentValue;
+
+// Change key dynamically
+title.SetKey(L.Ui.PauseTitle);
+
+// Dispose when done
+title.Dispose();
+```
+
+### Changing Locale
+
+```csharp
+await localization.SetLocaleAsync("ru");
+
+// Or with a LangLocale struct
+LangLocale locale = availableLocales[selectedIndex];
+await localization.SetLocaleAsync(locale);
+```
+
+### Available Locales
+
+```csharp
+LangLocale[] locales = localization.GetAvailableLocales();
+// locales[0].Code       → "en"
+// locales[0].Name       → "English"
+// locales[0].NativeName → "English"
+```
+
+### Reactive Locale Tracking
+
+```csharp
+// Current locale as reactive property
+localization.CurrentLocale.Subscribe(locale =>
+    Debug.Log($"Locale: {locale.NativeName}"));
+
+// RTL detection
+localization.IsRTL.Subscribe(isRtl =>
+    SetLayoutDirection(isRtl));
+```
+
+### Key Generation
+
+The editor generates a static class with strongly-typed keys from Unity String Table Collections.
 
 ```csharp
 // Auto-generated from String Tables
 L.Ui.GameTitle        // → LocalizationKey("UI", "game_title")
 L.Items.Sword         // → LocalizationKey("Items", "sword")
+L.Dialogs.NpcGreeting // → LocalizationKey("Dialogs", "npc_greeting")
 ```
 
-Configure via **Project Settings / Localization Generator** or run manually via **Tools / Generators / Localization**.
+Configure via **Project Settings > Localization Generator** or run manually via **Tools > Generators > Localization**. Auto-regeneration triggers when String Table assets are modified.
+
+## Design Decisions
+
+- **Persistence via delegates, not IStorageService** — avoids a hard dependency on the storage package. Callers wire `Func<string?>` (load) and `Action<string>` (save) in the DI container.
+- **LocalizedString caching** — `GetOrCreateLocalizedString()` caches Unity `LocalizedString` instances by key, avoiding repeated allocations.
+- **LocalizedValue.SetKey() reuses cache** — uses a resolver delegate from the service, so switching keys on a reactive value still benefits from the cache.

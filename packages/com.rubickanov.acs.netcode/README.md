@@ -1,27 +1,45 @@
-# ACS - Netcode Extension
+# ACS Netcode
 
-Netcode for GameObjects extension for ACS. Provides `EntityNetworkComponent` base class for network-aware components.
+Netcode for GameObjects extension for [ACS](../com.rubickanov.acs/). Provides **EntityNetworkComponent** base class for network-aware entity components.
 
-## Requirements
+## Dependencies
 
-- ACS (`com.rubickanov.acs`)
-- Netcode for GameObjects (`com.unity.netcode.gameobjects`)
+- `com.rubickanov.acs` — base ACS framework
+- `com.unity.netcode.gameobjects` — Netcode for GameObjects
+
+## Quick Start
+
+Inherit from **EntityNetworkComponent** instead of **EntityComponent** for components that need **NetworkBehaviour** capabilities (RPCs, NetworkVariables, ownership checks):
+
+```csharp
+public class NetworkHealthSync : EntityNetworkComponent
+{
+    private HealthAspect _health = default!;
+
+    protected virtual void Awake()
+    {
+        base.Awake();
+        _health = Context.Require<HealthAspect>();
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        // Subscribe to aspects here
+        _health.Current.Changed += OnHealthChanged;
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        // Unsubscribe here
+        _health.Current.Changed -= OnHealthChanged;
+    }
+
+    private void OnHealthChanged(float value) { /* sync logic */ }
+}
+```
 
 ## Usage
 
-Inherit from `EntityNetworkComponent` instead of `EntityComponent` for components that need network authority:
+**EntityNetworkComponent** extends `NetworkBehaviour` and implements `IEntityComponent`. It provides access to `Context` (lazily resolved via `GetComponentInParent<EntityContext>()`) and calls `EntityInjector.Inject` in `Awake()` for DI support.
 
-```csharp
-public class MyNetworkComponent : EntityNetworkComponent
-{
-    protected override void OnNetworkSpawn()
-    {
-        // Subscribe to aspects here
-    }
-
-    protected override void OnNetworkDespawn()
-    {
-        // Unsubscribe here
-    }
-}
-```
+Subscribe in `OnNetworkSpawn()`, unsubscribe in `OnNetworkDespawn()` -- same lifecycle pattern as standard Netcode components but with ACS aspect access.

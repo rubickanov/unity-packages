@@ -1,46 +1,60 @@
 # Behavior Tree
 
-Serializable behavior tree framework for Unity with a visual graph editor. Zero external dependencies.
+Serializable behavior tree framework for Unity. Visual graph editor, blackboard, subtrees, and `[SerializeReference]`-based polymorphic serialization.
+
+## Dependencies
+
+None.
+
+## Architecture
+
+```
+BehaviorTreeAsset (ScriptableObject, serialized graph)
+        │
+        │ CreateInstance()
+        ▼
+    BTNode (cloned runtime tree)
+        │
+        │ Tick(BTContext)
+        ▼
+    BTStatus { Success, Failure, Running }
+```
+
+**BehaviorTreeRunner** owns a runtime tree clone and its **Blackboard**. Call `Tick()` each frame to drive execution.
+
+## Assemblies
+
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **BehaviorTree.Runtime** | Yes | Nodes, blackboard, runner, tree asset |
+| **BehaviorTree.Editor** | Editor | Visual graph editor, node search window, auto-layout |
 
 ## Core Concepts
 
-**BTNode** — Abstract base class for all nodes. Serialized via `[SerializeReference]` for polymorphic storage in a single ScriptableObject.
+**BTNode** — Abstract base class for all nodes. Serialized via `[SerializeReference]`. Override `OnTick(BTContext)` to implement logic. Returns **BTStatus** (Success, Failure, Running).
 
 **Blackboard** — Typed key-value store shared across all nodes during a tick. Nodes communicate through `BlackboardKey<T>` instead of direct references.
 
-**BTContext** — Per-tick struct passed to every node: owner reference, blackboard, delta time, elapsed time, tick counter.
+**BTContext** — Per-tick struct passed to every node: `Owner`, `Blackboard`, `DeltaTime`, `Time`, `Tick`.
 
-**BehaviorTreeAsset** — ScriptableObject that holds the serialized node graph. Call `CreateInstance()` to get a cloned runtime copy.
-
-**BehaviorTreeRunner** — MonoBehaviour that owns a runtime tree instance and its blackboard. Call `Tick()` each frame.
-
-## Package Structure
-
-| Assembly | Description | Dependencies |
-|---|---|---|
-| `BehaviorTree.Runtime` | Core framework (nodes, blackboard, runner) | Unity only |
-| `BehaviorTree.Editor` | Visual graph editor, inspector, search window | BehaviorTree.Runtime |
-
-## Node Types
-
-### Composites
-- **BTSequence** — Ticks children left-to-right. Fails on first failure, succeeds when all succeed.
-- **BTSelector** — Ticks children left-to-right. Succeeds on first success, fails when all fail.
-
-### Decorators
-- **BTInverter** — Flips child result (Success <-> Failure).
-- **BTCooldown** — Blocks child execution until a duration expires after last completion.
-- **BTSubtree** — Runs another `BehaviorTreeAsset` as a nested subtree.
-
-### Leaves
-- **BTLeafAction** — Serializable base class for custom actions. Override `OnExecute(BTContext)`.
-- **BTLeafCondition** — Serializable base class for custom conditions. Override `OnEvaluate(BTContext)`.
-- **BTAction** — Inline action via `Func<BTContext, BTStatus>` delegate (code-only, not serializable).
-- **BTCondition** — Inline condition via `Func<BTContext, bool>` delegate (code-only, not serializable).
+**BehaviorTreeAsset** — ScriptableObject holding the serialized node graph. `CreateInstance()` returns a deep-cloned runtime copy.
 
 ## Quick Start
 
-### Define a Custom Action
+1. Create a tree asset: **Assets > Create > AI > Behavior Tree**.
+2. Open the visual editor (double-click the asset) and build the graph.
+3. Add **BehaviorTreeRunner** to a GameObject and assign the asset.
+4. Tick the runner from your update loop:
+
+```csharp
+_runner.Tick(owner: this, deltaTime: Time.deltaTime, tick: _tick++);
+```
+
+## Usage
+
+### Custom Actions
+
+Subclass **BTLeafAction** and override `OnExecute()`. Mark with `[BTNodeDescription]` to appear in the editor search window:
 
 ```csharp
 [Serializable]
@@ -51,39 +65,139 @@ public class BTFindTarget : BTLeafAction
 
     protected override BTStatus OnExecute(BTContext ctx)
     {
-        // find target logic
+        var owner = (AIController)ctx.Owner!;
+        var target = owner.FindNearest(_detectionRange);
+
+        if (target == null)
+            return BTStatus.Failure;
+
         ctx.Blackboard.Set(AIKeys.Target, target);
         return BTStatus.Success;
     }
 }
 ```
 
-### Define Blackboard Keys
+### Custom Conditions
+
+Subclass **BTLeafCondition** and override `OnEvaluate()`. Returns `true` for Success, `false` for Failure:
+
+```csharp
+[Serializable]
+[BTNodeDescription("Has Target", "Conditions", "Checks if a target exists on the blackboard.")]
+public class BTHasTarget : BTLeafCondition
+{
+    protected override bool OnEvaluate(BTContext ctx)
+    {
+        return ctx.Blackboard.Has(AIKeys.Target);
+    }
+}
+```
+
+### Blackboard Keys
+
+Define keys as static fields. The type parameter ensures type-safe `Set`/`Get`:
 
 ```csharp
 public static class AIKeys
 {
     public static readonly BlackboardKey<Transform> Target = new("Target");
     public static readonly BlackboardKey<Vector3> MoveDestination = new("MoveDestination");
+    public static readonly BlackboardKey<float> AlertLevel = new("AlertLevel");
 }
 ```
 
-### Run the Tree
-
-Add `BehaviorTreeRunner` to a GameObject, assign a `BehaviorTreeAsset`, and tick it:
-
 ```csharp
-_runner.Tick(owner: this, deltaTime: Time.deltaTime, tick: _tick++);
+ctx.Blackboard.Set(AIKeys.Target, enemy);
+var target = ctx.Blackboard.Get(AIKeys.Target);
+
+if (ctx.Blackboard.TryGet(AIKeys.AlertLevel, out var level))
+    /* use level */;
 ```
 
-## Custom Nodes
+### Code-Built Trees
 
-Every custom node must have a `[BTNodeDescription]` attribute to appear in the visual editor's search window:
+For trees assembled in code (not serializable), use **BTAction**, **BTCondition**, and composite constructors directly:
 
 ```csharp
-[BTNodeDescription("Node Name", "Category", "Short description.")]
+var tree = new BTSequence(
+    new BTCondition(ctx => ctx.Blackboard.Has(AIKeys.Target)),
+    new BTAction(ctx =>
+    {
+        var target = ctx.Blackboard.Get(AIKeys.Target);
+        /* chase logic */
+        return BTStatus.Running;
+    })
+);
 ```
 
-## Requirements
+### Initializing the Runner
 
-- Unity 2022.3+
+From an asset (typical):
+
+```csharp
+[SerializeField] private BehaviorTreeRunner _runner = default!;
+
+void Start()
+{
+    _runner.EnsureInitialized();
+}
+```
+
+Directly with a root node:
+
+```csharp
+_runner.Initialize(myRootNode);
+```
+
+### Built-in Node Types
+
+**Composites:**
+
+| Node | Behavior |
+|------|----------|
+| **BTSequence** | Ticks children left-to-right. Fails on first failure, succeeds when all succeed. Resumes from running child. |
+| **BTSelector** | Ticks children left-to-right. Succeeds on first success, fails when all fail. Aborts previous running child on switch. |
+
+**Decorators:**
+
+| Node | Behavior |
+|------|----------|
+| **BTInverter** | Flips child result (Success becomes Failure and vice versa). |
+| **BTCooldown** | Blocks child execution until a configurable duration expires after last completion. |
+| **BTSubtree** | Runs another **BehaviorTreeAsset** as a nested subtree. Clones on first tick. |
+
+## Examples
+
+### Patrol-or-Chase AI
+
+```csharp
+[Serializable]
+[BTNodeDescription("Move To", "Actions", "Moves owner toward blackboard target.")]
+public class BTMoveTo : BTLeafAction
+{
+    [SerializeField] private float _arrivalDistance = 0.5f;
+
+    protected override BTStatus OnExecute(BTContext ctx)
+    {
+        var owner = (AIController)ctx.Owner!;
+
+        if (!ctx.Blackboard.TryGet(AIKeys.MoveDestination, out var destination))
+            return BTStatus.Failure;
+
+        if (Vector3.Distance(owner.Position, destination) < _arrivalDistance)
+            return BTStatus.Success;
+
+        owner.MoveToward(destination, ctx.DeltaTime);
+        return BTStatus.Running;
+    }
+}
+```
+
+The visual editor composes this into a selector: try chase (if target exists), otherwise patrol.
+
+## Design Decisions
+
+- **`[SerializeReference]` over ScriptableObject-per-node** — the entire tree lives in a single asset file. No folder explosion, simpler version control.
+- **BTContext is a struct** — avoids allocation per tick. Passed by value to every node.
+- **Clone on CreateInstance** — runtime trees are independent copies. Multiple agents can share the same asset without state interference.
+- **BTLeafAction/BTLeafCondition split** — conditions return `bool` (cleaner API) while actions return **BTStatus** (supports Running).

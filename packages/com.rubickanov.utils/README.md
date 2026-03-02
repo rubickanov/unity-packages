@@ -1,40 +1,167 @@
 # Utils
 
-Shared utilities: deterministic random, circular buffer, object pooling, description attribute with custom inspector.
+Shared utilities: deterministic random, circular buffer, GameObject pooling, evicting pool, and description attribute.
 
-## Key Types
+## Dependencies
 
-| Type | Description |
-|------|-------------|
-| `DeterministicRandom` | Hash-based (murmur3) random — same output for same inputs on any machine, safe for netcode |
-| `CircularBuffer<T>` | Fixed-capacity ring buffer with index-based access |
-| `ObjectPool<T>` | GameObject pool with prewarm, position/rotation placement, and delayed release |
-| `EvictingPool<T>` | LRU pool that evicts the oldest active item when capacity is reached, with customizable eviction callback |
-| `DescriptionAttribute` | Marks a MonoBehaviour with a text description displayed in the Inspector |
-| `ApplicationExtensions` | `Quit()` helper — stops play mode in Editor, `Application.Quit()` in builds |
+None.
 
-## Usage
+## Assemblies
+
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **Utils.Runtime** | Yes | All utility types |
+| **Utils.Editor** | Editor | DescriptionAttribute inspector rendering |
+
+## Quick Start
+
+No registration needed. All types are used directly.
 
 ```csharp
 // Deterministic random (network-safe)
 float spread = DeterministicRandom.Range(tick, seed, -0.5f, 0.5f);
+
+// GameObject pool
+var pool = new ObjectPool<ParticleSystem>(prefab, prewarm: 8);
+var fx = pool.Get(hitPoint, Quaternion.identity);
+pool.Release(fx, delay: 2f);
+```
+
+## Usage
+
+### Deterministic Random
+
+Hash-based (murmur3 finalizer) random number generation. Same inputs produce the same output on any machine -- safe for network synchronization and replay.
+
+```csharp
+// Float in [0, 1)
+float f = DeterministicRandom.Float01(tick, seed);
+
+// Float in [min, max)
+float spread = DeterministicRandom.Range(tick, seed, -0.5f, 0.5f);
+
+// Int in [min, max)
+int index = DeterministicRandom.Int(tick, seed, 0, enemies.Length);
+
+// Boolean (50/50)
 bool crit = DeterministicRandom.Bool(attackerId, tick);
 
-// Object pool
-var pool = new ObjectPool<ParticleSystem>(prefab, prewarm: 8);
-var fx = pool.Get(position, rotation);
+// Sign (-1f or 1f)
+float dir = DeterministicRandom.Sign(tick, seed);
+
+// Raw hash
+uint hash = DeterministicRandom.Hash(a, b);
+uint hash3 = DeterministicRandom.Hash(a, b, c);
+```
+
+All methods accept 2 or 3 `uint` keys. More keys give more degrees of freedom for independent random streams.
+
+### Circular Buffer
+
+Fixed-capacity ring buffer. Index wraps automatically.
+
+```csharp
+var buffer = new CircularBuffer<SnapshotState>(128);
+
+buffer.Add(snapshot, tick);
+SnapshotState old = buffer.Get(tick - 10);
+buffer.Clear();
+```
+
+### Object Pool
+
+GameObject pool with prewarm, placement, delayed release, callbacks, and statistics. Instances are parented under a `[Pools]` root in the hierarchy.
+
+```csharp
+var pool = new ObjectPool<ParticleSystem>(vfxPrefab, prewarm: 16, maxSize: 64);
+
+// Get without placement
+var fx = pool.Get();
+
+// Get with position and rotation
+var fx = pool.Get(hitPoint, Quaternion.LookRotation(normal));
+
+// Release immediately
+pool.Release(fx);
+
+// Release after delay
 pool.Release(fx, delay: 2f);
 
-// Evicting pool (LRU — oldest item evicted at capacity)
-var pool = new EvictingPool<DecalProjector>(prefab, maxActive: 64,
-    onEvict: (item, release) => { /* fade out, then call release(item) */ });
-var decal = pool.Get(position, rotation);
+// Return all active instances
+pool.ReleaseAll();
+```
 
-// Description attribute (shown in Inspector)
-[Description("Moves the character based on input")]
+Constructor parameters:
+
+```csharp
+var pool = new ObjectPool<MuzzleFlash>(
+    prefab,
+    prewarm: 8,
+    maxSize: 32,
+    onGet: fx => fx.Play(),
+    onRelease: fx => fx.Stop(),
+    parent: weaponRoot       // optional, defaults to global [Pools] root
+);
+```
+
+Statistics: `pool.ActiveCount`, `pool.PooledCount`, `pool.TotalCreated`.
+
+### Evicting Pool
+
+LRU pool that automatically evicts the oldest active item when `maxActive` is reached. Built on top of **ObjectPool**.
+
+```csharp
+// Immediate eviction (oldest item released to pool)
+var pool = new EvictingPool<DecalProjector>(decalPrefab, maxActive: 64);
+var decal = pool.Get(hitPoint, Quaternion.LookRotation(normal));
+```
+
+With a custom eviction callback for fade-out:
+
+```csharp
+var pool = new EvictingPool<DecalProjector>(
+    decalPrefab,
+    maxActive: 64,
+    onEvict: (decal, release) =>
+    {
+        FadeOut(decal, duration: 0.5f, onComplete: () => release(decal));
+    },
+    evictBuffer: 8,   // extra pool slots for items mid-eviction
+    prewarm: 16
+);
+```
+
+### Description Attribute
+
+Attaches a short text description to a MonoBehaviour, rendered in the Inspector by a custom editor.
+
+```csharp
+[Description("Moves the character based on input direction and speed")]
 public class CharacterMovement : MonoBehaviour { }
 ```
 
-## Editor
+### Application Extensions
 
-`ComponentDescriptionEditor` — custom inspector that renders `[Description("...")]` text above the default inspector for any MonoBehaviour.
+```csharp
+// Stops play mode in Editor, calls Application.Quit() in builds
+ApplicationExtensions.Quit();
+```
+
+## File Structure
+
+```
+com.rubickanov.utils/
+├── Runtime/
+│   ├── Attributes/
+│   │   └── DescriptionAttribute.cs
+│   ├── Unity/
+│   │   ├── ApplicationExtensions.cs
+│   │   ├── EvictingPool.cs
+│   │   └── ObjectPool.cs
+│   ├── CircularBuffer.cs
+│   └── DeterministicRandom.cs
+├── Editor/
+│   └── ComponentDescriptionEditor.cs
+└── Tests/
+    └── Editor/
+```
