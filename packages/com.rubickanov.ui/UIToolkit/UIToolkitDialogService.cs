@@ -16,24 +16,24 @@ namespace Rubickanov.UI.UIToolkit
             string confirmText = "Yes", string cancelText = "No")
         {
             var vm = new ConfirmViewModel(title, message, confirmText, cancelText);
-            await _ui.ShowPopup<ConfirmPopup>(vm);
+            await _ui.Show<ConfirmPopup>(vm);
             bool result = await vm.Result;
-            await _ui.HidePopupAsync<ConfirmPopup>();
+            await _ui.HideAsync<ConfirmPopup>();
             return result;
         }
 
         public async UniTask ShowAlert(string title, string message, string buttonText = "OK")
         {
             var vm = new AlertViewModel(title, message, buttonText);
-            await _ui.ShowPopup<AlertPopup>(vm);
+            await _ui.Show<AlertPopup>(vm);
             await vm.Result;
-            await _ui.HidePopupAsync<AlertPopup>();
+            await _ui.HideAsync<AlertPopup>();
         }
 
         public IDisposable ShowModal(string title, string message)
         {
             var vm = new AlertViewModel(title, message, "");
-            _ui.ShowPopup<AlertPopup>(vm).Forget();
+            _ui.Show<AlertPopup>(vm).Forget();
             return new ModalHandle(_ui);
         }
 
@@ -48,7 +48,7 @@ namespace Rubickanov.UI.UIToolkit
             {
                 if (_disposed) return;
                 _disposed = true;
-                _ui.HidePopup<AlertPopup>();
+                _ui.Hide<AlertPopup>();
             }
         }
     }

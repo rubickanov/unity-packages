@@ -5,6 +5,7 @@ Audio service with SFX source pooling, music crossfade, pitch variation, and Aud
 ## Dependencies
 
 - `UniTask` — async crossfade and source lifecycle
+- `com.rubickanov.storage` — volume persistence via `IStorageService`
 
 ## Architecture
 
@@ -12,11 +13,9 @@ Audio service with SFX source pooling, music crossfade, pitch variation, and Aud
 IAudioService
 ├── UnityAudioService    — AudioMixer-based, pooled SFX sources, music crossfade
 └── NullAudioService     — no-op for server/headless builds
-
-IAudioPersistence        — optional volume persistence (load/save)
 ```
 
-**UnityAudioService** takes an **AudioServiceConfig** (ScriptableObject) for mixer groups, pool size, and crossfade duration. If an **IAudioPersistence** is provided, volume levels are persisted and restored automatically.
+**UnityAudioService** takes an **AudioServiceConfig** (ScriptableObject) for mixer groups, pool size, and crossfade duration. If an **IStorageService** is provided, volume levels are persisted and restored automatically.
 
 ## Core Concepts
 
@@ -85,26 +84,17 @@ float master = audioService.MasterVolume;
 
 ### Volume Persistence
 
-Implement **IAudioPersistence** and register it alongside the service. **UnityAudioService** will load volumes on construction and save on every `SetXxxVolume()` call.
+Register an **IStorageService** alongside the audio service. **UnityAudioService** will load volumes on construction and save on every `SetXxxVolume()` call.
 
 ```csharp
-public class StorageAudioPersistence : IAudioPersistence
-{
-    private readonly IStorageService _storage;
-
-    public StorageAudioPersistence(IStorageService storage) => _storage = storage;
-
-    public float Load(string key, float defaultValue) => _storage.GetFloat(key, defaultValue);
-    public void Save(string key, float value) => _storage.SetFloat(key, value).Forget();
-}
-
-// Registration
-builder.Register<StorageAudioPersistence>(Lifetime.Singleton).As<IAudioPersistence>();
+builder.Register<IStorageService, PlayerPrefsStorageService>(Lifetime.Singleton);
+builder.RegisterInstance(audioConfig);
+builder.Register<IAudioService, UnityAudioService>(Lifetime.Singleton);
 ```
 
 ## Design Decisions
 
-- **IAudioPersistence instead of IStorageService dependency** — keeps the audio package independent of the storage package. Callers bridge the two in game code.
+- **Persistence via IStorageService** — if an `IStorageService` is injected, volumes are persisted and restored automatically. Without it, volumes reset each session.
 - **SoundConfig as a struct** — avoids allocations when passed by `in` reference. Wraps `AudioResource` as the future FMOD migration point.
 - **SoundHandle for all play methods** — uniform API. One-shot callers ignore the handle; loop callers keep it.
 - **Pool evicts oldest source at capacity** — no allocation spikes. When all SFX sources are in use, the oldest playing source is stopped and reused.

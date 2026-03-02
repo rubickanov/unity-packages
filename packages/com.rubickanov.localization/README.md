@@ -8,6 +8,7 @@ Localization service wrapping Unity Localization with reactive locale tracking, 
 - `UniTask` — async initialization and locale switching
 - `Unity.Localization` — underlying localization backend
 - `ZLogger` — structured logging
+- `com.rubickanov.storage` — locale persistence via `IStorageService`
 
 ## Architecture
 
@@ -35,15 +36,11 @@ ILocalizationService
 ## Quick Start
 
 1. Set up Unity Localization with String Tables.
-2. Register in your LifetimeScope, wiring persistence via delegates:
+2. Register in your LifetimeScope:
 
 ```csharp
-builder.Register<LocalizationService>(Lifetime.Singleton)
-    .WithParameter<Func<string?>>(
-        () => storage.GetString("locale", null))
-    .WithParameter<Action<string>>(
-        code => storage.SetString("locale", code).Forget())
-    .As<ILocalizationService>();
+builder.Register<IStorageService, PlayerPrefsStorageService>(Lifetime.Singleton);
+builder.Register<ILocalizationService, LocalizationService>(Lifetime.Singleton);
 ```
 
 3. Initialize on startup:
@@ -127,6 +124,6 @@ Configure via **Project Settings > Localization Generator** or run manually via 
 
 ## Design Decisions
 
-- **Persistence via delegates, not IStorageService** — avoids a hard dependency on the storage package. Callers wire `Func<string?>` (load) and `Action<string>` (save) in the DI container.
+- **Persistence via IStorageService** — if an `IStorageService` is injected, the selected locale is persisted and restored automatically. Without it, locale resets each session.
 - **LocalizedString caching** — `GetOrCreateLocalizedString()` caches Unity `LocalizedString` instances by key, avoiding repeated allocations.
 - **LocalizedValue.SetKey() reuses cache** — uses a resolver delegate from the service, so switching keys on a reactive value still benefits from the cache.

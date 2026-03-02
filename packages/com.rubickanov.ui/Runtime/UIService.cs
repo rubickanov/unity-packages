@@ -9,6 +9,7 @@ namespace Rubickanov.UI
         private readonly IViewFactory _factory;
         private Action<bool>? _onUIVisibilityChanged;
         private readonly Dictionary<Type, IView> _views = new();
+        private readonly Dictionary<Type, UILayer> _viewLayers = new();
         private IView? _activeScreen;
         private readonly List<IView> _popupStack = new();
 
@@ -22,7 +23,9 @@ namespace Rubickanov.UI
         public async UniTask Register<T>(UILayer layer) where T : class, IView
         {
             var view = await _factory.Create<T>(layer);
-            _views[typeof(T)] = view;
+            var type = typeof(T);
+            _views[type] = view;
+            _viewLayers[type] = layer;
         }
 
         public void Unregister<T>() where T : IView
@@ -42,77 +45,51 @@ namespace Rubickanov.UI
             _popupStack.Remove(view);
             view.Destroy();
             _views.Remove(type);
+            _viewLayers.Remove(type);
         }
 
         public T Get<T>() where T : IView => (T)_views[typeof(T)];
 
-        public async UniTask ShowScreen<T>(ViewModelBase viewModel) where T : IView
+        public async UniTask Show<T>(ViewModelBase viewModel) where T : IView
         {
-            _activeScreen?.Hide();
+            var type = typeof(T);
             var view = Get<T>();
-            await view.Bind(viewModel);
-            await view.ShowAsync();
-            _activeScreen = view;
+            var layer = _viewLayers[type];
+
+            if (layer == UILayer.Screen)
+            {
+                _activeScreen?.Hide();
+                await view.Bind(viewModel);
+                await view.ShowAsync();
+                _activeScreen = view;
+            }
+            else
+            {
+                await view.Bind(viewModel);
+                await view.ShowAsync();
+                _popupStack.Add(view);
+            }
+
             _onUIVisibilityChanged?.Invoke(true);
         }
 
-        public void HideScreen<T>() where T : IView
+        public void Hide<T>() where T : IView
         {
-            if (!_views.TryGetValue(typeof(T), out var view) || _activeScreen != view)
+            if (!_views.TryGetValue(typeof(T), out var view))
             {
                 return;
             }
 
-            _activeScreen.Hide();
-            _activeScreen = null;
-
-            if (_popupStack.Count == 0)
+            if (_activeScreen == view)
             {
-                _onUIVisibilityChanged?.Invoke(false);
+                _activeScreen.Hide();
+                _activeScreen = null;
             }
-        }
-
-        public async UniTask HideScreenAsync<T>(float duration = 0.3f) where T : IView
-        {
-            if (!_views.TryGetValue(typeof(T), out var view) || _activeScreen != view)
+            else
             {
-                return;
+                view.Hide();
+                _popupStack.Remove(view);
             }
-
-            await _activeScreen.HideAsync(duration);
-            _activeScreen = null;
-
-            if (_popupStack.Count == 0)
-            {
-                _onUIVisibilityChanged?.Invoke(false);
-            }
-        }
-
-        public void HideAllScreens()
-        {
-            _activeScreen?.Hide();
-            _activeScreen = null;
-
-            if (_popupStack.Count == 0)
-            {
-                _onUIVisibilityChanged?.Invoke(false);
-            }
-        }
-
-        public async UniTask ShowPopup<T>(ViewModelBase viewModel) where T : IView
-        {
-            var popup = Get<T>();
-            await popup.Bind(viewModel);
-            await popup.ShowAsync();
-            _popupStack.Add(popup);
-            _onUIVisibilityChanged?.Invoke(true);
-        }
-
-        public void HidePopup<T>() where T : IView
-        {
-            var popup = Get<T>();
-            popup.Hide();
-            _popupStack.Remove(popup);
 
             if (_popupStack.Count == 0 && _activeScreen == null)
             {
@@ -120,11 +97,23 @@ namespace Rubickanov.UI
             }
         }
 
-        public async UniTask HidePopupAsync<T>(float duration = 0.3f) where T : IView
+        public async UniTask HideAsync<T>(float duration = 0.3f) where T : IView
         {
-            var popup = Get<T>();
-            await popup.HideAsync(duration);
-            _popupStack.Remove(popup);
+            if (!_views.TryGetValue(typeof(T), out var view))
+            {
+                return;
+            }
+
+            if (_activeScreen == view)
+            {
+                await _activeScreen.HideAsync(duration);
+                _activeScreen = null;
+            }
+            else
+            {
+                await view.HideAsync(duration);
+                _popupStack.Remove(view);
+            }
 
             if (_popupStack.Count == 0 && _activeScreen == null)
             {
@@ -132,7 +121,7 @@ namespace Rubickanov.UI
             }
         }
 
-        public void HideTopPopup()
+        public void HideTop()
         {
             if (_popupStack.Count == 0)
             {
@@ -149,7 +138,7 @@ namespace Rubickanov.UI
             }
         }
 
-        public async UniTask HideTopPopupAsync(float duration = 0.3f)
+        public async UniTask HideTopAsync(float duration = 0.3f)
         {
             if (_popupStack.Count == 0)
             {
@@ -166,6 +155,20 @@ namespace Rubickanov.UI
             }
         }
 
+        public void HideAll()
+        {
+            _activeScreen?.Hide();
+            _activeScreen = null;
+
+            foreach (var popup in _popupStack)
+            {
+                popup.Hide();
+            }
+
+            _popupStack.Clear();
+            _onUIVisibilityChanged?.Invoke(false);
+        }
+
         public void Dispose()
         {
             foreach (var view in _views.Values)
@@ -174,6 +177,7 @@ namespace Rubickanov.UI
             }
 
             _views.Clear();
+            _viewLayers.Clear();
             _popupStack.Clear();
             _activeScreen = null;
         }

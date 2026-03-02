@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using R3;
+using Rubickanov.Storage;
 using UnityEngine.Localization;
 using UnityEngine.Localization.Settings;
 using ZLogger;
@@ -20,9 +21,10 @@ namespace Rubickanov.Localization
             "ar", "he", "fa", "ur", "yi", "ps", "sd", "ug"
         };
 
+        private const string StorageKey = "locale";
+
         private readonly ILogger<LocalizationService> _logger;
-        private readonly Func<string?> _loadLocale;
-        private readonly Action<string> _saveLocale;
+        private readonly IStorageService? _storage;
         private readonly Dictionary<LocalizationKey, LocalizedString> _cache = new();
         private readonly ReactiveProperty<LangLocale> _currentLocale;
         private readonly ReactiveProperty<bool> _isRtl;
@@ -33,20 +35,12 @@ namespace Rubickanov.Localization
         public ReadOnlyReactiveProperty<bool> IsRTL => _isRtl;
         public Observable<Locale> OnLocaleChanged => _onLocaleChanged;
 
-        /// <summary>
-        /// Creates a new localization service.
-        /// </summary>
-        /// <param name="loggerFactory">Logger factory for diagnostic output.</param>
-        /// <param name="loadLocale">Delegate that returns the saved locale code, or null if none.</param>
-        /// <param name="saveLocale">Delegate that persists the selected locale code.</param>
         public LocalizationService(
             ILoggerFactory loggerFactory,
-            Func<string?> loadLocale,
-            Action<string> saveLocale)
+            IStorageService? storage = null)
         {
             _logger = loggerFactory.CreateLogger<LocalizationService>();
-            _loadLocale = loadLocale;
-            _saveLocale = saveLocale;
+            _storage = storage;
 
             _currentLocale = new ReactiveProperty<LangLocale>(LangLocale.Empty);
             _isRtl = new ReactiveProperty<bool>(false);
@@ -64,7 +58,9 @@ namespace Rubickanov.Localization
 
         private void RestoreSavedLocale()
         {
-            var savedLocaleCode = _loadLocale();
+            var savedLocaleCode = _storage?.HasKey(StorageKey) == true
+                ? _storage.GetString(StorageKey)
+                : null;
 
             if (string.IsNullOrEmpty(savedLocaleCode))
             {
@@ -214,7 +210,7 @@ namespace Rubickanov.Localization
             _isRtl.Value = isRtl;
             _onLocaleChanged.OnNext(locale);
 
-            _saveLocale(code);
+            _storage?.SetString(StorageKey, code).Forget();
         }
 
         public void Dispose()
