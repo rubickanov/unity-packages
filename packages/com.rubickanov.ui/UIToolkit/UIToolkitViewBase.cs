@@ -18,7 +18,7 @@ namespace Rubickanov.UI.UIToolkit
         private IAnimationTarget? _animationTarget;
         private IAnimationTarget AnimationTarget => _animationTarget ??= new UIToolkitAnimationTarget(Root);
 
-        async UniTask IView.Bind(ViewModelBase viewModel)
+        public async UniTask Bind(ViewModelBase viewModel)
         {
             await OnBind(viewModel);
         }
