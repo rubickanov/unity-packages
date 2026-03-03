@@ -1,0 +1,17 @@
+{
+    "name": "StateMachine.Async",
+    "rootNamespace": "Rubickanov.StateMachine",
+    "references": [
+        "StateMachine.Runtime",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
