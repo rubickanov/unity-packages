@@ -5,32 +5,37 @@ using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
 
+namespace Rubickanov.BehaviorTree.Editor;
+
 public class BehaviorTreeEditorWindow : EditorWindow
 {
+    private const string WindowTitle = "Behavior Tree";
+
     private BehaviorTreeGraphView _graphView = default!;
     private BehaviorTreeInspectorView _inspectorView = default!;
     private BehaviorTreeSerializer? _serializer;
     private ObjectField _assetField = default!;
     private BehaviorTreeAsset? _asset;
+    private bool _isDirty;
 
     [MenuItem("Window/AI/Behavior Tree")]
     public static void ShowWindow()
     {
         var window = GetWindow<BehaviorTreeEditorWindow>();
-        window.titleContent = new GUIContent("Behavior Tree");
+        window.titleContent = new GUIContent(WindowTitle);
     }
 
     public static void OpenAsset(BehaviorTreeAsset asset)
     {
         var window = GetWindow<BehaviorTreeEditorWindow>();
-        window.titleContent = new GUIContent("Behavior Tree");
+        window.titleContent = new GUIContent(WindowTitle);
         window.LoadAsset(asset);
     }
 
     [OnOpenAsset]
     public static bool OnOpenAsset(int instanceID, int line)
     {
-        var asset = EditorUtility.EntityIdToObject(instanceID) as BehaviorTreeAsset;
+        var asset = EditorUtility.InstanceIDToObject(instanceID) as BehaviorTreeAsset;
         if (asset == null) return false;
         OpenAsset(asset);
         return true;
@@ -46,6 +51,7 @@ public class BehaviorTreeEditorWindow : EditorWindow
         _graphView = new BehaviorTreeGraphView();
         _graphView.style.flexGrow = 1;
         _graphView.OnNodeSelected += OnNodeSelectionChanged;
+        _graphView.OnGraphModified += MarkDirty;
 
         var graphContainer = rootVisualElement.Q<VisualElement>("graph-container");
         if (graphContainer != null)
@@ -61,6 +67,7 @@ public class BehaviorTreeEditorWindow : EditorWindow
         // Inspector view
         var inspectorScroll = rootVisualElement.Q<ScrollView>("inspector-scroll");
         _inspectorView = new BehaviorTreeInspectorView();
+        _inspectorView.OnPropertyChanged += OnInspectorPropertyChanged;
         inspectorScroll?.Add(_inspectorView);
 
         // Asset field
@@ -104,30 +111,47 @@ public class BehaviorTreeEditorWindow : EditorWindow
         // Undo support
         Undo.undoRedoPerformed += OnUndoRedo;
 
+        // Dirty indicator — clear on save
+        EditorApplication.projectChanged += ClearDirty;
+
         // Restore selection
         if (_asset != null)
             LoadAsset(_asset);
     }
 
+    private const string UxmlGuid = "e5d66d0d4fcb0a953849948ae3a0274e";
+
     private static VisualTreeAsset? LoadUxml()
     {
-        var guids = AssetDatabase.FindAssets("BehaviorTreeEditorWindow t:VisualTreeAsset");
-        foreach (var guid in guids)
-        {
-            var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (path.EndsWith("BehaviorTreeEditorWindow.uxml"))
-                return AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(path);
-        }
-        return null;
+        var path = AssetDatabase.GUIDToAssetPath(UxmlGuid);
+        if (string.IsNullOrEmpty(path)) return null;
+        return AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(path);
     }
 
     private void OnDisable()
     {
         Undo.undoRedoPerformed -= OnUndoRedo;
+        EditorApplication.projectChanged -= ClearDirty;
+    }
+
+    private void MarkDirty()
+    {
+        if (_isDirty) return;
+        _isDirty = true;
+        titleContent = new GUIContent(WindowTitle + " *");
+    }
+
+    private void ClearDirty()
+    {
+        if (!_isDirty) return;
+        _isDirty = false;
+        titleContent = new GUIContent(WindowTitle);
     }
 
     private void OnSelectionChange()
     {
+        // Only auto-load from project selection if no asset is currently loaded
+        if (_asset != null) return;
         var asset = Selection.activeObject as BehaviorTreeAsset;
         if (asset != null)
             LoadAsset(asset);
@@ -167,6 +191,31 @@ public class BehaviorTreeEditorWindow : EditorWindow
         _inspectorView?.UpdateSelection(_serializer, nodeView.Guid);
     }
 
+    private void OnInspectorPropertyChanged(string guid)
+    {
+        if (_serializer == null || _graphView == null) return;
+
+        // Invalidate caches since a property changed
+        _serializer.RebuildGuidCache();
+
+        // Update the affected node view title
+        var nodeView = _graphView.FindNodeView(guid);
+        if (nodeView == null) return;
+
+        var allNodes = _serializer.GetAllNodes();
+        foreach (var nodeInfo in allNodes)
+        {
+            if (nodeInfo.Guid == guid)
+            {
+                nodeView.UpdateTitle(nodeInfo.DisplayName, nodeInfo.Description);
+                nodeView.ValidateNode(_serializer);
+                break;
+            }
+        }
+
+        MarkDirty();
+    }
+
     private void OnUndoRedo()
     {
         if (_asset != null)
@@ -174,6 +223,8 @@ public class BehaviorTreeEditorWindow : EditorWindow
     }
 
     private BehaviorTreeRunner? _cachedRunner;
+    private double _lastUpdateTime;
+    private const double UpdateThrottleSeconds = 0.1;
 
     private void Update()
     {
@@ -183,6 +234,11 @@ public class BehaviorTreeEditorWindow : EditorWindow
             return;
         }
         if (_serializer == null || _asset == null) return;
+
+        // Throttle runtime state updates to ~10 FPS
+        var now = EditorApplication.timeSinceStartup;
+        if (now - _lastUpdateTime < UpdateThrottleSeconds) return;
+        _lastUpdateTime = now;
 
         // Re-lookup only if cache is stale
         if (_cachedRunner == null || _cachedRunner.Asset != _asset)

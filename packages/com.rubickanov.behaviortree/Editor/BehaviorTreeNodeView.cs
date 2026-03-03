@@ -3,6 +3,8 @@ using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.UIElements;
 
+namespace Rubickanov.BehaviorTree.Editor;
+
 public class BehaviorTreeNodeView : UnityEditor.Experimental.GraphView.Node
 {
     public string Guid { get; }
@@ -11,6 +13,7 @@ public class BehaviorTreeNodeView : UnityEditor.Experimental.GraphView.Node
 
     private readonly BehaviorTreeSerializer _serializer;
     private readonly BehaviorTreeGraphView _graphView;
+    private Label? _descriptionLabel;
 
     public BehaviorTreeNodeView(
         BehaviorTreeSerializer.NodeInfo info,
@@ -55,9 +58,9 @@ public class BehaviorTreeNodeView : UnityEditor.Experimental.GraphView.Node
         // Description label
         if (!string.IsNullOrEmpty(info.Description))
         {
-            var descLabel = new Label(info.Description);
-            descLabel.AddToClassList("node-description");
-            mainContainer.Insert(1, descLabel);
+            _descriptionLabel = new Label(info.Description);
+            _descriptionLabel.AddToClassList("node-description");
+            mainContainer.Insert(1, _descriptionLabel);
         }
 
         // Collapse default #top — we don't use inputContainer/outputContainer,
@@ -144,6 +147,13 @@ public class BehaviorTreeNodeView : UnityEditor.Experimental.GraphView.Node
         RemoveFromClassList("bt-state-running");
         RemoveFromClassList("bt-state-success");
         RemoveFromClassList("bt-state-failure");
+    }
+
+    public void UpdateTitle(string displayName, string description)
+    {
+        title = displayName;
+        if (_descriptionLabel != null)
+            _descriptionLabel.text = description;
     }
 
     public void UpdatePortConnectedState()

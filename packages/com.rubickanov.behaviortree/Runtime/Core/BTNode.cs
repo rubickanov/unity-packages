@@ -39,6 +39,22 @@ namespace Rubickanov.BehaviorTree.Runtime
         }
 
         /// <summary>
+        /// Creates a shallow copy with a new GUID and no children. Edges are handled separately by the editor.
+        /// </summary>
+        internal BTNode ShallowClone()
+        {
+            var clone = (BTNode)MemberwiseClone();
+            clone._guid = System.Guid.NewGuid().ToString();
+
+            if (clone is BTComposite composite)
+                composite.SetChildren(Array.Empty<BTNode>());
+            else if (clone is BTDecorator decorator)
+                decorator.SetChild(null);
+
+            return clone;
+        }
+
+        /// <summary>
         /// Creates a deep copy of this node with a new GUID.
         /// </summary>
         public virtual BTNode Clone()

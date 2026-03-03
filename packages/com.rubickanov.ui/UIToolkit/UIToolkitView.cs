@@ -39,6 +39,7 @@ namespace Rubickanov.UI.UIToolkit
         private void UnbindAll()
         {
             _disposables.Dispose();
+            _disposables = new DisposableBag();
             foreach (var unbind in _unbindActions) unbind();
             _unbindActions.Clear();
         }

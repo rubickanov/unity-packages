@@ -5,6 +5,8 @@ using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.UIElements;
 
+namespace Rubickanov.BehaviorTree.Editor;
+
 public class BehaviorTreeNodePort : Port
 {
     private class EdgeConnectorListener : IEdgeConnectorListener
@@ -26,15 +28,15 @@ public class BehaviorTreeNodePort : Port
 
         public void OnDrop(GraphView graphView, Edge edge)
         {
-            // Disconnect existing edges on single-capacity ports
-            var edgesToDelete = new List<GraphElement>();
+            // Collect existing edges on single-capacity ports to replace
+            var edgesToReplace = new List<Edge>();
 
             if (edge.input?.capacity == Capacity.Single)
             {
                 foreach (var conn in edge.input.connections)
                 {
                     if (conn != edge)
-                        edgesToDelete.Add(conn);
+                        edgesToReplace.Add(conn);
                 }
             }
 
@@ -43,12 +45,14 @@ public class BehaviorTreeNodePort : Port
                 foreach (var conn in edge.output.connections)
                 {
                     if (conn != edge)
-                        edgesToDelete.Add(conn);
+                        edgesToReplace.Add(conn);
                 }
             }
 
-            if (edgesToDelete.Count > 0)
-                graphView.DeleteElements(edgesToDelete);
+            // Remove replaced edges via dedicated method — serializes removal + visual cleanup
+            // without triggering OnGraphViewChanged race condition
+            if (edgesToReplace.Count > 0)
+                _graphView.RemoveEdgesForDrop(edgesToReplace);
 
             // Add the new edge visually
             graphView.AddElement(edge);

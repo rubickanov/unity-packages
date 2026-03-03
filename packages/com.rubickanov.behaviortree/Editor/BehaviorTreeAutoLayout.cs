@@ -2,10 +2,12 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
+namespace Rubickanov.BehaviorTree.Editor;
+
 public static class BehaviorTreeAutoLayout
 {
     private const float NodeWidth = 220f;
-    private const float NodeHeight = 80f;
+    private const float NodeHeight = 100f;
     private const float HorizontalSpacing = 30f;
     private const float VerticalSpacing = 100f;
 

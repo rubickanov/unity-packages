@@ -5,6 +5,8 @@ using Rubickanov.BehaviorTree.Runtime;
 using UnityEditor;
 using UnityEngine;
 
+namespace Rubickanov.BehaviorTree.Editor;
+
 public class BehaviorTreeSerializer
 {
     public SerializedObject SerializedObject { get; }
@@ -12,17 +14,32 @@ public class BehaviorTreeSerializer
     public SerializedProperty OrphansProperty { get; }
 
     private readonly Dictionary<string, string> _guidToPropertyPath = new();
+    private bool _cacheDirty = true;
+    private List<NodeInfo>? _cachedNodes;
+    private List<(string parentGuid, string childGuid)>? _cachedPairs;
+    private Dictionary<string, string>? _cachedChildToParent;
 
     public BehaviorTreeSerializer(SerializedObject serializedObject)
     {
         SerializedObject = serializedObject;
         RootProperty = serializedObject.FindProperty("_root");
         OrphansProperty = serializedObject.FindProperty("_orphans");
-        RebuildGuidCache();
+        EnsureCaches();
     }
 
-    public void RebuildGuidCache()
+    private void InvalidateCaches()
     {
+        _cacheDirty = true;
+        _cachedNodes = null;
+        _cachedPairs = null;
+        _cachedChildToParent = null;
+    }
+
+    private void EnsureCaches()
+    {
+        if (!_cacheDirty) return;
+        _cacheDirty = false;
+
         _guidToPropertyPath.Clear();
 
         if (RootProperty.managedReferenceValue != null)
@@ -35,6 +52,8 @@ public class BehaviorTreeSerializer
                 CacheNodeRecursive(orphan);
         }
     }
+
+    public void RebuildGuidCache() => InvalidateCaches();
 
     private void CacheNodeRecursive(SerializedProperty nodeProp)
     {
@@ -65,6 +84,7 @@ public class BehaviorTreeSerializer
 
     public SerializedProperty? FindNodeProperty(string guid)
     {
+        EnsureCaches();
         if (_guidToPropertyPath.TryGetValue(guid, out var path))
             return SerializedObject.FindProperty(path);
         return null;
@@ -79,19 +99,22 @@ public class BehaviorTreeSerializer
 
     public List<NodeInfo> GetAllNodes()
     {
-        var result = new List<NodeInfo>();
+        EnsureCaches();
+        if (_cachedNodes != null) return _cachedNodes;
+
+        _cachedNodes = new List<NodeInfo>();
 
         if (RootProperty.managedReferenceValue != null)
-            CollectNodesRecursive(RootProperty, false, result);
+            CollectNodesRecursive(RootProperty, false, _cachedNodes);
 
         for (int i = 0; i < OrphansProperty.arraySize; i++)
         {
             var orphan = OrphansProperty.GetArrayElementAtIndex(i);
             if (orphan.managedReferenceValue != null)
-                CollectNodesRecursive(orphan, true, result);
+                CollectNodesRecursive(orphan, true, _cachedNodes);
         }
 
-        return result;
+        return _cachedNodes;
     }
 
     private static readonly Dictionary<Type, BTNodeDescriptionAttribute?> _descriptionCache = new();
@@ -165,19 +188,22 @@ public class BehaviorTreeSerializer
 
     public List<(string parentGuid, string childGuid)> GetParentChildPairs()
     {
-        var result = new List<(string, string)>();
+        EnsureCaches();
+        if (_cachedPairs != null) return _cachedPairs;
+
+        _cachedPairs = new List<(string, string)>();
 
         if (RootProperty.managedReferenceValue != null)
-            CollectPairsRecursive(RootProperty, result);
+            CollectPairsRecursive(RootProperty, _cachedPairs);
 
         for (int i = 0; i < OrphansProperty.arraySize; i++)
         {
             var orphan = OrphansProperty.GetArrayElementAtIndex(i);
             if (orphan.managedReferenceValue != null)
-                CollectPairsRecursive(orphan, result);
+                CollectPairsRecursive(orphan, _cachedPairs);
         }
 
-        return result;
+        return _cachedPairs;
     }
 
     private static void CollectPairsRecursive(SerializedProperty nodeProp, List<(string, string)> result)
@@ -217,6 +243,7 @@ public class BehaviorTreeSerializer
 
     public List<string> GetChildGuids(string guid)
     {
+        EnsureCaches();
         var result = new List<string>();
         var nodeProp = FindNodeProperty(guid);
         if (nodeProp == null) return result;
@@ -366,12 +393,15 @@ public class BehaviorTreeSerializer
 
     private string? FindParentGuid(string childGuid)
     {
-        var pairs = GetParentChildPairs();
-        foreach (var (parentGuid, cGuid) in pairs)
+        if (_cachedChildToParent == null)
         {
-            if (cGuid == childGuid) return parentGuid;
+            var pairs = GetParentChildPairs();
+            _cachedChildToParent = new Dictionary<string, string>(pairs.Count);
+            foreach (var (parentGuid, cGuid) in pairs)
+                _cachedChildToParent[cGuid] = parentGuid;
         }
-        return null;
+
+        return _cachedChildToParent.TryGetValue(childGuid, out var parent) ? parent : null;
     }
 
     public void AddChild(string parentGuid, string childGuid)
@@ -554,6 +584,30 @@ public class BehaviorTreeSerializer
         return nodes.Count > 1 && nodes.All(n => n.Position == Vector2.zero);
     }
 
+    public bool WouldCreateCycle(string parentGuid, string childGuid)
+    {
+        if (parentGuid == childGuid) return true;
+
+        // DFS from parentGuid upward through the tree — if we reach childGuid, adding
+        // childGuid→parentGuid edge would form a cycle. Equivalently, check if parentGuid
+        // is reachable from childGuid via existing edges.
+        var visited = new HashSet<string>();
+        var stack = new Stack<string>();
+        stack.Push(childGuid);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            if (current == parentGuid) return true;
+            if (!visited.Add(current)) continue;
+
+            foreach (var child in GetChildGuids(current))
+                stack.Push(child);
+        }
+
+        return false;
+    }
+
     public BehaviorTreeAsset Asset => (BehaviorTreeAsset)SerializedObject.targetObject;
 
     public static bool HasSubtreeCycle(BehaviorTreeAsset currentAsset, BehaviorTreeAsset? referencedAsset)
@@ -570,14 +624,6 @@ public class BehaviorTreeSerializer
         return CheckNodeForCycles(asset.Root, visited);
     }
 
-    private static readonly System.Reflection.FieldInfo? _compositeChildrenField =
-        typeof(BTComposite).GetField("Children",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-    private static readonly System.Reflection.FieldInfo? _decoratorChildField =
-        typeof(BTDecorator).GetField("Child",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     private static bool CheckNodeForCycles(BTNode node, HashSet<BehaviorTreeAsset> visited)
     {
         if (node is BTSubtree subtree && subtree.SubtreeAsset != null)
@@ -586,24 +632,19 @@ public class BehaviorTreeSerializer
                 return true;
         }
 
-        if (node is BTComposite)
+        if (node is BTComposite composite)
         {
-            if (_compositeChildrenField?.GetValue(node) is BTNode[] children)
+            foreach (var child in composite.GetChildren())
             {
-                foreach (var child in children)
-                {
-                    if (child != null && CheckNodeForCycles(child, visited))
-                        return true;
-                }
-            }
-        }
-        else if (node is BTDecorator)
-        {
-            if (_decoratorChildField?.GetValue(node) is BTNode child)
-            {
-                if (CheckNodeForCycles(child, visited))
+                if (child != null && CheckNodeForCycles(child, visited))
                     return true;
             }
+        }
+        else if (node is BTDecorator decorator)
+        {
+            var child = decorator.GetChild();
+            if (child != null && CheckNodeForCycles(child, visited))
+                return true;
         }
 
         return false;

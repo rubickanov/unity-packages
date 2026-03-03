@@ -24,6 +24,9 @@ namespace Rubickanov.BehaviorTree.Runtime
             Child?.Abort();
         }
 
+        internal BTNode? GetChild() => Child;
+        internal void SetChild(BTNode? child) => Child = child;
+
         public override BTNode Clone()
         {
             var clone = (BTDecorator)base.Clone();

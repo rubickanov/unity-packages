@@ -6,8 +6,12 @@ using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
 
+namespace Rubickanov.BehaviorTree.Editor;
+
 public class BehaviorTreeInspectorView : VisualElement
 {
+    public Action<string>? OnPropertyChanged;
+
     public void UpdateSelection(BehaviorTreeSerializer serializer, string guid)
     {
         Clear();
@@ -77,27 +81,33 @@ public class BehaviorTreeInspectorView : VisualElement
             field.style.paddingRight = 4;
             field.style.paddingTop = 2;
             field.Bind(serializer.SerializedObject);
+            field.RegisterValueChangeCallback(_ => OnPropertyChanged?.Invoke(guid));
             Add(field);
         }
         while (iterator.NextVisible(false));
     }
 
-    private static Dictionary<Type, MonoScript>? s_scriptCache;
+    private static readonly Dictionary<Type, MonoScript?> s_scriptCache = new();
 
     private static MonoScript? FindScript(Type type)
     {
-        if (s_scriptCache == null)
+        if (s_scriptCache.TryGetValue(type, out var cached))
+            return cached;
+
+        MonoScript? result = null;
+        var guids = AssetDatabase.FindAssets($"{type.Name} t:MonoScript");
+        foreach (var guid in guids)
         {
-            s_scriptCache = new Dictionary<Type, MonoScript>();
-            foreach (var script in MonoImporter.GetAllRuntimeMonoScripts())
+            var path = AssetDatabase.GUIDToAssetPath(guid);
+            var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
+            if (script != null && script.GetClass() == type)
             {
-                var scriptClass = script.GetClass();
-                if (scriptClass != null)
-                    s_scriptCache[scriptClass] = script;
+                result = script;
+                break;
             }
         }
 
-        s_scriptCache.TryGetValue(type, out var result);
+        s_scriptCache[type] = result;
         return result;
     }
 

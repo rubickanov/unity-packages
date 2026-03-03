@@ -6,6 +6,8 @@ using UnityEditor;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 
+namespace Rubickanov.BehaviorTree.Editor;
+
 public class BehaviorTreeSearchWindow : ScriptableObject, ISearchWindowProvider
 {
     private BehaviorTreeGraphView _graphView = default!;
@@ -14,6 +16,8 @@ public class BehaviorTreeSearchWindow : ScriptableObject, ISearchWindowProvider
     public Port? FromPort { get; set; }
     public Vector2 CreationPosition { get; set; }
 
+    private List<SearchTreeEntry>? _cachedEntries;
+
     public void Initialize(BehaviorTreeGraphView graphView, BehaviorTreeSerializer serializer)
     {
         _graphView = graphView;
@@ -21,6 +25,57 @@ public class BehaviorTreeSearchWindow : ScriptableObject, ISearchWindowProvider
     }
 
     public List<SearchTreeEntry> CreateSearchTree(SearchWindowContext context)
+    {
+        _cachedEntries ??= BuildSearchTree();
+
+        // When dragging from an input port (looking for a parent), filter to types that can have children
+        if (FromPort?.direction == Direction.Input)
+            return FilterParentOnly(_cachedEntries);
+
+        return _cachedEntries;
+    }
+
+    private static List<SearchTreeEntry> FilterParentOnly(List<SearchTreeEntry> entries)
+    {
+        var filtered = new List<SearchTreeEntry>();
+        bool currentGroupHasItems = false;
+        SearchTreeGroupEntry? pendingGroup = null;
+
+        foreach (var entry in entries)
+        {
+            if (entry is SearchTreeGroupEntry groupEntry)
+            {
+                if (groupEntry.level == 0)
+                {
+                    filtered.Add(groupEntry);
+                    continue;
+                }
+                pendingGroup = groupEntry;
+                currentGroupHasItems = false;
+                continue;
+            }
+
+            if (entry.userData is Type type && CanHaveChildren(type))
+            {
+                if (pendingGroup != null)
+                {
+                    filtered.Add(pendingGroup);
+                    pendingGroup = null;
+                }
+                filtered.Add(entry);
+                currentGroupHasItems = true;
+            }
+        }
+
+        return filtered;
+    }
+
+    private static bool CanHaveChildren(Type type)
+    {
+        return type.IsSubclassOf(typeof(BTComposite)) || type.IsSubclassOf(typeof(BTDecorator));
+    }
+
+    private static List<SearchTreeEntry> BuildSearchTree()
     {
         var entries = new List<SearchTreeEntry>
         {

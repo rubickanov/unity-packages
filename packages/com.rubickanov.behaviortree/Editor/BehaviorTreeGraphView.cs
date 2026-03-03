@@ -1,16 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using Rubickanov.BehaviorTree.Runtime;
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.UIElements;
 
+namespace Rubickanov.BehaviorTree.Editor;
+
 public class BehaviorTreeGraphView : GraphView
 {
     public Action<BehaviorTreeNodeView?>? OnNodeSelected;
+    public Action? OnGraphModified;
 
     private BehaviorTreeSerializer? _serializer;
     private BehaviorTreeSearchWindow? _searchWindow;
@@ -23,9 +25,9 @@ public class BehaviorTreeGraphView : GraphView
         public Vector2 Position;
     }
 
-    private static List<ClipboardNode>? s_clipboard;
-    private static List<(string parentOrigGuid, string childOrigGuid)>? s_clipboardEdges;
-    private static int s_pasteCount;
+    private List<ClipboardNode>? _clipboard;
+    private List<(string parentOrigGuid, string childOrigGuid)>? _clipboardEdges;
+    private int _pasteCount;
 
     public BehaviorTreeGraphView()
     {
@@ -53,20 +55,20 @@ public class BehaviorTreeGraphView : GraphView
         unserializeAndPaste = PasteElements;
     }
 
+    private const string UssGuid = "b976e4244841b5158bbf3cee84cb591e";
+
     private static string FindUssPath()
     {
-        var guids = AssetDatabase.FindAssets("BehaviorTreeEditorStyles t:StyleSheet");
-        foreach (var guid in guids)
-        {
-            var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (path.EndsWith("BehaviorTreeEditorStyles.uss"))
-                return path;
-        }
-        return "Assets/Code/Framework/BehaviorTree/Editor/BehaviorTreeEditorStyles.uss";
+        var path = AssetDatabase.GUIDToAssetPath(UssGuid);
+        return string.IsNullOrEmpty(path) ? "" : path;
     }
 
     public void PopulateView(BehaviorTreeSerializer serializer)
     {
+        // Preserve transform across full rebuilds
+        var savedPosition = viewTransform.position;
+        var savedScale = viewTransform.scale;
+
         _serializer = serializer;
 
         // Clear existing
@@ -95,15 +97,13 @@ public class BehaviorTreeGraphView : GraphView
         var pairs = serializer.GetParentChildPairs();
         foreach (var (parentGuid, childGuid) in pairs)
         {
-            var parentView = FindNodeView(parentGuid);
-            var childView = FindNodeView(childGuid);
-            if (parentView?.OutputPort == null || childView?.InputPort == null) continue;
-
-            var edge = parentView.OutputPort.ConnectTo(childView.InputPort);
-            AddElement(edge);
+            AddEdgeView(parentGuid, childGuid);
         }
 
         UpdatePortConnectedStates();
+
+        // Restore transform
+        UpdateViewTransform(savedPosition, savedScale);
 
         // Setup search window
         if (_searchWindow == null)
@@ -118,6 +118,34 @@ public class BehaviorTreeGraphView : GraphView
         };
     }
 
+    private BehaviorTreeNodeView? AddNodeViewForGuid(string guid)
+    {
+        if (_serializer == null) return null;
+
+        var rootGuid = _serializer.GetRootGuid();
+        var allNodes = _serializer.GetAllNodes();
+        foreach (var nodeInfo in allNodes)
+        {
+            if (nodeInfo.Guid != guid) continue;
+            var nodeView = new BehaviorTreeNodeView(
+                nodeInfo, _serializer, this, nodeInfo.Guid == rootGuid);
+            AddElement(nodeView);
+            return nodeView;
+        }
+        return null;
+    }
+
+    private Edge? AddEdgeView(string parentGuid, string childGuid)
+    {
+        var parentView = FindNodeView(parentGuid);
+        var childView = FindNodeView(childGuid);
+        if (parentView?.OutputPort == null || childView?.InputPort == null) return null;
+
+        var edge = parentView.OutputPort.ConnectTo(childView.InputPort);
+        AddElement(edge);
+        return edge;
+    }
+
     public BehaviorTreeNodeView? FindNodeView(string guid)
     {
         return GetNodeByGuid(guid) as BehaviorTreeNodeView;
@@ -126,22 +154,43 @@ public class BehaviorTreeGraphView : GraphView
     public override List<Port> GetCompatiblePorts(Port startPort, NodeAdapter nodeAdapter)
     {
         return ports.Where(endPort =>
-            endPort.direction != startPort.direction &&
-            endPort.node != startPort.node).ToList();
+        {
+            if (endPort.direction == startPort.direction) return false;
+            if (endPort.node == startPort.node) return false;
+
+            // Cycle detection at port level
+            if (_serializer != null)
+            {
+                var startNode = startPort.node as BehaviorTreeNodeView;
+                var endNode = endPort.node as BehaviorTreeNodeView;
+                if (startNode != null && endNode != null)
+                {
+                    var parentGuid = startPort.direction == Direction.Output ? startNode.Guid : endNode.Guid;
+                    var childGuid = startPort.direction == Direction.Output ? endNode.Guid : startNode.Guid;
+                    if (_serializer.WouldCreateCycle(parentGuid, childGuid))
+                        return false;
+                }
+            }
+
+            return true;
+        }).ToList();
     }
 
     private GraphViewChange OnGraphViewChanged(GraphViewChange change)
     {
         if (_serializer == null) return change;
 
-        // Handle removed elements
+        // Handle removed elements — two-pass: edges first, then nodes
         if (change.elementsToRemove != null)
         {
-            // Collect edges connected to nodes being removed
+            var nodesToDelete = new HashSet<string>();
+
+            // Collect dangling edges before processing anything
             var danglingEdges = new List<Edge>();
             foreach (var element in change.elementsToRemove)
             {
                 if (element is not BehaviorTreeNodeView nodeView) continue;
+                nodesToDelete.Add(nodeView.Guid);
                 if (nodeView.InputPort != null)
                     foreach (var e in nodeView.InputPort.connections)
                         if (!change.elementsToRemove.Contains(e))
@@ -152,6 +201,22 @@ public class BehaviorTreeGraphView : GraphView
                             danglingEdges.Add(e);
             }
 
+            // Pass 1: process explicit edge removals (skip edges whose parent node is also being deleted)
+            foreach (var element in change.elementsToRemove)
+            {
+                if (element is not Edge edge) continue;
+                var parentView = edge.output?.node as BehaviorTreeNodeView;
+                var childView = edge.input?.node as BehaviorTreeNodeView;
+                if (parentView == null || childView == null) continue;
+
+                // Skip if parent node is also being deleted — DeleteNode handles cleanup
+                if (nodesToDelete.Contains(parentView.Guid)) continue;
+
+                _serializer.RemoveChild(parentView.Guid, childView.Guid);
+                childView.AddToClassList("bt-node-orphan");
+            }
+
+            // Pass 2: process node deletions (handles own children internally)
             foreach (var element in change.elementsToRemove)
             {
                 if (element is BehaviorTreeNodeView nodeView)
@@ -159,19 +224,9 @@ public class BehaviorTreeGraphView : GraphView
                     _serializer.DeleteNode(nodeView.Guid);
                     OnNodeSelected?.Invoke(null);
                 }
-                else if (element is Edge edge)
-                {
-                    var parentView = edge.output?.node as BehaviorTreeNodeView;
-                    var childView = edge.input?.node as BehaviorTreeNodeView;
-                    if (parentView != null && childView != null)
-                    {
-                        _serializer.RemoveChild(parentView.Guid, childView.Guid);
-                        childView.AddToClassList("bt-node-orphan");
-                    }
-                }
             }
 
-            // Explicitly remove dangling edges — GraphView doesn't clean them up
+            // Clean up dangling edges visually — data already handled by DeleteNode
             if (danglingEdges.Count > 0)
             {
                 foreach (var edge in danglingEdges)
@@ -185,18 +240,24 @@ public class BehaviorTreeGraphView : GraphView
             }
         }
 
-        // Handle created edges
+        // Handle created edges — with cycle detection
         if (change.edgesToCreate != null)
         {
-            foreach (var edge in change.edgesToCreate)
+            for (int i = change.edgesToCreate.Count - 1; i >= 0; i--)
             {
+                var edge = change.edgesToCreate[i];
                 var parentView = edge.output?.node as BehaviorTreeNodeView;
                 var childView = edge.input?.node as BehaviorTreeNodeView;
-                if (parentView != null && childView != null)
+                if (parentView == null || childView == null) continue;
+
+                if (_serializer.WouldCreateCycle(parentView.Guid, childView.Guid))
                 {
-                    _serializer.AddChild(parentView.Guid, childView.Guid);
-                    childView.RemoveFromClassList("bt-node-orphan");
+                    change.edgesToCreate.RemoveAt(i);
+                    continue;
                 }
+
+                _serializer.AddChild(parentView.Guid, childView.Guid);
+                childView.RemoveFromClassList("bt-node-orphan");
             }
         }
 
@@ -224,6 +285,7 @@ public class BehaviorTreeGraphView : GraphView
         }
 
         UpdatePortConnectedStates();
+        OnGraphModified?.Invoke();
 
         return change;
     }
@@ -275,11 +337,25 @@ public class BehaviorTreeGraphView : GraphView
             }
         }
 
-        // Rebuild view
-        PopulateView(_serializer);
+        // Incremental add instead of full rebuild
+        var newNodeView = AddNodeViewForGuid(guid);
+
+        // Add edge view if auto-connected
+        if (fromPort != null && newNodeView != null)
+        {
+            var fromNode = fromPort.node as BehaviorTreeNodeView;
+            if (fromNode != null)
+            {
+                if (fromPort.direction == Direction.Output)
+                    AddEdgeView(fromNode.Guid, guid);
+                else
+                    AddEdgeView(guid, fromNode.Guid);
+            }
+        }
+
+        UpdatePortConnectedStates();
 
         // Select the new node
-        var newNodeView = FindNodeView(guid);
         if (newNodeView != null)
         {
             ClearSelection();
@@ -295,12 +371,53 @@ public class BehaviorTreeGraphView : GraphView
         var childView = edge.input?.node as BehaviorTreeNodeView;
         if (parentView != null && childView != null)
         {
+            if (_serializer.WouldCreateCycle(parentView.Guid, childView.Guid))
+            {
+                // Reject — remove edge visually
+                edge.input?.Disconnect(edge);
+                edge.output?.Disconnect(edge);
+                RemoveElement(edge);
+                return;
+            }
+
             _serializer.AddChild(parentView.Guid, childView.Guid);
             childView.RemoveFromClassList("bt-node-orphan");
         }
 
         // port.connected is not yet updated at this point — defer to next frame
         schedule.Execute(() => UpdatePortConnectedStates());
+        OnGraphModified?.Invoke();
+    }
+
+    /// <summary>
+    /// Removes edges visually without triggering OnGraphViewChanged, and serializes the removal.
+    /// Used by <see cref="BehaviorTreeNodePort"/> to handle old edge replacement on drop.
+    /// </summary>
+    public void RemoveEdgesForDrop(List<Edge> edgesToRemove)
+    {
+        if (_serializer == null || edgesToRemove.Count == 0) return;
+
+        // Serialize removals
+        foreach (var edge in edgesToRemove)
+        {
+            var parentView = edge.output?.node as BehaviorTreeNodeView;
+            var childView = edge.input?.node as BehaviorTreeNodeView;
+            if (parentView != null && childView != null)
+            {
+                _serializer.RemoveChild(parentView.Guid, childView.Guid);
+                childView.AddToClassList("bt-node-orphan");
+            }
+        }
+
+        // Remove visually without triggering callback
+        foreach (var edge in edgesToRemove)
+        {
+            edge.input?.Disconnect(edge);
+            edge.output?.Disconnect(edge);
+        }
+        graphViewChanged -= OnGraphViewChanged;
+        DeleteElements(edgesToRemove);
+        graphViewChanged += OnGraphViewChanged;
     }
 
     public void ToggleMiniMap()
@@ -330,8 +447,8 @@ public class BehaviorTreeGraphView : GraphView
 
         var selectedGuids = new HashSet<string>(selectedViews.Select(v => v.Guid));
 
-        s_clipboard = new List<ClipboardNode>();
-        s_pasteCount = 0;
+        _clipboard = new List<ClipboardNode>();
+        _pasteCount = 0;
         foreach (var view in selectedViews)
         {
             var nodeProp = _serializer.FindNodeProperty(view.Guid);
@@ -339,7 +456,7 @@ public class BehaviorTreeGraphView : GraphView
 
             var clone = ShallowClone(node);
 
-            s_clipboard.Add(new ClipboardNode
+            _clipboard.Add(new ClipboardNode
             {
                 Node = clone,
                 OriginalGuid = view.Guid,
@@ -348,12 +465,12 @@ public class BehaviorTreeGraphView : GraphView
         }
 
         // Collect internal edges (both endpoints selected)
-        s_clipboardEdges = new List<(string, string)>();
+        _clipboardEdges = new List<(string, string)>();
         var allPairs = _serializer.GetParentChildPairs();
         foreach (var (parentGuid, childGuid) in allPairs)
         {
             if (selectedGuids.Contains(parentGuid) && selectedGuids.Contains(childGuid))
-                s_clipboardEdges.Add((parentGuid, childGuid));
+                _clipboardEdges.Add((parentGuid, childGuid));
         }
 
         return "bt-clipboard";
@@ -361,19 +478,19 @@ public class BehaviorTreeGraphView : GraphView
 
     private bool CanPaste(string data)
     {
-        return data == "bt-clipboard" && s_clipboard is { Count: > 0 };
+        return data == "bt-clipboard" && _clipboard is { Count: > 0 };
     }
 
     private void PasteElements(string operationName, string data)
     {
-        if (s_clipboard == null || s_clipboard.Count == 0 || _serializer == null) return;
+        if (_clipboard == null || _clipboard.Count == 0 || _serializer == null) return;
 
-        s_pasteCount++;
-        var offset = new Vector2(30, 30) * s_pasteCount;
+        _pasteCount++;
+        var offset = new Vector2(30, 30) * _pasteCount;
         var guidMap = new Dictionary<string, string>();
         var newGuids = new List<string>();
 
-        foreach (var entry in s_clipboard)
+        foreach (var entry in _clipboard)
         {
             var node = ShallowClone(entry.Node);
             var newGuid = _serializer.CreateNodeFromInstance(node, entry.Position + offset);
@@ -384,19 +501,28 @@ public class BehaviorTreeGraphView : GraphView
         }
 
         // Rebuild internal edges
-        if (s_clipboardEdges != null)
+        var edgePairs = new List<(string parent, string child)>();
+        if (_clipboardEdges != null)
         {
-            foreach (var (parentOrig, childOrig) in s_clipboardEdges)
+            foreach (var (parentOrig, childOrig) in _clipboardEdges)
             {
                 if (guidMap.TryGetValue(parentOrig, out var newParent) &&
                     guidMap.TryGetValue(childOrig, out var newChild))
                 {
                     _serializer.AddChild(newParent, newChild);
+                    edgePairs.Add((newParent, newChild));
                 }
             }
         }
 
-        PopulateView(_serializer);
+        // Incremental add instead of full rebuild
+        foreach (var guid in newGuids)
+            AddNodeViewForGuid(guid);
+
+        foreach (var (parent, child) in edgePairs)
+            AddEdgeView(parent, child);
+
+        UpdatePortConnectedStates();
 
         ClearSelection();
         foreach (var guid in newGuids)
@@ -407,22 +533,7 @@ public class BehaviorTreeGraphView : GraphView
         }
     }
 
-    private static readonly MethodInfo MemberwiseCloneMethod =
-        typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic)!;
-
-    private static BTNode ShallowClone(BTNode node)
-    {
-        var clone = (BTNode)MemberwiseCloneMethod.Invoke(node, null)!;
-        clone.Guid = Guid.NewGuid().ToString();
-
-        // Strip children — edges are handled separately
-        if (clone is BTComposite)
-            CompositeChildrenField?.SetValue(clone, Array.Empty<BTNode>());
-        else if (clone is BTDecorator)
-            DecoratorChildField?.SetValue(clone, null);
-
-        return clone;
-    }
+    private static BTNode ShallowClone(BTNode node) => node.ShallowClone();
 
     private readonly Dictionary<string, BTStatus> _runtimeStateMap = new();
 
@@ -446,14 +557,6 @@ public class BehaviorTreeGraphView : GraphView
         }
     }
 
-    private static readonly System.Reflection.FieldInfo? CompositeChildrenField =
-        typeof(BTComposite).GetField("Children",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-    private static readonly System.Reflection.FieldInfo? DecoratorChildField =
-        typeof(BTDecorator).GetField("Child",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
     private static void CollectRuntimeStates(BTNode node, Dictionary<string, BTStatus> map)
     {
         if (string.IsNullOrEmpty(node.Guid)) return;
@@ -461,15 +564,13 @@ public class BehaviorTreeGraphView : GraphView
 
         if (node is BTComposite composite)
         {
-            if (CompositeChildrenField?.GetValue(composite) is BTNode[] children)
-            {
-                foreach (var child in children)
-                    CollectRuntimeStates(child, map);
-            }
+            foreach (var child in composite.GetChildren())
+                CollectRuntimeStates(child, map);
         }
         else if (node is BTDecorator decorator)
         {
-            if (DecoratorChildField?.GetValue(decorator) is BTNode child)
+            var child = decorator.GetChild();
+            if (child != null)
                 CollectRuntimeStates(child, map);
         }
     }
