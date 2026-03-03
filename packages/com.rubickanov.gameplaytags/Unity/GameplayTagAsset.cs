@@ -18,7 +18,7 @@ namespace Rubickanov.GameplayTags
         public GameplayTagRegistry BuildRegistry() => new(_tagPaths);
 
 #if UNITY_EDITOR
-        internal void SetTagPaths(string[] paths)
+        public void SetTagPaths(string[] paths)
         {
             _tagPaths = paths;
         }
