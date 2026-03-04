@@ -41,8 +41,8 @@ namespace Rubickanov.Motor.Modules
                 if (State.GroundVelocity.sqrMagnitude > 0.001f)
                     target += State.GroundVelocity;
 
-                Vector3 currentHorizontal = new Vector3(Body.Velocity.x, 0f, Body.Velocity.z);
-                Vector3 diff = target - currentHorizontal;
+                Vector3 currentOnGround = Vector3.ProjectOnPlane(Body.Velocity, State.GroundNormal);
+                Vector3 diff = target - currentOnGround;
 
                 // Counter-movement: brake aggressively when no input
                 float accel = State.MoveInput.sqrMagnitude < 0.01f

@@ -160,6 +160,9 @@ namespace Rubickanov.Motor
                 if (_inputProvider.CrouchPressed) _crouchBuffered = true;
             }
 
+            float alpha = Mathf.Clamp01((Time.time - Time.fixedTime) / Time.fixedDeltaTime);
+            _body.Interpolate(alpha);
+
             _simulation.VisualUpdate(Time.deltaTime);
         }
 

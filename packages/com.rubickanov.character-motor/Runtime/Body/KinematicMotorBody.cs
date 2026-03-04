@@ -19,6 +19,10 @@ namespace Rubickanov.Motor
         private Vector3 _velocity;
         private float _frameDeltaTime;
 
+        // Interpolation
+        private Vector3 _previousPosition;
+        private Vector3 _simulatedPosition;
+
         public KinematicMotorBody(
             Rigidbody rb,
             CapsuleCollider capsule,
@@ -36,6 +40,9 @@ namespace Rubickanov.Motor
             _rb.isKinematic = true;
             _rb.useGravity = false;
             _rb.interpolation = RigidbodyInterpolation.None;
+
+            _previousPosition = _transform.position;
+            _simulatedPosition = _transform.position;
         }
 
         public Transform Transform => _transform;
@@ -46,6 +53,10 @@ namespace Rubickanov.Motor
 
         public void BeginFrame(MotorState state, float deltaTime)
         {
+            // Restore exact simulated position for physics (undo visual interpolation)
+            _transform.position = _simulatedPosition;
+            _previousPosition = _simulatedPosition;
+
             _frameDeltaTime = deltaTime;
             state.CurrentVelocity = _velocity;
         }
@@ -54,7 +65,13 @@ namespace Rubickanov.Motor
         {
             Vector3 displacement = _velocity * deltaTime;
             ResolveMovement(displacement);
+            _simulatedPosition = _transform.position;
             state.CurrentVelocity = _velocity;
+        }
+
+        public void Interpolate(float alpha)
+        {
+            _transform.position = Vector3.Lerp(_previousPosition, _simulatedPosition, alpha);
         }
 
         public void AddForce(Vector3 force, ForceMode mode)
@@ -85,6 +102,8 @@ namespace Rubickanov.Motor
         public void MovePosition(Vector3 position)
         {
             _transform.position = position;
+            _previousPosition = position;
+            _simulatedPosition = position;
         }
 
         public void Rotate(Vector3 axis, float angle, Space relativeTo)
@@ -119,6 +138,8 @@ namespace Rubickanov.Motor
         public void RestoreState(BodySnapshot snapshot)
         {
             _transform.position = snapshot.Position;
+            _previousPosition = snapshot.Position;
+            _simulatedPosition = snapshot.Position;
             _velocity = snapshot.Velocity;
             _transform.rotation = snapshot.Rotation;
             _capsule.height = snapshot.CapsuleHeight;

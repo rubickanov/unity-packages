@@ -33,6 +33,12 @@ namespace Rubickanov.Motor
         bool Raycast(Vector3 origin, Vector3 direction,
                      float distance, out RaycastHit hit);
 
+        /// <summary>
+        /// Interpolate the visual position between the last two simulation frames.
+        /// Called from Update to smooth out FixedUpdate movement.
+        /// </summary>
+        void Interpolate(float alpha);
+
         BodySnapshot SaveState();
         void RestoreState(BodySnapshot snapshot);
     }

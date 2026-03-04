@@ -23,6 +23,11 @@ namespace Rubickanov.Motor
             hideFlags = HideFlags.HideAndDontSave
         };
 
+        // Interpolation — track physics positions without touching _rb.position
+        private Vector3 _previousPosition;
+        private Vector3 _simulatedPosition;
+        private bool _isInterpolated;
+
         public RigidbodyMotorBody(Rigidbody rb, CapsuleCollider capsule, LayerMask groundMask)
         {
             _rb = rb;
@@ -30,12 +35,15 @@ namespace Rubickanov.Motor
             _groundMask = groundMask;
 
             _rb.freezeRotation = true;
-            _rb.interpolation = RigidbodyInterpolation.Interpolate;
+            _rb.interpolation = RigidbodyInterpolation.None;
             _rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
             _rb.isKinematic = false;
             _rb.useGravity = false;
 
             _capsule.material = ZeroFrictionMaterial;
+
+            _previousPosition = _rb.position;
+            _simulatedPosition = _rb.position;
         }
 
         public Transform Transform => _rb.transform;
@@ -46,12 +54,34 @@ namespace Rubickanov.Motor
 
         public void BeginFrame(MotorState state, float deltaTime)
         {
+            // Undo visual interpolation — restore physics transform for colliders
+            if (_isInterpolated)
+            {
+                _rb.transform.position = _simulatedPosition;
+                Physics.SyncTransforms();
+                _isInterpolated = false;
+            }
+
+            // Shift the interpolation window
+            _previousPosition = _simulatedPosition;
+            _simulatedPosition = _rb.position;
+
             state.CurrentVelocity = _rb.linearVelocity;
         }
 
         public void EndFrame(MotorState state, float deltaTime)
         {
             // No-op: Unity physics engine resolves forces applied during the frame.
+        }
+
+        public void Interpolate(float alpha)
+        {
+            // Capture latest post-PhysX position
+            _simulatedPosition = _rb.position;
+
+            // Move ONLY the transform for visual purposes — don't touch _rb.position
+            _rb.transform.position = Vector3.Lerp(_previousPosition, _simulatedPosition, alpha);
+            _isInterpolated = true;
         }
 
         public void AddForce(Vector3 force, ForceMode mode)
@@ -68,6 +98,9 @@ namespace Rubickanov.Motor
         public void MovePosition(Vector3 position)
         {
             _rb.MovePosition(position);
+            _previousPosition = position;
+            _simulatedPosition = position;
+            _isInterpolated = false;
         }
 
         public void Rotate(Vector3 axis, float angle, Space relativeTo)
@@ -102,6 +135,9 @@ namespace Rubickanov.Motor
         public void RestoreState(BodySnapshot snapshot)
         {
             _rb.position = snapshot.Position;
+            _previousPosition = snapshot.Position;
+            _simulatedPosition = snapshot.Position;
+            _isInterpolated = false;
             _rb.linearVelocity = snapshot.Velocity;
             _rb.rotation = snapshot.Rotation;
             _capsule.height = snapshot.CapsuleHeight;
