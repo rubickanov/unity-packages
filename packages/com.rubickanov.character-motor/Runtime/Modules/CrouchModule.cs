@@ -20,6 +20,8 @@ namespace Rubickanov.Motor.Modules
         private float _currentHeight;
         private bool _isCrouching;
         private bool _wasCrouching;
+        private Rigidbody _ownRb;
+        private readonly RaycastHit[] _ceilingHits = new RaycastHit[4];
 
         /// <summary>
         /// Camera height offset caused by crouching.
@@ -33,6 +35,7 @@ namespace Rubickanov.Motor.Modules
         protected override void OnInitialize()
         {
             _currentHeight = _standHeight;
+            _ownRb = Body.Transform.GetComponentInParent<Rigidbody>();
         }
 
         public override void Simulate(float deltaTime)
@@ -68,9 +71,19 @@ namespace Rubickanov.Motor.Modules
         private bool CanStand()
         {
             float checkDist = _standHeight - _crouchHeight;
-            return !Body.SphereCast(
-                Body.Position + Vector3.up * _crouchHeight,
-                _ceilingCheckRadius, Vector3.up, checkDist, out _);
+            Vector3 origin = Body.Position + Vector3.up * _crouchHeight;
+
+            int count = Physics.SphereCastNonAlloc(
+                origin, _ceilingCheckRadius, Vector3.up, _ceilingHits,
+                checkDist, ~0, QueryTriggerInteraction.Ignore);
+
+            for (int i = 0; i < count; i++)
+            {
+                if (_ceilingHits[i].collider.attachedRigidbody != _ownRb)
+                    return false;
+            }
+
+            return true;
         }
 
         public void SaveState(ref ModuleStateWriter writer)
