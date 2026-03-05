@@ -35,6 +35,7 @@ namespace Rubickanov.GameplayTags.Editor
 
             var nodeMap = new Dictionary<string, GameplayTagDropdownItem>();
 
+            // First pass: create all nodes
             foreach (var name in names)
             {
                 var parts = name.Split('.');
@@ -52,6 +53,34 @@ namespace Rubickanov.GameplayTags.Editor
                     }
 
                     parentItem = item;
+                }
+            }
+
+            // Second pass: add a selectable "[Select]" child to non-leaf nodes
+            // so that parent tags can be picked directly
+            var leafPaths = new HashSet<string>(names);
+            foreach (var kvp in nodeMap)
+            {
+                var node = kvp.Value;
+                var path = kvp.Key;
+
+                // A node is non-leaf if any other path starts with "path."
+                var isParent = false;
+                foreach (var other in names)
+                {
+                    if (other.Length > path.Length
+                        && other.StartsWith(path)
+                        && other[path.Length] == '.')
+                    {
+                        isParent = true;
+                        break;
+                    }
+                }
+
+                if (isParent)
+                {
+                    var selectItem = new GameplayTagDropdownItem($"(select {node.name})", path);
+                    node.AddChild(selectItem);
                 }
             }
 
