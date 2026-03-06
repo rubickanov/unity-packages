@@ -8,20 +8,35 @@ namespace Rubickanov.Motor.Modules
     /// air control, gravity, and external forces. Runs last among all modules.
     /// </summary>
     [Serializable]
-    public class PhysicsResolverModule : MotorModuleBase
+    public class PhysicsResolverModule : MotorModuleBase, IStatefulModule
     {
         [Header("Acceleration")]
         [SerializeField] private float _acceleration = 80f;
         [SerializeField] private float _deceleration = 120f;
+
+        [Header("Air Control")]
+        [Range(0f, 1f)]
+        [SerializeField] private float _airControl = 0.3f;
         [SerializeField] private float _airControlForce = 4f;
         [SerializeField] private float _maxAirSpeed = 8f;
         [SerializeField] private float _airDrag = 0.5f;
+
+        [Header("Air Strafe (Source-style)")]
+        [SerializeField] private bool _enableAirStrafe;
+        [SerializeField] private float _airStrafeAccel = 50f;
+        [SerializeField] private float _airStrafeMaxWishSpeed = 1f;
+
+        [Header("Momentum")]
+        [SerializeField] private bool _preserveTakeoffSpeed;
 
         [Header("Gravity")]
         [SerializeField] private float _gravity = 28f;
         [SerializeField] private float _fallMultiplier = 2.2f;
 
         public override int Priority => 1000;
+
+        private bool _wasGrounded;
+        private float _takeoffSpeed;
 
         public override void Simulate(float deltaTime)
         {
@@ -30,6 +45,14 @@ namespace Rubickanov.Motor.Modules
                 Body.AddForce(State.ExternalForce, ForceMode.VelocityChange);
 
             if (State.SkipDefaultPhysics) return;
+
+            // Track ground→air transition for takeoff speed
+            if (_wasGrounded && !State.IsGrounded)
+            {
+                Vector3 vel = Body.Velocity;
+                _takeoffSpeed = new Vector3(vel.x, 0f, vel.z).magnitude;
+            }
+            _wasGrounded = State.IsGrounded;
 
             Vector3 target = State.DesiredVelocity * State.SpeedMultiplier;
 
@@ -54,17 +77,50 @@ namespace Rubickanov.Motor.Modules
             }
             else
             {
-                // Air control
-                Vector3 airForce = target * _airControlForce;
                 Vector3 horizontal = new Vector3(Body.Velocity.x, 0f, Body.Velocity.z);
+                float effectiveMaxAirSpeed = _preserveTakeoffSpeed
+                    ? Mathf.Max(_maxAirSpeed, _takeoffSpeed)
+                    : _maxAirSpeed;
 
-                if (horizontal.magnitude < _maxAirSpeed)
-                    Body.AddForce(airForce, ForceMode.Acceleration);
+                if (_enableAirStrafe && target.sqrMagnitude > 0.01f)
+                {
+                    // Source/Quake-style air strafing:
+                    // Only accelerate along wishdir when current projection onto it is below threshold.
+                    // This lets players curve through the air with strafe + mouse turn.
+                    Vector3 wishDir = target.normalized;
+                    float currentSpeed = Vector3.Dot(horizontal, wishDir);
+                    float addSpeed = _airStrafeMaxWishSpeed - currentSpeed;
+
+                    if (addSpeed > 0f)
+                    {
+                        float accelSpeed = _airStrafeAccel * _airStrafeMaxWishSpeed * deltaTime;
+                        if (accelSpeed > addSpeed)
+                            accelSpeed = addSpeed;
+
+                        Body.AddForce(wishDir * accelSpeed, ForceMode.VelocityChange);
+                    }
+                }
+                else
+                {
+                    // Standard air control
+                    Vector3 airForce = target * (_airControlForce * _airControl);
+
+                    if (horizontal.magnitude < effectiveMaxAirSpeed)
+                        Body.AddForce(airForce, ForceMode.Acceleration);
+                }
 
                 if (_airDrag > 0f)
                 {
-                    Vector3 dragForce = -horizontal * _airDrag;
-                    Body.AddForce(dragForce, ForceMode.Acceleration);
+                    // When preserving takeoff speed, don't drag below the speed we launched at
+                    if (_preserveTakeoffSpeed && horizontal.magnitude <= _takeoffSpeed)
+                    {
+                        // No drag — preserve momentum
+                    }
+                    else
+                    {
+                        Vector3 dragForce = -horizontal * _airDrag;
+                        Body.AddForce(dragForce, ForceMode.Acceleration);
+                    }
                 }
             }
 
@@ -79,6 +135,18 @@ namespace Rubickanov.Motor.Modules
 
                 Body.AddForce(Vector3.down * g, ForceMode.Acceleration);
             }
+        }
+
+        public void SaveState(ref ModuleStateWriter writer)
+        {
+            writer.Write(_wasGrounded);
+            writer.Write(_takeoffSpeed);
+        }
+
+        public void RestoreState(ref ModuleStateReader reader)
+        {
+            _wasGrounded = reader.ReadBool();
+            _takeoffSpeed = reader.ReadFloat();
         }
     }
 }

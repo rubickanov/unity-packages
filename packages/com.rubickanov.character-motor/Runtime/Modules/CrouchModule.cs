@@ -20,7 +20,7 @@ namespace Rubickanov.Motor.Modules
         private float _currentHeight;
         private bool _isCrouching;
         private bool _wasCrouching;
-        private Rigidbody _ownRb;
+        private Rigidbody _ownRb = default!;
         private readonly RaycastHit[] _ceilingHits = new RaycastHit[4];
 
         /// <summary>
