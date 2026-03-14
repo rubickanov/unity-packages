@@ -215,9 +215,8 @@ namespace Rubickanov.Motor.Modules
             float checkDist = _standHeight - _slideHeight;
             Vector3 origin = Body.Position + Vector3.up * _slideHeight;
 
-            int count = Physics.SphereCastNonAlloc(
-                origin, _ceilingCheckRadius, Vector3.up, _ceilingHits,
-                checkDist, ~0, QueryTriggerInteraction.Ignore);
+            int count = Body.SphereCastNonAlloc(
+                origin, _ceilingCheckRadius, Vector3.up, _ceilingHits, checkDist);
 
             for (int i = 0; i < count; i++)
             {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace Rubickanov.ACS.Runtime
@@ -28,7 +29,7 @@ namespace Rubickanov.ACS.Runtime
         /// <summary>
         /// Tries to get an existing aspect without creating it.
         /// </summary>
-        public bool TryGet<T>(out T? aspect) where T : class, IEntityAspect
+        public bool TryGet<T>([NotNullWhen(returnValue: true)] out T? aspect) where T : class, IEntityAspect
         {
             if (_aspects.TryGetValue(typeof(T), out var existing))
             {

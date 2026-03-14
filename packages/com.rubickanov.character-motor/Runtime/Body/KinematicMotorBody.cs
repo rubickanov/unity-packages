@@ -125,6 +125,13 @@ namespace Rubickanov.Motor
                                    distance, _groundMask, QueryTriggerInteraction.Ignore);
         }
 
+        public int SphereCastNonAlloc(Vector3 origin, float radius, Vector3 direction,
+                                      RaycastHit[] results, float distance)
+        {
+            return Physics.SphereCastNonAlloc(origin, radius, direction, results,
+                                              distance, _groundMask, QueryTriggerInteraction.Ignore);
+        }
+
         public BodySnapshot SaveState()
         {
             return new BodySnapshot(

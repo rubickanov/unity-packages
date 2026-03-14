@@ -33,6 +33,9 @@ namespace Rubickanov.Motor
         bool Raycast(Vector3 origin, Vector3 direction,
                      float distance, out RaycastHit hit);
 
+        int SphereCastNonAlloc(Vector3 origin, float radius, Vector3 direction,
+                               RaycastHit[] results, float distance);
+
         /// <summary>
         /// Interpolate the visual position between the last two simulation frames.
         /// Called from Update to smooth out FixedUpdate movement.
