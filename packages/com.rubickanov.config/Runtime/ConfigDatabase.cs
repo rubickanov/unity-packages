@@ -10,7 +10,7 @@ namespace Rubickanov.Config
     /// </summary>
     /// <typeparam name="TData">Data type that implements IIdentifiable</typeparam>
     public abstract class ConfigDatabase<TData> : ConfigBase
-        where TData : class, IIdentifiable
+        where TData : ConfigBase, IIdentifiable
     {
         [SerializeField] private List<TData> _items = new();
 
@@ -22,7 +22,7 @@ namespace Rubickanov.Config
         public TData? Get(string id)
         {
             _lookup ??= _items.ToDictionary(i => i.Id);
-            return _lookup.TryGetValue(id, out var item) ? item : null;
+            return _lookup.GetValueOrDefault(id);
         }
 
         /// <summary>
