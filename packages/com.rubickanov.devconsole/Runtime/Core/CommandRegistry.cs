@@ -68,6 +68,55 @@ namespace Rubickanov.DevConsole
             }, description, category, argProviders);
         }
 
+        /// <summary>Registers a command group with subcommands. Each subcommand gets its own handler and autocomplete providers.</summary>
+        public void RegisterGroup(string name, string description, string category,
+            Action<CommandGroupBuilder> configure)
+        {
+            var builder = new CommandGroupBuilder();
+            configure(builder);
+
+            var subcommands = builder.Subcommands.ToArray();
+            var cmdName = name.ToLowerInvariant();
+
+            _commands[cmdName] = new RegisteredCommand
+            {
+                Name = cmdName,
+                Description = description,
+                Category = category,
+                Method = null,
+                Parameters = Array.Empty<ParameterInfo>(),
+                ManualHandler = args => ExecuteGroup(cmdName, subcommands, args),
+                Subcommands = subcommands
+            };
+            RebuildSortedKeys();
+        }
+
+        private static string? ExecuteGroup(string groupName, SubcommandDefinition[] subcommands, string[] args)
+        {
+            if (args.Length == 0)
+            {
+                var sb = new StringBuilder();
+                sb.Append($"Usage: {groupName} <subcommand>\nSubcommands:");
+                for (int i = 0; i < subcommands.Length; i++)
+                {
+                    var desc = string.IsNullOrEmpty(subcommands[i].Description)
+                        ? ""
+                        : $" - {subcommands[i].Description}";
+                    sb.Append($"\n  {subcommands[i].Name}{desc}");
+                }
+                return sb.ToString();
+            }
+
+            var subName = args[0].ToLowerInvariant();
+            for (int i = 0; i < subcommands.Length; i++)
+            {
+                if (subcommands[i].Name == subName)
+                    return subcommands[i].Handler(args[1..]);
+            }
+
+            return $"Unknown subcommand '{args[0]}'. Type '{groupName}' for available subcommands.";
+        }
+
         private void RebuildSortedKeys()
         {
             _sortedKeys = new string[_commands.Count];
@@ -365,6 +414,51 @@ namespace Rubickanov.DevConsole
             var argIndex = endsWithSpace ? _tokenBuffer.Count - 1 : _tokenBuffer.Count - 2;
             var partial2 = endsWithSpace ? "" : _tokenBuffer[_tokenBuffer.Count - 1];
 
+            // Subcommand-aware autocomplete
+            if (cmd.Subcommands != null)
+            {
+                if (argIndex == 0)
+                {
+                    // Suggest subcommand names
+                    for (int i = 0; i < cmd.Subcommands.Length; i++)
+                    {
+                        if (string.IsNullOrEmpty(partial2) ||
+                            cmd.Subcommands[i].Name.StartsWith(partial2, StringComparison.OrdinalIgnoreCase))
+                        {
+                            results.Add(cmd.Subcommands[i].Name);
+                            if (results.Count >= maxResults) return;
+                        }
+                    }
+                    return;
+                }
+
+                // Look up the subcommand's providers
+                var subToken = _tokenBuffer[1].ToLowerInvariant();
+                SubcommandDefinition? matchedSub = null;
+                for (int i = 0; i < cmd.Subcommands.Length; i++)
+                {
+                    if (cmd.Subcommands[i].Name == subToken)
+                    {
+                        matchedSub = cmd.Subcommands[i];
+                        break;
+                    }
+                }
+
+                if (matchedSub?.ArgProviders == null) return;
+
+                var subArgIndex = argIndex - 1;
+                if (subArgIndex < 0 || subArgIndex >= matchedSub.ArgProviders.Length) return;
+
+                var subProvider = matchedSub.ArgProviders[subArgIndex];
+                if (subProvider == null) return;
+
+                int subCountBefore = results.Count;
+                subProvider.GetSuggestions(partial2, results);
+                if (results.Count - subCountBefore > maxResults)
+                    results.RemoveRange(subCountBefore + maxResults, results.Count - subCountBefore - maxResults);
+                return;
+            }
+
             if (cmd.ArgProviders == null || argIndex >= cmd.ArgProviders.Length || argIndex < 0)
                 return;
 
@@ -428,6 +522,18 @@ namespace Rubickanov.DevConsole
                     ConsoleLog.Log($"<b>{cmd.GetUsageString()}</b>");
                     if (!string.IsNullOrEmpty(cmd.Description)) ConsoleLog.Log($"  {cmd.Description}");
                     ConsoleLog.Log($"  Category: {cmd.Category}");
+
+                    if (cmd.Subcommands != null)
+                    {
+                        ConsoleLog.Log("\n  Subcommands:");
+                        for (int i = 0; i < cmd.Subcommands.Length; i++)
+                        {
+                            var sub = cmd.Subcommands[i];
+                            var desc = string.IsNullOrEmpty(sub.Description) ? "" : $" - {sub.Description}";
+                            ConsoleLog.Log($"    {cmd.GetSubcommandUsageString(sub)}{desc}");
+                        }
+                    }
+
                     return null;
                 }
 

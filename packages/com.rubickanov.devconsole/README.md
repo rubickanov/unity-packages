@@ -137,6 +137,31 @@ CommandRegistry.Instance.Register("ping", args =>
 }, "Ping test", "Debug");
 ```
 
+### Command Groups (Subcommands)
+
+Register commands with subcommands using `RegisterGroup`. Each subcommand gets its own handler and autocomplete providers:
+
+```csharp
+var fruitProvider = new FruitIdProvider(database);
+
+CommandRegistry.Instance.RegisterGroup("inventory", "Manage inventory", "Cheats", group =>
+{
+    group.Add("add", args => AddFruit(args), "Add fruits", fruitProvider);
+    group.Add("remove", args => RemoveFruit(args), "Remove fruits", fruitProvider);
+    group.Add("clear", _ => ClearInventory(), "Clear inventory");
+    group.Add("list", _ => ListInventory(), "Show contents");
+});
+```
+
+Autocomplete is context-aware per subcommand:
+- `inventory ` → suggests `add`, `remove`, `clear`, `list`
+- `inventory add ` → suggests fruit IDs (from `fruitProvider`)
+- `inventory list ` → no suggestions
+
+Subcommand handlers receive args **after** the subcommand name: `inventory add apple 5` calls handler with `["apple", "5"]`.
+
+`help inventory` shows all subcommands with descriptions.
+
 ### Console API
 
 ```csharp
@@ -226,6 +251,8 @@ com.rubickanov.devconsole/
 │   ├── Core/
 │   │   ├── CommandRegistry.cs
 │   │   ├── RegisteredCommand.cs
+│   │   ├── SubcommandDefinition.cs
+│   │   ├── CommandGroupBuilder.cs
 │   │   ├── ConsoleLog.cs
 │   │   ├── CommandHistory.cs
 │   │   └── DevConsoleSettings.cs
