@@ -9,14 +9,16 @@ namespace Rubickanov.UI.UGUI
         public delegate UniTask<GameObject> PrefabLoader(string address);
 
         private readonly PrefabLoader _loadPrefab;
+        private readonly IViewServiceResolver? _serviceResolver;
         private readonly RectTransform _screenLayer;
         private readonly RectTransform _hudLayer;
         private readonly RectTransform _popupLayer;
         private readonly RectTransform _overlayLayer;
 
-        public UGUIViewFactory(Transform root, PrefabLoader loadPrefab)
+        public UGUIViewFactory(Transform root, PrefabLoader loadPrefab, IViewServiceResolver? serviceResolver = null)
         {
             _loadPrefab = loadPrefab;
+            _serviceResolver = serviceResolver;
             _screenLayer = FindLayer(root, "ScreenLayer");
             _hudLayer = FindLayer(root, "HUDLayer");
             _popupLayer = FindLayer(root, "PopupLayer");
@@ -44,6 +46,7 @@ namespace Rubickanov.UI.UGUI
                     $"Prefab '{prefabName}' does not have a {nameof(UGUIViewBase)} component.");
 
             view.ViewFactory = this;
+            view.ServiceResolver = _serviceResolver;
             view.Initialize();
             instance.SetActive(false);
 

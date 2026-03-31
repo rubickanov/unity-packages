@@ -23,6 +23,15 @@ namespace Rubickanov.UI
             disposable.AddTo(ref _disposables);
         }
 
+        /// <summary>
+        /// Tracks a disposable for cleanup when the ViewModel is disposed.
+        /// Public wrapper for use by extension methods in bridge packages.
+        /// </summary>
+        public void TrackDisposable(IDisposable disposable)
+        {
+            disposable.AddTo(ref _disposables);
+        }
+
         protected ReactiveProperty<T> CreateProperty<T>(T initialValue = default!)
         {
             var property = new ReactiveProperty<T>(initialValue);

@@ -44,6 +44,7 @@ namespace Rubickanov.UI
 
             _popupStack.Remove(view);
             view.Destroy();
+            _factory.Detach(view);
             _views.Remove(type);
             _viewLayers.Remove(type);
         }
@@ -174,6 +175,7 @@ namespace Rubickanov.UI
             foreach (var view in _views.Values)
             {
                 view.Destroy();
+                _factory.Detach(view);
             }
 
             _views.Clear();

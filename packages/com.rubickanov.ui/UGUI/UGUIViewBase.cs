@@ -9,6 +9,7 @@ namespace Rubickanov.UI.UGUI
         public bool IsVisible { get; private set; }
 
         internal IViewFactory? ViewFactory { get; set; }
+        internal IViewServiceResolver? ServiceResolver { get; set; }
         internal virtual string PrefabName => GetType().Name;
 
         protected virtual bool InterceptsInput => true;

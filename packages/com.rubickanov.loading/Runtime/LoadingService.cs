@@ -17,7 +17,7 @@ namespace Rubickanov.Loading
         private readonly ILogger _logger;
         private readonly ILoadingPresenter _presenter;
         private CancellationTokenSource? _cts;
-        private Action<string>? _fatalErrorHandler;
+        private int _loadGeneration;
 
         public LoadingService(ILoadingPresenter presenter, ILoggerFactory loggerFactory)
         {
@@ -25,21 +25,18 @@ namespace Rubickanov.Loading
             _presenter = presenter;
         }
 
-        /// <summary>
-        /// Registers a handler invoked on fatal loading errors instead of the default behavior.
-        /// </summary>
-        public void SetFatalErrorHandler(Action<string> handler)
-        {
-            _fatalErrorHandler = handler;
-        }
-
         /// <inheritdoc />
-        public async UniTask Load(IReadOnlyList<ILoadingOperation> operations, CancellationToken ct = default)
+        public async UniTask<LoadResult> Load(
+            IReadOnlyList<ILoadingOperation> operations,
+            CancellationToken ct = default)
         {
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var token = _cts.Token;
+
+            var generation = ++_loadGeneration;
+            _presenter.Hide();
 
             _presenter.SetDescription("Loading...");
             _presenter.SetProgress(0f);
@@ -47,49 +44,48 @@ namespace Rubickanov.Loading
 
             try
             {
-                int count = operations.Count;
-
-                for (int i = 0; i < count; i++)
-                {
-                    token.ThrowIfCancellationRequested();
-                    var op = operations[i];
-                    _presenter.SetDescription(op.Description);
-
-                    float baseProgress = (float)i / count;
-                    float stepWeight = 1f / count;
-                    var capturedBase = baseProgress;
-                    var capturedWeight = stepWeight;
-                    var progress = new Progress<float>(p =>
-                    {
-                        _presenter.SetProgress(capturedBase + capturedWeight * p);
-                    });
-
-                    await op.Execute(progress, token);
-                }
-
-                _presenter.SetProgress(1f);
+                await ExecuteOperations(operations, token);
+                return LoadResult.Ok;
             }
             catch (OperationCanceledException)
             {
-                // Silently cancel
+                return LoadResult.Ok;
             }
             catch (Exception ex)
             {
                 _logger.ZLogError(ex, $"Loading pipeline failed.");
-
-                if (_fatalErrorHandler != null)
-                {
-                    _fatalErrorHandler(ex.Message);
-                    return;
-                }
-
-                _presenter.SetError(ex.Message);
-                await UniTask.Delay(2000, cancellationToken: CancellationToken.None);
+                return LoadResult.Fail(ex);
             }
             finally
             {
-                _presenter.Hide();
+                if (_loadGeneration == generation)
+                    _presenter.Hide();
             }
+        }
+
+        private async UniTask ExecuteOperations(IReadOnlyList<ILoadingOperation> operations, CancellationToken ct)
+        {
+            int count = operations.Count;
+
+            for (int i = 0; i < count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var op = operations[i];
+                _presenter.SetDescription(op.Description);
+
+                float baseProgress = (float)i / count;
+                float stepWeight = 1f / count;
+                var capturedBase = baseProgress;
+                var capturedWeight = stepWeight;
+                var progress = new Progress<float>(p =>
+                {
+                    _presenter.SetProgress(capturedBase + capturedWeight * p);
+                });
+
+                await op.Execute(progress, ct);
+            }
+
+            _presenter.SetProgress(1f);
         }
     }
 }

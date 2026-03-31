@@ -10,6 +10,7 @@ namespace Rubickanov.UI.UIToolkit
 
         internal abstract string? UxmlName { get; }
         internal IViewFactory? ViewFactory { get; set; }
+        internal IViewServiceResolver? ServiceResolver { get; set; }
 
         internal void Initialize() => OnInitialize();
 

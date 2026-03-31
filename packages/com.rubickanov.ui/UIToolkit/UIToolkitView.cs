@@ -48,6 +48,13 @@ namespace Rubickanov.UI.UIToolkit
         protected virtual void OnViewHide() { }
         protected virtual void OnUnbind() { }
 
+        public T GetService<T>() where T : class
+            => ServiceResolver?.Resolve<T>()
+               ?? throw new InvalidOperationException($"Service {typeof(T).Name} is not registered in IViewServiceResolver.");
+
+        public void BindObservable<T>(Observable<T> observable, Action<T> handler)
+            => Bind(observable, handler);
+
         protected void Bind<T>(Observable<T> observable, Action<T> handler)
         {
             observable.Subscribe(handler).AddTo(ref _disposables);

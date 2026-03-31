@@ -102,11 +102,16 @@ public class UILoadingPresenter : ILoadingPresenter
 }
 ```
 
-### Fatal Error Handler
+### Handling Errors
+
+`Load()` returns a `LoadResult` — the caller decides how to handle failures:
 
 ```csharp
-var loading = container.Resolve<LoadingService>();
-loading.SetFatalErrorHandler(message => ShowFatalPopup(message));
+var result = await loadingService.Load(operations);
+if (!result.Success)
+{
+    ShowErrorPopup($"Loading failed: {result.Error?.Message}");
+}
 ```
 
 ## Design Decisions
@@ -114,3 +119,4 @@ loading.SetFatalErrorHandler(message => ShowFatalPopup(message));
 - **ILoadingPresenter instead of IUIService** — decouples the loading pipeline from any UI framework. Game code provides the bridge.
 - **Uniform progress distribution** — each operation gets an equal slice of the progress bar (1/N). Individual operations report 0-1 within their slice.
 - **Caller controls order** — operations execute in array order. No priority system or `RunBefore`/`RunAfter` attributes.
+- **LoadResult instead of fallback/callbacks** — the caller owns error recovery, not the loading service. This avoids ownership issues where a fallback scene load destroys the caller.

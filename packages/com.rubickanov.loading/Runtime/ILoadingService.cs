@@ -12,9 +12,12 @@ namespace Rubickanov.Loading
     {
         /// <summary>
         /// Executes a sequence of loading operations, reporting progress via the presenter.
+        /// Returns <see cref="LoadResult"/> indicating success or failure with the exception.
         /// </summary>
         /// <param name="operations">Ordered list of operations to execute sequentially.</param>
         /// <param name="ct">Cancellation token.</param>
-        UniTask Load(IReadOnlyList<ILoadingOperation> operations, CancellationToken ct = default);
+        UniTask<LoadResult> Load(
+            IReadOnlyList<ILoadingOperation> operations,
+            CancellationToken ct = default);
     }
 }
