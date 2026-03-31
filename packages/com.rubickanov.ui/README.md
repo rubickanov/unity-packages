@@ -22,6 +22,10 @@ IDialogService (confirm/alert/modal)
 ├── UIToolkitDialogService — popup-based dialogs
 └── NullDialogService      — no-op for server builds
 
+TooltipService (hover tooltips on overlay layer)
+TooltipManipulator (VisualElement hover behavior)
+TooltipExtensions (AddTooltip / RemoveTooltip)
+
 IView (view contract)
 ├── UIToolkitViewBase → UIToolkitView<TViewModel>
 └── UGUIViewBase      → UGUIView<TViewModel>
@@ -32,7 +36,7 @@ IView (view contract)
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
 | **UI.Runtime** | No | Core abstractions: IView, IUIService, IDialogService, UIService, ViewModelBase |
-| **UI.UIToolkit** | Yes | UI Toolkit backend: UIToolkitView, UIToolkitViewFactory, dialog views |
+| **UI.UIToolkit** | Yes | UI Toolkit backend: UIToolkitView, UIToolkitViewFactory, dialog views, tooltips |
 | **UI.UGUI** | Yes | UGUI backend: UGUIView, UGUIViewFactory |
 
 ## Core Concepts
@@ -179,6 +183,73 @@ await dialogs.ShowAlert("Error", message);
 using var modal = dialogs.ShowModal("Loading", "Please wait...");
 ```
 
+### Tooltips
+
+Show tooltips on hover for any `VisualElement`. Supports plain text and rich content. Works with both UI elements and 3D objects (via screen position).
+
+**Setup:**
+
+```csharp
+var tooltipService = new TooltipService(uiDocument);
+// Optionally pass a StyleSheet for default tooltip styles:
+// var tooltipService = new TooltipService(uiDocument, tooltipStyleSheet);
+```
+
+**UI elements — via Manipulator or extension method:**
+
+```csharp
+// Extension method (recommended)
+element.AddTooltip(tooltipService, "Tooltip text");
+element.AddTooltip(tooltipService, "Tooltip text", delay: 0.5f);
+
+// Rich content
+element.AddTooltip(tooltipService, () => {
+    var el = new VisualElement();
+    el.Add(new Label("Title"));
+    el.Add(new Label("Description"));
+    return el;
+});
+
+// Remove tooltip
+var manipulator = element.AddTooltip(tooltipService, "Text");
+element.RemoveTooltip(manipulator);
+
+// Or directly via Manipulator
+element.AddManipulator(new TooltipManipulator(tooltipService, "Text"));
+```
+
+**3D objects — via service directly:**
+
+```csharp
+// Show at screen position (e.g. from a raycast)
+tooltipService.Show(Input.mousePosition, "Object name");
+
+// Update position each frame
+tooltipService.UpdatePosition(Input.mousePosition);
+
+// Hide
+tooltipService.Hide();
+```
+
+**Styling:** The tooltip container uses CSS classes `.tooltip-container` and `.tooltip-text`. Define these in your project's theme USS:
+
+```css
+.tooltip-container {
+    background-color: var(--color-bg);
+    border-color: var(--color-border);
+    border-width: 1px;
+    border-radius: 8px;
+    padding: 6px 10px;
+    max-width: 300px;
+}
+
+.tooltip-text {
+    color: var(--color-text);
+    font-size: 14px;
+    white-space: normal;
+}
+```
+
 ### Animations
 
 Views show/hide instantly by default. Override `OnShowAsync`/`OnHideAsync` to add transitions.
@@ -272,7 +343,12 @@ com.rubickanov.ui/
 │   ├── ConfirmPopup.cs / ConfirmPopup.uxml
 │   ├── AlertPopup.cs / AlertPopup.uxml
 │   ├── ConfirmViewModel.cs
-│   └── AlertViewModel.cs
+│   ├── AlertViewModel.cs
+│   └── Tooltip/
+│       ├── TooltipService.cs
+│       ├── TooltipManipulator.cs
+│       ├── TooltipExtensions.cs
+│       └── Tooltip.uss
 └── UGUI/
     ├── UGUIViewBase.cs
     ├── UGUIView.cs

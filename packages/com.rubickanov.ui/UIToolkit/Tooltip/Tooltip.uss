@@ -1,0 +1,22 @@
+.tooltip-container {
+    position: absolute;
+    background-color: var(--tooltip-bg, rgba(20, 20, 30, 0.95));
+    border-color: var(--tooltip-border-color, rgba(255, 255, 255, 0.1));
+    border-width: var(--tooltip-border-width, 1px);
+    border-radius: var(--tooltip-radius, 6px);
+    padding: var(--tooltip-padding, 6px 10px);
+    max-width: var(--tooltip-max-width, 300px);
+    picking-mode: ignore;
+}
+
+.tooltip-container > * {
+    picking-mode: ignore;
+}
+
+.tooltip-text {
+    color: var(--tooltip-color, rgb(240, 240, 240));
+    font-size: var(--tooltip-font-size, 14px);
+    white-space: normal;
+    margin: 0;
+    padding: 0;
+}

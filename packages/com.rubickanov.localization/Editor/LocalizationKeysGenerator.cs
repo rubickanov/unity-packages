@@ -94,33 +94,83 @@ namespace Rubickanov.Localization.Editor
             for (var i = 0; i < sortedTables.Count; i++)
             {
                 var table = sortedTables[i];
-                var className = SanitizeIdentifier(table.Key);
+                var tableClassName = SanitizeIdentifier(table.Key);
 
-                sb.AppendLine($"        public static class {className}");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            private const string Table = \"{table.Key}\";");
-                sb.AppendLine();
-
+                var root = new KeyTreeNode();
                 var sortedKeys = table.Value.OrderBy(k => k).ToList();
 
                 foreach (var key in sortedKeys)
-                {
-                    var fieldName = SanitizeIdentifier(key);
-                    sb.AppendLine($"            public static readonly LocalizationKey {fieldName} = new(Table, \"{key}\");");
-                }
+                    root.Insert(key.Split('.'), key);
 
-                sb.AppendLine("        }");
+                WriteTreeNode(sb, root, table.Key, tableClassName, "        ");
 
                 if (i < sortedTables.Count - 1)
-                {
                     sb.AppendLine();
-                }
             }
 
             sb.AppendLine("    }");
             sb.AppendLine("}");
 
             return sb.ToString();
+        }
+
+        private static void WriteTreeNode(StringBuilder sb, KeyTreeNode node, string tableName,
+            string className, string indent)
+        {
+            sb.AppendLine($"{indent}public static class {className}");
+            sb.AppendLine($"{indent}{{");
+
+            var needsTableConst = node.Leaves.Count > 0 || !node.Children.Values.Any(c => c.Leaves.Count > 0 && c.Children.Count == 0);
+            if (node.Leaves.Count > 0 || node.Children.Count == 0)
+            {
+                sb.AppendLine($"{indent}    private const string Table = \"{tableName}\";");
+                sb.AppendLine();
+            }
+
+            foreach (var leaf in node.Leaves.OrderBy(l => l.FieldName))
+            {
+                sb.AppendLine(
+                    $"{indent}    public static readonly LocalizationKey {leaf.FieldName} = new(Table, \"{leaf.OriginalKey}\");");
+            }
+
+            if (node.Leaves.Count > 0 && node.Children.Count > 0)
+                sb.AppendLine();
+
+            var sortedChildren = node.Children.OrderBy(c => c.Key).ToList();
+            for (var i = 0; i < sortedChildren.Count; i++)
+            {
+                var child = sortedChildren[i];
+                WriteTreeNode(sb, child.Value, tableName, SanitizeIdentifier(child.Key), indent + "    ");
+
+                if (i < sortedChildren.Count - 1)
+                    sb.AppendLine();
+            }
+
+            sb.AppendLine($"{indent}}}");
+        }
+
+        private sealed class KeyTreeNode
+        {
+            public readonly Dictionary<string, KeyTreeNode> Children = new();
+            public readonly List<(string FieldName, string OriginalKey)> Leaves = new();
+
+            public void Insert(string[] segments, string originalKey)
+            {
+                if (segments.Length == 1)
+                {
+                    Leaves.Add((SanitizeIdentifier(segments[0]), originalKey));
+                    return;
+                }
+
+                var childKey = segments[0];
+                if (!Children.TryGetValue(childKey, out var child))
+                {
+                    child = new KeyTreeNode();
+                    Children[childKey] = child;
+                }
+
+                child.Insert(segments[1..], originalKey);
+            }
         }
 
         private static string SanitizeIdentifier(string input)

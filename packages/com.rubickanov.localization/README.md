@@ -111,13 +111,19 @@ localization.IsRTL.Subscribe(isRtl =>
 
 ### Key Generation
 
-The editor generates a static class with strongly-typed keys from Unity String Table Collections.
+The editor generates a static class with strongly-typed keys from Unity String Table Collections. Keys containing dots (`.`) are split into nested classes, giving hierarchical autocomplete.
+
+**Key naming convention:** `namespace.category.key` (e.g., `ui.settings.master_volume`, `fruit.apple`)
 
 ```csharp
 // Auto-generated from String Tables
-L.Ui.GameTitle        // → LocalizationKey("UI", "game_title")
-L.Items.Sword         // → LocalizationKey("Items", "sword")
-L.Dialogs.NpcGreeting // → LocalizationKey("Dialogs", "npc_greeting")
+// Dot-separated keys become nested classes:
+L.App.Ui.Menu.Play              // → LocalizationKey("App", "ui.menu.play")
+L.App.Ui.Settings.MasterVolume  // → LocalizationKey("App", "ui.settings.master_volume")
+L.App.Fruit.Apple               // → LocalizationKey("App", "fruit.apple")
+
+// Keys without dots stay flat:
+L.Items.Sword                   // → LocalizationKey("Items", "sword")
 ```
 
 Configure via **Project Settings > Localization Generator** or run manually via **Tools > Generators > Localization**. Auto-regeneration triggers when String Table assets are modified.
