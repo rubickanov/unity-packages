@@ -15,6 +15,7 @@ namespace Rubickanov.GameplayTags.Editor
         private static readonly Regex TagPathRegex = new(@"^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)*$");
 
         private string _newTagPath = "";
+        private string? _tagToExtract;
 
         private GameplayTagRegistry? _cachedRegistry;
         private IReadOnlyList<string>? _cachedNames;
@@ -80,6 +81,14 @@ namespace Rubickanov.GameplayTags.Editor
 
                 EditorGUILayout.LabelField(name, GUILayout.ExpandWidth(true));
 
+                if (depth == 0)
+                {
+                    if (GUILayout.Button("\u2197", GUILayout.Width(25))) // extract arrow
+                    {
+                        _tagToExtract = name;
+                    }
+                }
+
                 if (GUILayout.Button("\u2212", GUILayout.Width(25))) // minus sign
                 {
                     tagToRemove = name;
@@ -102,6 +111,45 @@ namespace Rubickanov.GameplayTags.Editor
                 EditorUtility.SetDirty(asset);
                 InvalidateCache();
             }
+
+            if (_tagToExtract != null)
+            {
+                ExtractTags(asset, paths, _tagToExtract);
+                _tagToExtract = null;
+            }
+        }
+
+        private void ExtractTags(GameplayTagAsset source, List<string> paths, string rootTag)
+        {
+            var savePath = EditorUtility.SaveFilePanelInProject(
+                "Extract Tags to New Asset",
+                rootTag + "Tags",
+                "asset",
+                "Choose where to save the extracted tag asset.");
+
+            if (string.IsNullOrEmpty(savePath))
+                return;
+
+            var prefix = rootTag + ".";
+            var extractedPaths = paths
+                .Where(p => p == rootTag || p.StartsWith(prefix))
+                .ToArray();
+
+            var newAsset = ScriptableObject.CreateInstance<GameplayTagAsset>();
+            newAsset.SetTagPaths(extractedPaths);
+            AssetDatabase.CreateAsset(newAsset, savePath);
+
+            Undo.RecordObject(source, "Extract Gameplay Tags");
+            var remainingPaths = paths
+                .Where(p => p != rootTag && !p.StartsWith(prefix))
+                .ToArray();
+            source.SetTagPaths(remainingPaths);
+            EditorUtility.SetDirty(source);
+
+            AssetDatabase.SaveAssets();
+            InvalidateCache();
+
+            Debug.Log($"[GameplayTags] Extracted {extractedPaths.Length} tag(s) under \"{rootTag}\" to {savePath}");
         }
 
         private (GameplayTagRegistry registry, IReadOnlyList<string> names) GetOrRebuildRegistry(

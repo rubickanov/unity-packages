@@ -18,14 +18,15 @@ namespace Rubickanov.GameplayTags.Editor
         [MenuItem("Tools/Generators/Gameplay Tags")]
         public static void GenerateTags()
         {
-            var asset = FindTagAsset();
-            if (asset == null)
+            var assets = FindAllTagAssets();
+            if (assets.Count == 0)
             {
                 Debug.LogWarning("[GameplayTagsGenerator] No GameplayTagAsset found.");
                 return;
             }
 
-            var registry = new GameplayTagRegistry(asset.TagPaths);
+            var allPaths = assets.SelectMany(a => a.TagPaths).Distinct().ToArray();
+            var registry = new GameplayTagRegistry(allPaths);
             var names = registry.GetAllNames();
 
             if (names.Count == 0)
@@ -38,7 +39,7 @@ namespace Rubickanov.GameplayTags.Editor
             WriteToFile(code);
 
             AssetDatabase.Refresh();
-            Debug.Log($"[GameplayTagsGenerator] Generated {Settings.OutputPath} with {names.Count} tag(s).");
+            Debug.Log($"[GameplayTagsGenerator] Generated {Settings.OutputPath} with {names.Count} tag(s) from {assets.Count} asset(s).");
         }
 
         private static string GenerateCode(IReadOnlyList<string> names)
@@ -190,14 +191,20 @@ namespace Rubickanov.GameplayTags.Editor
             File.WriteAllText(Settings.OutputPath, content);
         }
 
-        private static GameplayTagAsset? FindTagAsset()
+        private static List<GameplayTagAsset> FindAllTagAssets()
         {
             var guids = AssetDatabase.FindAssets("t:GameplayTagAsset");
-            if (guids.Length == 0)
-                return null;
+            var assets = new List<GameplayTagAsset>();
 
-            var path = AssetDatabase.GUIDToAssetPath(guids[0]);
-            return AssetDatabase.LoadAssetAtPath<GameplayTagAsset>(path);
+            foreach (var guid in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                var asset = AssetDatabase.LoadAssetAtPath<GameplayTagAsset>(path);
+                if (asset != null)
+                    assets.Add(asset);
+            }
+
+            return assets;
         }
 
         private sealed class TreeNode

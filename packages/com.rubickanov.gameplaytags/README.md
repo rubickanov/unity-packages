@@ -42,7 +42,7 @@ GameplayTagContainer (sorted list, hierarchical queries)
 
 ## Quick Start
 
-1. Create a tag database: **Assets > Create > Config > Gameplay Tags**.
+1. Create one or more tag databases: **Assets > Create > Config > Gameplay Tags**. You can split tags across multiple assets by category (e.g. `DamageTags`, `StatusTags`).
 2. Add tags in the inspector (e.g. `Damage.Fire.DoT`, `Status.Stun`).
 3. Install the registry at startup:
 
@@ -55,7 +55,7 @@ void Awake()
 }
 ```
 
-4. Generate constants: **Tools > Generators > Gameplay Tags**.
+4. Generate constants: **Tools > Generators > Gameplay Tags**. The generator finds all `GameplayTagAsset` files in the project, merges their tags, and produces a single output file.
 
 ## Usage
 
@@ -138,7 +138,7 @@ public static class GameTags
 }
 ```
 
-Configure output path, namespace, and class name in **Project Settings > Gameplay Tags Generator**. Auto-regeneration triggers when the tag database asset is modified.
+Configure output path, namespace, and class name in **Project Settings > Gameplay Tags Generator**. Auto-regeneration triggers when any tag database asset is modified. If multiple `GameplayTagAsset` files exist, all are merged during generation.
 
 ## Examples
 
