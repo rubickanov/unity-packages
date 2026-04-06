@@ -1,3 +1,4 @@
+using System.Threading;
 using Cysharp.Threading.Tasks;
 
 namespace Rubickanov.Loading
@@ -20,7 +21,10 @@ namespace Rubickanov.Loading
         /// <summary>Displays an error message.</summary>
         void SetError(string error);
 
+        /// <summary>Waits for user input before proceeding.</summary>
+        UniTask WaitForInput(CancellationToken ct = default);
+
         /// <summary>Hides the loading UI.</summary>
-        void Hide();
+        UniTask Hide();
     }
 }

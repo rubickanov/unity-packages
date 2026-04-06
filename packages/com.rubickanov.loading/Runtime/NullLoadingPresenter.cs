@@ -1,3 +1,4 @@
+using System.Threading;
 using Cysharp.Threading.Tasks;
 
 namespace Rubickanov.Loading
@@ -21,6 +22,9 @@ namespace Rubickanov.Loading
         public void SetError(string error) { }
 
         /// <inheritdoc />
-        public void Hide() { }
+        public UniTask WaitForInput(CancellationToken ct = default) => UniTask.CompletedTask;
+
+        /// <inheritdoc />
+        public UniTask Hide() => UniTask.CompletedTask;
     }
 }

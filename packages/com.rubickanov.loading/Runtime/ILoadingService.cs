@@ -18,6 +18,7 @@ namespace Rubickanov.Loading
         /// <param name="ct">Cancellation token.</param>
         UniTask<LoadResult> Load(
             IReadOnlyList<ILoadingOperation> operations,
+            bool waitForInput = false,
             CancellationToken ct = default);
     }
 }

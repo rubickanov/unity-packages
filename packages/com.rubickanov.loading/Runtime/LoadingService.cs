@@ -28,6 +28,7 @@ namespace Rubickanov.Loading
         /// <inheritdoc />
         public async UniTask<LoadResult> Load(
             IReadOnlyList<ILoadingOperation> operations,
+            bool waitForInput = false,
             CancellationToken ct = default)
         {
             _cts?.Cancel();
@@ -36,15 +37,19 @@ namespace Rubickanov.Loading
             var token = _cts.Token;
 
             var generation = ++_loadGeneration;
-            _presenter.Hide();
+            await _presenter.Hide();
 
             _presenter.SetDescription("Loading...");
             _presenter.SetProgress(0f);
-            await _presenter.Show();
+            var showTask = _presenter.Show();
 
             try
             {
-                await ExecuteOperations(operations, token);
+                await UniTask.WhenAll(showTask, ExecuteOperations(operations, token));
+
+                if (waitForInput)
+                    await _presenter.WaitForInput(token);
+
                 return LoadResult.Ok;
             }
             catch (OperationCanceledException)
@@ -59,7 +64,7 @@ namespace Rubickanov.Loading
             finally
             {
                 if (_loadGeneration == generation)
-                    _presenter.Hide();
+                    await _presenter.Hide();
             }
         }
 
