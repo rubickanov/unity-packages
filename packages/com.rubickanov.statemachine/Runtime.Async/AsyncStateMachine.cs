@@ -91,7 +91,11 @@ namespace Rubickanov.StateMachine
             await state.OnEnterAsync(ct);
             _isTransitioning = false;
 
-            await ProcessPendingTransitionAsync(ct);
+            if (_hasPendingTransition)
+            {
+                _hasPendingTransition = false;
+                await PerformTransitionAsync(_pendingKey, ct);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -136,44 +140,44 @@ namespace Rubickanov.StateMachine
 
         private async UniTask PerformTransitionAsync(TKey key, CancellationToken ct)
         {
-            _transitionDepth++;
-            if (_transitionDepth > MaxTransitionDepth)
+            var nextKey = key;
+
+            while (true)
             {
-                _transitionDepth = 0;
+                _transitionDepth++;
+                if (_transitionDepth > MaxTransitionDepth)
+                {
+                    _transitionDepth = 0;
+                    _hasPendingTransition = false;
+                    throw new InvalidOperationException(
+                        $"Maximum transition depth ({MaxTransitionDepth}) exceeded. Possible infinite loop detected.");
+                }
+
+                var previousKey = _currentKey;
+                var previousState = _currentState!;
+
+                _isTransitioning = true;
+                await previousState.OnExitAsync(ct);
+
+                var nextState = _states[nextKey];
+                _currentKey = nextKey;
+                _currentState = nextState;
+
+                await nextState.OnEnterAsync(ct);
+                _isTransitioning = false;
+
+                StateChanged?.Invoke(previousKey, nextKey);
+
+                if (!_hasPendingTransition)
+                {
+                    _transitionDepth = 0;
+                    return;
+                }
+
                 _hasPendingTransition = false;
-                throw new InvalidOperationException(
-                    $"Maximum transition depth ({MaxTransitionDepth}) exceeded. Possible infinite loop detected.");
-            }
-
-            var previousKey = _currentKey;
-            var previousState = _currentState!;
-
-            _isTransitioning = true;
-            await previousState.OnExitAsync(ct);
-
-            var nextState = _states[key];
-            _currentKey = key;
-            _currentState = nextState;
-
-            await nextState.OnEnterAsync(ct);
-            _isTransitioning = false;
-
-            StateChanged?.Invoke(previousKey, key);
-
-            await ProcessPendingTransitionAsync(ct);
-        }
-
-        private async UniTask ProcessPendingTransitionAsync(CancellationToken ct)
-        {
-            if (!_hasPendingTransition)
-            {
+                nextKey = _pendingKey;
                 _transitionDepth = 0;
-                return;
             }
-
-            _hasPendingTransition = false;
-            var pendingKey = _pendingKey;
-            await PerformTransitionAsync(pendingKey, ct);
         }
     }
 }
