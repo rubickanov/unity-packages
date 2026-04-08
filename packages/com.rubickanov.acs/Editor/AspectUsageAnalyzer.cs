@@ -91,6 +91,8 @@ namespace Rubickanov.ACS.Editor
             var result = new List<AspectInfo>();
             foreach (var (aspectName, fields) in map.OrderBy(kv => kv.Key))
             {
+                if (fields.Count == 0) continue;
+
                 var fieldInfos = new List<AspectFieldInfo>();
                 foreach (var (fieldName, bindings) in fields.OrderBy(kv => kv.Key))
                     fieldInfos.Add(new AspectFieldInfo(fieldName, bindings));
@@ -127,7 +129,7 @@ namespace Rubickanov.ACS.Editor
 
                 string aspectName = classMatch.Groups[1].Value;
                 var fieldMatches = Regex.Matches(source,
-                    @"public\s+readonly\s+(?:ReactiveProperty<[^>]+>|Subject(?:<[^>]+>)?)\s+(\w+)");
+                    @"public\s+(?:readonly\s+)?(?:ReactiveProperty<[^>]+>|Subject(?:<[^>]+>)?|\w+(?:<[^>]+>)?)\s+(\w+)\s*[;=]");
 
                 var fields = new List<string>();
                 foreach (Match m in fieldMatches)
@@ -152,30 +154,43 @@ namespace Rubickanov.ACS.Editor
         private static List<string> ParseRequiredAspects(string source)
         {
             var result = new List<string>();
-            var matches = Regex.Matches(source, @"Context\.Require<(\w+)>\(\)");
-            foreach (Match m in matches)
+
+            var requireMatches = Regex.Matches(source, @"Context\.Require<(\w+)>\(\)");
+            foreach (Match m in requireMatches)
                 result.Add(m.Groups[1].Value);
+
+            var attrMatches = Regex.Matches(source,
+                @"\[Aspect\]\s+(?:(?:private|protected|public|internal|readonly|static)\s+)*(\w+)\s+\w+");
+            foreach (Match m in attrMatches)
+                result.Add(m.Groups[1].Value);
+
             return result.Distinct().ToList();
         }
 
-        private static string FindFieldVariable(string source, string aspectName)
+        private static string? FindFieldVariable(string source, string aspectName)
         {
-            var match = Regex.Match(source, $@"(\w+)\s*=\s*Context\.Require<{Regex.Escape(aspectName)}>");
-            return match.Success ? match.Groups[1].Value : null;
+            var requireMatch = Regex.Match(source, $@"(\w+)\s*=\s*Context\.Require<{Regex.Escape(aspectName)}>");
+            if (requireMatch.Success) return requireMatch.Groups[1].Value;
+
+            var attrMatch = Regex.Match(source,
+                $@"\[Aspect\]\s+(?:(?:private|protected|public|internal|readonly|static)\s+)*{Regex.Escape(aspectName)}\s+(\w+)");
+            return attrMatch.Success ? attrMatch.Groups[1].Value : null;
         }
 
         private static bool IsFieldWritten(string source, string fieldVar, string fieldName)
         {
             string escaped = Regex.Escape(fieldVar) + @"\." + Regex.Escape(fieldName);
             return Regex.IsMatch(source, escaped + @"\.Value\s*=")
-                   || Regex.IsMatch(source, escaped + @"\.OnNext\(");
+                   || Regex.IsMatch(source, escaped + @"\.OnNext\(")
+                   || Regex.IsMatch(source, escaped + @"\b\s*=[^=]");
         }
 
         private static bool IsFieldRead(string source, string fieldVar, string fieldName)
         {
             string escaped = Regex.Escape(fieldVar) + @"\." + Regex.Escape(fieldName);
             return Regex.IsMatch(source, escaped + @"\.Subscribe\(")
-                   || Regex.IsMatch(source, escaped + @"\.Value(?!\s*=)");
+                   || Regex.IsMatch(source, escaped + @"\.Value(?!\s*=)")
+                   || Regex.IsMatch(source, escaped + @"\b(?!\.Value)(?!\.OnNext)(?!\.Subscribe)(?!\s*=[^=])");
         }
     }
 }

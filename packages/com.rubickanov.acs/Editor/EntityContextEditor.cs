@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Rubickanov.ACS.Editor
 {
-    [CustomEditor(typeof(EntityContext))]
+    [CustomEditor(typeof(EntityContext), true)]
     public class EntityContextEditor : UnityEditor.Editor
     {
         private static readonly Color ReadColor = new(0.4f, 0.75f, 0.45f);
