@@ -14,13 +14,22 @@ namespace Rubickanov.ACS.Editor
         private static readonly Color WriteColor = new(0.9f, 0.65f, 0.25f);
         private static readonly Color DimColor = new(1f, 1f, 1f, 0.4f);
 
-        private List<AspectInfo> _aspects;
+        private List<AspectInfo> _aspects = default!;
         private readonly Dictionary<string, bool> _foldouts = new();
+        private RuntimeAspectDrawer _runtimeDrawer = default!;
 
         private void OnEnable()
         {
+            _runtimeDrawer = new RuntimeAspectDrawer();
             Refresh();
         }
+
+        private void OnDisable()
+        {
+            _runtimeDrawer?.Dispose();
+        }
+
+        public override bool RequiresConstantRepaint() => Application.isPlaying;
 
         private void Refresh()
         {
@@ -54,6 +63,12 @@ namespace Rubickanov.ACS.Editor
 
             foreach (var aspect in _aspects)
                 DrawAspect(aspect);
+
+            if (Application.isPlaying)
+            {
+                EditorGUILayout.Space(8);
+                _runtimeDrawer.Draw((EntityContext)target);
+            }
         }
 
         private void DrawAspect(AspectInfo aspect)

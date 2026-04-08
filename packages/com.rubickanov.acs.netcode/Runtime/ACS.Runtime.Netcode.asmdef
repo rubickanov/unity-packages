@@ -3,11 +3,12 @@
     "rootNamespace": "Rubickanov.ACS.Runtime.Netcode",
     "references": [
         "GUID:c318aa71effcd0148ade1233ecf216cc",
-        "GUID:1491147abca9d7d4bb7105af628b223e"
+        "GUID:1491147abca9d7d4bb7105af628b223e",
+        "GUID:e0cd26848372d4e5c891c569017e11f1"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": false,
+    "allowUnsafeCode": true,
     "overrideReferences": true,
     "precompiledReferences": [
         "R3.dll"

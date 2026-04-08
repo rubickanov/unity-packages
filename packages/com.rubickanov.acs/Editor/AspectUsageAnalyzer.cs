@@ -59,14 +59,14 @@ namespace Rubickanov.ACS.Editor
 
             foreach (var type in componentTypes)
             {
-                string source = FindAndReadSource(type);
-                if (string.IsNullOrEmpty(source)) continue;
+                var source = FindAndReadSource(type);
+                if (source == null) continue;
 
                 var aspects = ParseRequiredAspects(source);
 
                 foreach (string aspectName in aspects)
                 {
-                    string fieldVar = FindFieldVariable(source, aspectName);
+                    var fieldVar = FindFieldVariable(source, aspectName);
                     if (fieldVar == null) continue;
 
                     if (!_aspectFieldsCache.TryGetValue(aspectName, out var aspectFields)) continue;
@@ -139,7 +139,7 @@ namespace Rubickanov.ACS.Editor
             }
         }
 
-        private static string FindAndReadSource(Type type)
+        private static string? FindAndReadSource(Type type)
         {
             string[] guids = AssetDatabase.FindAssets($"{type.Name} t:MonoScript");
             foreach (string guid in guids)

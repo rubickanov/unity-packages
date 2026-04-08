@@ -11,6 +11,12 @@ namespace Rubickanov.ACS.Runtime
     /// </summary>
     public class EntityContext : MonoBehaviour
     {
+        /// <summary>
+        /// Raised once in Start after all Awake calls have completed and aspects have been created.
+        /// Used by extension packages (e.g. netcode) to perform auto-setup.
+        /// </summary>
+        public static event Action<EntityContext>? OnContextInitialized;
+
         private readonly Dictionary<Type, object> _aspects = new();
 
         /// <summary>
@@ -46,6 +52,16 @@ namespace Rubickanov.ACS.Runtime
         public bool Has<T>() where T : class, IEntityAspect
         {
             return _aspects.ContainsKey(typeof(T));
+        }
+
+        /// <summary>
+        /// Returns all aspect instances currently registered on this entity.
+        /// </summary>
+        public IEnumerable<object> GetAllAspects() => _aspects.Values;
+
+        private void Start()
+        {
+            OnContextInitialized?.Invoke(this);
         }
     }
 }
