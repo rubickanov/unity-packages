@@ -50,6 +50,8 @@ namespace Rubickanov.Loading
                 if (waitForInput)
                     await _presenter.WaitForInput(token);
 
+                await ActivateDeferredOperations(operations, token);
+
                 return LoadResult.Ok;
             }
             catch (OperationCanceledException)
@@ -65,6 +67,16 @@ namespace Rubickanov.Loading
             {
                 if (_loadGeneration == generation)
                     await _presenter.Hide();
+            }
+        }
+
+        private static async UniTask ActivateDeferredOperations(
+            IReadOnlyList<ILoadingOperation> operations, CancellationToken ct)
+        {
+            for (int i = 0; i < operations.Count; i++)
+            {
+                if (operations[i] is IDeferrableOperation deferred)
+                    await deferred.Activate(ct);
             }
         }
 
