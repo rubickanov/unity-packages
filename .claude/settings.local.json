@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(grep -E \"\\\\.\\(cs|asmdef|md|txt|json\\)$\")",
-      "Bash(grep -i \"\\\\.cs$\")"
-    ]
-  }
-}

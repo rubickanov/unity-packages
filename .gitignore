@@ -7,3 +7,6 @@ Thumbs.db
 .vs/
 *.sln
 *.csproj
+
+# Claude Code
+.claude/settings.local.json
