@@ -9,4 +9,71 @@ Thumbs.db
 *.csproj
 
 # Claude Code
-.claude/settings.local.json
+.claude/*local*
+
+
+# Unity project library directory.
+[Ll]ibrary/
+
+# Unity editor logs directory.
+[Ll]ogs/
+
+# Unity editor intermediate directory.
+[Tt]emp/
+[Tt]emp.meta
+
+# Unity project user settings.
+UserSettings/
+
+# Compiled object files.
+[Oo]bj/
+
+# Visual Studio Code intermediate files.
+.vscode/
+
+# Rider/ReSharper settings files.
+*.[Dd]ot[Ss]ettings
+*.[Dd]ot[Ss]ettings.[Uu]ser
+
+# Generated project and solution files.
+*.slnx
+
+# Addressables build files.
+[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin
+[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin.meta
+[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/[Ww]indows.meta
+[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/OSX.meta
+
+# Build results.
+[Bb]uild*/
+release/
+
+# User files
+*.user
+
+# Network statistics.
+_statistics/
+
+# FMOD
+# Ignore the Cache folder since it is updated locally.
+[Aa]ssets/Plugins/FMOD/Cache/*
+[Aa]ssets/Plugins/FMOD/Cache.meta
+
+# Ignore bank files in the StreamingAssets folder.
+[Aa]ssets/StreamingAssets/**/*.bank
+[Aa]ssets/StreamingAssets/**/*.bank.meta
+# If the source bank files are kept outside of the StreamingAssets folder then these can be ignored.
+
+# Log files can be ignored.
+fmod_editor.log
+
+# Settings that changes on project load
+ProjectSettings/Packages/com.unity.services.vivox/*
+
+# Additional files
+*.additionalfile*
+
+# Dotnet intermediate files and build results
+**/bin/
+**/bin~/
+**/obj~/

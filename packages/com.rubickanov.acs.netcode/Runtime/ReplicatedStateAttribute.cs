@@ -3,11 +3,11 @@ using System;
 namespace Rubickanov.ACS.Runtime.Netcode
 {
     /// <summary>
-    /// Marks a <c>ReactiveProperty&lt;T&gt;</c> field on an aspect for automatic network replication.
-    /// The field's value is synchronized from the authority side to all other clients.
+    /// Marks a <c>ReactiveProperty&lt;T&gt;</c> field on an aspect for automatic network state replication.
+    /// The field's value is synchronized from the authority side to all other clients via dirty-tick RPC.
     /// </summary>
     [AttributeUsage(AttributeTargets.Field)]
-    public sealed class ReplicatedAttribute : Attribute
+    public sealed class ReplicatedStateAttribute : Attribute
     {
         /// <summary>
         /// Who has write authority over this field. Default is <see cref="AuthorityMode.Server"/>.

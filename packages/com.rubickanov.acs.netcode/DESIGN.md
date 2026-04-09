@@ -45,20 +45,34 @@ Client Authoritative:
 
 ## Layer 0: Replication
 
+Two kinds of data flow across the network:
+
+- **State** — `ReactiveProperty<T>` fields. Current value is synchronized via dirty-tick.
+  Marked with `[ReplicatedState]`.
+- **Events** — `Subject<T>` fields. Each `OnNext` call is broadcast as an instant RPC.
+  Marked with `[ReplicatedEvent]`.
+
 ### Attributes
 
 ```csharp
 [AttributeUsage(AttributeTargets.Field)]
-public class ReplicatedAttribute : Attribute
+public sealed class ReplicatedStateAttribute : Attribute
 {
     public AuthorityMode Authority { get; set; } = AuthorityMode.Server;
     public InterpolationMode Interpolation { get; set; } = InterpolationMode.None;
 }
 
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class ReplicatedEventAttribute : Attribute
+{
+    public AuthorityMode Authority { get; set; } = AuthorityMode.Server;
+    public Reliability Reliability { get; set; } = Reliability.Reliable;
+}
+
 public enum AuthorityMode
 {
-    Server,  // server writes, clients read
-    Owner    // owner writes, server relays to others
+    Server,  // server writes / fires, clients receive
+    Owner    // owner writes / fires, server relays to others
 }
 
 public enum InterpolationMode
@@ -67,91 +81,82 @@ public enum InterpolationMode
     Linear,
     // Spherical -- for quaternions, future
 }
+
+public enum Reliability
+{
+    Reliable,    // guaranteed delivery, ordered (default)
+    Unreliable   // best-effort, lower latency, good for frequent cosmetic events
+}
 ```
 
 ### Usage
 
 ```csharp
-public class HealthAspect : IEntityAspect
+public class WeaponAspect : IEntityAspect
 {
-    [Replicated]
-    public readonly Reactive<float> Current = new(100);
+    // State — current value synced via dirty-tick
+    [ReplicatedState]
+    public readonly ReactiveProperty<int> AmmoInMagazine = new(0);
 
-    [Replicated]
-    public readonly Reactive<float> Max = new(100);
+    [ReplicatedState(Interpolation = InterpolationMode.Linear)]
+    public readonly ReactiveProperty<Vector3> Position = new();
 
-    // Not replicated -- local only
-    public readonly Reactive<bool> IsFlashing = new(false);
+    // Event — instant broadcast on each OnNext
+    [ReplicatedEvent]
+    public readonly Subject<BulletTraceInfo> BulletTraced = new();
+
+    // Cosmetic, frequent — ok to drop
+    [ReplicatedEvent(Reliability = Reliability.Unreliable)]
+    public readonly Subject<Unit> Footstep = new();
+
+    // Not networked — local only
+    public readonly ReactiveProperty<bool> IsHighlighted = new(false);
 }
 ```
 
-### AspectReplicator (internal, auto-created)
+### AspectReplicator
 
-Single `NetworkBehaviour` per entity. Auto-added by `EntityContext` when it detects
-any `[Replicated]` fields in aspects. User never adds this manually.
+Single `NetworkBehaviour` per entity. Must be added to the prefab manually (alongside `NetworkObject`).
+NGO requires all `NetworkBehaviour` components to exist on the prefab before spawn —
+dynamic `AddComponent` does not work for network replication.
 
+Responsibilities:
 - On `OnNetworkSpawn`: scans all aspects in `EntityContext` via reflection
-- Finds all fields marked `[Replicated]`
-- Creates `NetworkVariable<T>` for each field dynamically
-- Sets up sync:
-  - **Authority side** (server or owner): subscribes to `Reactive<T>` changes -> writes to `NetworkVariable<T>`
-  - **Non-authority side**: subscribes to `NetworkVariable<T>.OnValueChanged` -> writes to `Reactive<T>`
-- If any `[Predicted]` fields found: auto-registers entity in `PredictionManager`
-- If any `ISimulate` components found: collects them for simulation calls
+- For each `[ReplicatedState]` field:
+  - Create a `ReplicatedFieldBinding<T>`
+  - On authority side: subscribe to `ReactiveProperty<T>` → mark dirty
+  - On each server tick: if dirty → serialize → send via dirty-mask RPC
+  - On client: deserialize → write to `ReactiveProperty<T>` with suppression flag
+- For each `[ReplicatedEvent]` field:
+  - Create a `ReplicatedEventBinding<T>`
+  - On authority side: subscribe to `Subject<T>` → serialize payload → send RPC immediately
+  - On client: deserialize → call `Subject.OnNext(payload)` with suppression flag
 - Caches reflection data (same pattern as `AspectInjector`)
 
-```csharp
-internal class AspectReplicator : NetworkBehaviour
-{
-    private List<ReplicatedField> _fields;
-    private ISimulate[] _simulators;
-    private SnapshotBuffer _snapshots;
+### Event binding details
 
-    public override void OnNetworkSpawn()
-    {
-        var context = GetComponent<EntityContext>();
-        _fields = ReflectionScanner.FindReplicatedFields(context);
-
-        foreach (var field in _fields)
-        {
-            field.CreateNetworkVariable(this);
-            field.Bind(IsServer, IsOwner);
-        }
-
-        // Auto-detect prediction
-        if (_fields.Any(f => f.IsPredicted))
-        {
-            _simulators = GetComponentsInChildren<ISimulate>();
-            _snapshots = new SnapshotBuffer(128);
-            PredictionManager.Instance.Register(this);
-        }
-    }
-
-    public override void OnNetworkDespawn()
-    {
-        PredictionManager.Instance?.Unregister(this);
-    }
-}
-```
-
-### Auto-Detection Flow
-
-```
-EntityContext.Awake()
-  1. Initialize aspects (existing)
-  2. Scan aspects for [Replicated] fields
-  3. If any found:
-     a. AddComponent<AspectReplicator>() (if not already present)
-     b. AspectReplicator handles everything from OnNetworkSpawn
-```
+- `Subject<Unit>` is a special case — no payload, just broadcast RPC with no data
+- Event payload `T` must satisfy the same type constraints as state (`unmanaged` initially)
+- Events do NOT participate in dirty-tick — they are sent immediately when `OnNext` is called
+- On host: `OnNext` on server side fires locally; RPC arrives back to host and is skipped (same `IsHost` guard as state)
 
 ### Supported Types
 
-Must handle serialization for:
-- Primitives: `int`, `float`, `bool`
-- Unity types: `Vector2`, `Vector3`, `Quaternion`, `Color`
+Currently only `unmanaged` types (via unsafe byte copy):
+- Primitives: `int`, `float`, `bool`, `byte`, `short`, `long`, `double`
+- Unity types: `Vector2`, `Vector3`, `Vector4`, `Quaternion`, `Color`
 - Enums
-- Custom `INetworkSerializable` structs
+
+### TODO: Managed type support
+
+`string`, `FixedString`, and custom `INetworkSerializable` structs require a separate
+serialization path (`ReplicatedFieldBinding_Serializable<T>`). The current `where T : unmanaged`
+constraint does not allow these types.
+
+### TODO: FastBufferWriter pre-calculation
+
+Currently `FastBufferWriter(256, ...)` with autogrow. Better to pre-calculate buffer size
+from `sizeof(T)` of each binding at init time to avoid reallocation.
 
 ---
 
@@ -159,14 +164,14 @@ Must handle serialization for:
 
 ### Server Authoritative (default)
 
-- `[Replicated(Authority = AuthorityMode.Server)]`
+- `[ReplicatedState(Authority = AuthorityMode.Server)]`
 - Server writes to aspect -> syncs to clients
 - Client writes are ignored / blocked on non-authority side
 - Used for: health, game state, AI-controlled entities
 
 ### Owner Authoritative
 
-- `[Replicated(Authority = AuthorityMode.Owner)]`
+- `[ReplicatedState(Authority = AuthorityMode.Owner)]`
 - Owner writes to aspect -> syncs to server -> server relays to other clients
 - Used for: client-auth co-op games, cosmetic state
 - Server can optionally validate (anti-cheat hook)
@@ -177,13 +182,100 @@ Different fields can have different authority on the same entity:
 ```csharp
 public class PlayerAspect : IEntityAspect
 {
-    [Replicated(Authority = AuthorityMode.Server)]
+    [ReplicatedState(Authority = AuthorityMode.Server)]
     public readonly Reactive<float> Health = new(100);  // server controls
 
-    [Replicated(Authority = AuthorityMode.Owner)]
+    [ReplicatedState(Authority = AuthorityMode.Owner)]
     public readonly Reactive<int> SelectedSlot = new(0); // client controls
 }
 ```
+
+---
+
+## Layer 1.5: Component Scope
+
+Problem: with MonoBehaviour-based components, every `EntityComponent` runs on every
+peer (host, client, server). That forces manual `if (NetworkManager.Singleton.IsServer)`
+checks inside `Update()` for logic that should only run on one side. In DOTS Netcode
+this is handled by system groups (`ServerSimulationSystemGroup`) — we need an
+equivalent for MonoBehaviour components.
+
+### Attribute
+
+```csharp
+[AttributeUsage(AttributeTargets.Class)]
+public sealed class NetworkScopeAttribute : Attribute
+{
+    public NetworkScope Scope { get; }
+    public NetworkScopeAttribute(NetworkScope scope) { Scope = scope; }
+}
+
+public enum NetworkScope
+{
+    Everywhere,   // default — runs on server, host, all clients (observers, bridges, VFX)
+    ServerOnly,   // only runs on server/host (authoritative game logic, damage)
+    OwnerOnly     // only runs on the owning client (local input, camera, HUD)
+}
+```
+
+### Semantics
+
+- Default (no attribute) = `Everywhere`. Most components are observers/bridges that
+  react to replicated state — safe default.
+- `ServerOnly` — component is disabled (`enabled = false`) on pure clients.
+  On host runs normally (host *is* a server).
+- `OwnerOnly` — component is disabled on all peers except the one that owns the
+  `NetworkObject`. Useful for input controllers, local cameras, HUDs.
+
+### Usage
+
+```csharp
+[NetworkScope(NetworkScope.ServerOnly)]
+public class CharacterHealth : EntityComponent
+{
+    [Aspect] private HealthAspect _health;
+    // Damage logic runs only on server — no IsServer checks needed
+}
+
+[NetworkScope(NetworkScope.OwnerOnly)]
+public class PlayerInputController : EntityComponent
+{
+    // Input reading runs only on owning client
+}
+
+// No attribute → Everywhere (default)
+public class MuzzleFlashObserver : EntityComponent
+{
+    // Reacts to replicated [ReplicatedEvent] Fired → plays VFX on all peers
+}
+```
+
+### How it's applied
+
+Applied by `AspectReplicator.OnNetworkSpawn()` (or a sibling component):
+- Scan all `EntityComponent`s on the entity for `[NetworkScope]` attributes
+- Check `IsServer`/`IsOwner` against the scope
+- Set `component.enabled = false` on peers where the scope does not match
+
+### Relation to aspect authority
+
+Two levels of enforcement, orthogonal:
+- **Data-level** (`AuthorityMode` on `[ReplicatedState]`) — who is allowed to *write*
+  to a specific field. Enforced by the replication layer.
+- **Logic-level** (`NetworkScope` on component class) — where a component's
+  `Update`/`Awake`/etc. runs at all. Enforced by disabling the component.
+
+Both should usually agree (e.g., a `ServerOnly` component writes to `Authority = Server`
+fields), but they're separate so you can have an `Everywhere` component that reacts to
+replicated state via subscriptions without any authority of its own.
+
+### Mixed components
+
+If a component has both server-only and owner-only logic (e.g., `WeaponController`
+that handles input AND fires server-authoritative damage), it must be split into
+two components. This is not a cost of this approach — it's how netcode architecture
+works in general. The attribute just makes the split explicit instead of hiding it
+behind branching inside `Update()`.
 
 ---
 
@@ -207,10 +299,10 @@ Server snapshots:   [T=1, pos=0] ---- [T=2, pos=5] ---- [T=3, pos=9]
 ### Configuration
 
 ```csharp
-[Replicated(Interpolation = InterpolationMode.Linear)]
+[ReplicatedState(Interpolation = InterpolationMode.Linear)]
 public readonly Reactive<Vector3> Position = new();
 
-[Replicated(Interpolation = InterpolationMode.None)]
+[ReplicatedState(Interpolation = InterpolationMode.None)]
 public readonly Reactive<int> AmmoCount = new();  // discrete, no interpolation
 ```
 
@@ -274,11 +366,11 @@ Marks fields that participate in prediction/reconciliation snapshot:
 ```csharp
 public class MovementAspect : IEntityAspect
 {
-    [Replicated(Authority = AuthorityMode.Server)]
+    [ReplicatedState(Authority = AuthorityMode.Server)]
     [Predicted]
     public readonly Reactive<Vector3> Position = new();
 
-    [Replicated(Authority = AuthorityMode.Server)]
+    [ReplicatedState(Authority = AuthorityMode.Server)]
     [Predicted]
     public readonly Reactive<Vector3> Velocity = new();
 }
@@ -440,10 +532,83 @@ public class NetworkInstaller : IInstaller
 
 ## Implementation Order
 
-1. **[Replicated] + AspectReplicator (auto-created)** -- basic server->client sync
-2. **AuthorityMode.Owner** -- client-auth support
-3. **InterpolationBuffer** -- smooth remote entities
-4. **IInputCommand + ISimulate + PredictionManager** -- prediction/reconciliation
-5. **SnapshotBuffer + reconciliation loop** -- snapshot/rollback machinery
-6. **Lag compensation** -- server-side hitbox history
-7. **Delta compression + relevancy** -- optimization
+Status legend: [x] done, [ ] not started, [~] in progress
+
+- [x] **1. [Replicated] state sync (Layer 0)** — server→client sync via dirty-tick RPC
+  - `ReplicatedStateAttribute`, `AuthorityMode`, `InterpolationMode` enums
+  - `ReplicationScanner` with reflection + caching + stable field sort
+  - `ReplicatedFieldBinding<T>` with unsafe unmanaged serialization + feedback-loop guard
+  - `AspectReplicator` (`NetworkBehaviour`) with dirty-bitmask RPC broadcast
+  - Host double-apply guard (`if (IsHost) return;` in RPC)
+  - Manual placement on prefab (NGO requires NetworkBehaviours at prefab build time)
+  - >64 fields warning
+  - Note: only `AuthorityMode.Server` actually wired — `Owner` path not yet functional
+
+- [x] **2. [ReplicatedEvent] event broadcast (Layer 0.5)** — `Subject<T>` via instant RPC
+  - Hard-rename `[Replicated]` → `[ReplicatedState]` (single test consumer, no deprecated alias)
+  - `ReplicatedEventAttribute` with `Authority` + `Reliability` props
+  - `Reliability` enum (`Reliable` / `Unreliable`)
+  - `ReplicatedEventBinding<T>` + factory parallel to `ReplicatedFieldBinding<T>`
+  - `ReplicationScanner.ScanEvents` returns `ReplicatedEventInfo[]` sorted by name (stable index)
+  - `AspectReplicator` extends:
+    - Authority subscribes to `Subject<T>.OnNext` → serialize `sizeof(T)` bytes → broadcast via reliable/unreliable RPC
+    - Two RPCs (`BroadcastEventReliableRpc`, `BroadcastEventUnreliableRpc`) because `Delivery` is a compile-time arg
+    - Receiver dispatches by `eventIndex` → `ReplicatedEventBinding.ApplyFromNetwork` → `Subject.OnNext` with suppression flag
+  - Host guard `if (IsHost) return;` in dispatch (analogous to state)
+  - `Subject<Unit>` goes through the shared `unmanaged` path (1-byte overhead, acceptable)
+  - Note: only `AuthorityMode.Server` is functional; `Owner` path shares the gap with state and lands in step 4
+  - Note: event index is `byte` → ≤256 events/entity (warning if exceeded)
+
+- [x] **3. Component Scope (Layer 1.5)** — `[NetworkScope]` class-level attribute
+  - `NetworkScopeAttribute` + `NetworkScope` enum (`Everywhere` / `ServerOnly` / `OwnerOnly`)
+  - `NetworkScopeScanner` with per-type cache (parallel to `ReplicationScanner`)
+  - `AspectReplicator.OnNetworkSpawn` calls `ApplyNetworkScopes()` first — scans via
+    `GetComponentsInChildren<IEntityComponent>(includeInactive: true)` so components on
+    Visual children are covered, not only the root
+  - `ServerOnly` → `behaviour.enabled = IsServer`; `OwnerOnly` → `behaviour.enabled = IsOwner`
+  - `OnGainedOwnership` / `OnLostOwnership` re-apply on the cached `OwnerOnly` array
+  - Removes most `if (IsServer)` / `if (IsOwner)` checks from user code
+  - Note: NGO does not guarantee `OnNetworkSpawn` order between `NetworkBehaviour`s on
+    the same `NetworkObject` — an `EntityNetworkComponent` may have already subscribed
+    before we disable it. `Update` is still suppressed and its `DisposableBag` releases
+    on `OnNetworkDespawn`. Acceptable for MVP.
+
+- [x] **4. AuthorityMode.Owner (Layer 1)** — client-auth flow
+  - Owner writes → `SubmitOwnerStateRpc` (`SendTo.Server, InvokePermission = RpcInvokePermission.Owner`) → server applies + `MarkDirty` → existing `OnServerTick` relays via `BroadcastStateRpc` to `NotServer`
+  - Pure client owner subscribes `NetworkTickSystem.Tick += OnOwnerTick`; host-owner is handled by `OnServerTick` (single broadcast path, no extra owner hop)
+  - Events: `SubmitOwnerEventReliableRpc`/`SubmitOwnerEventUnreliableRpc` → server relays via `BroadcastEventReliableRpc`/`BroadcastEventUnreliableRpc` and fires locally on server-side
+  - Per-field / per-event authority skip on receive: pure client owner skips `Owner` fields in `BroadcastStateRpc` (via new `ReplicatedFieldBinding.Skip(FastBufferReader)`) and `Owner` events in `DispatchEvent`, preventing a relay race from overwriting a fresher local write
+  - Anti-cheat: framework-level via `RpcInvokePermission.Owner` (NGO rejects RPCs not from the NetworkObject's owner); server-side per-field/per-event check that `Authority == Owner` rejects malformed payloads
+  - Single dirty bitmask shared between server-auth and owner-auth fields; per-field `AuthorityMode[]` parallel array on replicator distinguishes them at tick/receive time
+  - Note: runtime ownership changes for replication are not covered here — bindings are captured at `OnNetworkSpawn` and owner-tick subscription is not re-evaluated in `OnGainedOwnership` / `OnLostOwnership` (`[NetworkScope]` still re-applies). Follow-up step.
+
+- [x] **5. InterpolationBuffer (Layer 2)** — smooth remote entities
+  - `Interpolators` registry with per-type lerpers: `float`, `double`, `Vector2/3/4`, `Quaternion` (Slerp), `Color`
+  - `InterpolatedFieldBinding<T>` subclass of `ReplicatedFieldBinding<T>` with ring buffer (32 snapshots) keyed by server tick
+  - `BroadcastStateRpc` payload prefixed with `int serverTick` so snapshot timestamps stay monotonic even when multiple RPCs land in one frame
+  - `AspectReplicator.Update()` lerps at `renderTime = ServerTime.Time - 2 * tickInterval`; cached `_interpolatedBindings` array, early-return when empty
+  - Authority bypass: `shouldInterpolate = !IsServer && !isAuthority && Linear` — host / server / owner of owner-auth fields never buffer
+  - First-snapshot bootstrap: first received value is applied immediately so the entity does not stall at `default(T)` for the delay window
+  - Unsupported types (int / bool / enum) with `Linear` → one-time warning + fallback to immediate apply
+  - `ApplyFromNetwork()` signature changed to `ApplyFromNetwork(double receivedTime)`; `SubmitOwnerStateRpc` passes `0` (server does not interpolate)
+
+- [ ] **6. IInputCommand + ISimulate + PredictionManager (Layer 3)** — prediction loop
+  - Marker interface `IInputCommand : INetworkSerializable`
+  - `ISimulate { void Simulate(in TInput input, float dt); }`
+  - `PredictionManager` as pure C# DI singleton subscribing to `NetworkTickSystem.Tick`
+  - `[Predicted]` attribute marking fields included in snapshot
+
+- [ ] **7. SnapshotBuffer + reconciliation (Layer 3)** — rollback machinery
+  - Per-entity ring buffer of `[Predicted]` field values keyed by tick
+  - On server state arrival: restore snapshot → replay inputs from serverTick+1 to currentTick
+
+- [ ] **8. Lag compensation (Layer 4)** — server-side hitbox rollback
+- [ ] **9. Delta compression + relevancy (Layer 5)** — optimization
+
+### TODO (cross-cutting, not tied to a specific layer)
+
+- [ ] Managed type support for replication (`string`, `FixedString`, `INetworkSerializable`) — requires `ReplicatedFieldBinding_Serializable<T>` alternate path
+- [ ] `FastBufferWriter` pre-calculation from `sizeof(T)` of bindings at init time (avoid autogrow reallocation)
+- [ ] IL2CPP: document `[Preserve]` requirement for `MakeGenericType` with value types
+- [ ] Replace per-tick `byte[]` RPC allocation with `CustomMessagingManager` or pooled buffers (Layer 5)
+- [ ] Runtime ownership changes: rebuild owner-auth bindings and owner-tick subscription in `OnGainedOwnership` / `OnLostOwnership` so possession-style handoff works mid-session
