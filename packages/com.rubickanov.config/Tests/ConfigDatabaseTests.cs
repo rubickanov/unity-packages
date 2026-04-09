@@ -110,7 +110,7 @@ namespace Rubickanov.Config.Tests
         }
 
         [Serializable]
-        private class TestData : IIdentifiable
+        private class TestData : ConfigBase, IIdentifiable
         {
             public string Id;
             public int Value;

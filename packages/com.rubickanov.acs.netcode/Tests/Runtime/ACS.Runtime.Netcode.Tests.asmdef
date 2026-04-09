@@ -1,0 +1,25 @@
+{
+    "name": "ACS.Runtime.Netcode.Tests",
+    "rootNamespace": "Rubickanov.ACS.Runtime.Netcode.Tests",
+    "references": [
+        "ACS.Runtime.Netcode",
+        "Unity.Netcode.Runtime",
+        "Unity.Collections"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "R3.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

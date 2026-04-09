@@ -1,0 +1,26 @@
+{
+    "m_Dictionary": {
+        "m_DictionaryValues": [
+            {
+                "type": "System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+                "key": "IncludeAssemblies",
+                "value": "{\"m_Value\":\"ACS.Editor,ACS.Runtime,ACS.Runtime.Netcode,ACS.Runtime.Netcode.Tests,ACS.Tests,Audio.Runtime,BehaviorTree.Editor,BehaviorTree.Runtime,com.IvanMurzak.Unity.MCP.TestFiles,com.rlabrecque.steamworks.net,com.rlabrecque.steamworks.net.editor,Config.Runtime,Config.Tests,DevConsole.Editor,DevConsole.Netcode.Runtime,DevConsole.Runtime,EQS.BehaviorTree,EQS.Editor,EQS.Runtime,EQS.UniTask,Extensions.Unity.PlayerPrefsEx,GameplayTags.Editor,GameplayTags.Runtime,GameplayTags.Unity,GAS.Editor,GAS.Runtime,GAS.Unity,LitMotion,LitMotion.Editor,LitMotion.Extensions,Loading.Runtime,Localization.Editor,Localization.Runtime,Logging.Runtime,LoggingEditor,Microsoft.CodeAnalysis.Analyzers_Unity,NuGetForUnity,Rubickanov.Motor,Rubickanov.Motor.Editor,StateMachine.Async,StateMachine.Runtime,SteamTransport.Runtime,Storage.Runtime,Storage.Unity,UI.Animations,UI.Loading,UI.Localization.Runtime,UI.Localization.UIToolkit,UI.Runtime,UI.UGUI,UI.UIToolkit,UniTask,UniTask.Addressables,UniTask.DOTween,UniTask.Editor,UniTask.Linq,UniTask.TextMeshPro,Unity.Addressables,Unity.Addressables.DocExampleCode.Editor.Tests,Unity.Addressables.Editor,Unity.Burst,Unity.Burst.CodeGen,Unity.Burst.Editor,Unity.Collections,Unity.Collections.CodeGen,Unity.Collections.Editor,Unity.InputSystem,Unity.InputSystem.DocCodeSamples,Unity.InputSystem.ForUI,Unity.InputSystem.TestFramework,Unity.InternalAPIEditorBridge.013,Unity.InternalAPIEngineBridge.004,Unity.InternalAPIEngineBridge.013,Unity.Localization,Unity.Localization.Editor,Unity.Mathematics,Unity.Mathematics.Editor,Unity.Multiplayer.Center.Common,Unity.Multiplayer.Center.Editor,Unity.Netcode.Editor,Unity.Netcode.Editor.CodeGen,Unity.Netcode.PackageChecker.Editor,Unity.Netcode.Runtime,Unity.Networking.Editor,Unity.Networking.Transport,Unity.PerformanceTesting,Unity.PerformanceTesting.Editor,Unity.Profiling.Core,Unity.ResourceManager,Unity.Rider.Editor,Unity.ScriptableBuildPipeline,Unity.ScriptableBuildPipeline.Editor,Unity.Settings.Editor,Unity.Sysroot.Linux_x86_64,Unity.SysrootPackage.Editor,Unity.TestTools.CodeCoverage.Editor,Unity.TestTools.CodeCoverage.Editor.OpenCover.Model,Unity.TestTools.CodeCoverage.Editor.OpenCover.Mono.Reflection,Unity.TextMeshPro,Unity.TextMeshPro.Editor,Unity.Toolchain.Linux-x86_64-Linux,Unity.VisualStudio.Editor,UnityEditor.TestRunner,UnityEditor.UI,UnityEditor.UI.Analytics,UnityEngine.TestRunner,UnityEngine.UI,Utils.Editor,Utils.EditorTests,Utils.Runtime,ZLogger.Unity\"}"
+            },
+            {
+                "type": "System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+                "key": "Path",
+                "value": "{\"m_Value\":\"{ProjectPath}\"}"
+            },
+            {
+                "type": "System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+                "key": "HistoryPath",
+                "value": "{\"m_Value\":\"{ProjectPath}\"}"
+            },
+            {
+                "type": "System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+                "key": "EnableCodeCoverage",
+                "value": "{\"m_Value\":true}"
+            }
+        ]
+    }
+}

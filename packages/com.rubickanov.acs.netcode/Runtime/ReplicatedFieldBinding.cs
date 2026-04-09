@@ -3,32 +3,44 @@ using System.Collections.Generic;
 using R3;
 using Unity.Collections;
 using Unity.Netcode;
+using UnityEngine;
+using UnityEngine.Scripting;
 
 namespace Rubickanov.ACS.Runtime.Netcode
 {
+    [Preserve]
     internal abstract class ReplicatedFieldBinding
     {
         public bool IsDirty { get; protected set; }
+        public virtual bool IsInterpolated => false;
+        public abstract int Size { get; }
 
         public abstract void WriteTo(FastBufferWriter writer);
         public abstract void ReadFrom(FastBufferReader reader);
+        public abstract void Skip(FastBufferReader reader);
         public abstract void SubscribeAsAuthority(ref DisposableBag disposables);
-        public abstract void ApplyFromNetwork();
+        public abstract void ApplyFromNetwork(double receivedTime);
+        public virtual void TickRender(double renderTime) { }
         public abstract void ClearDirty();
+
+        public void MarkDirty() => IsDirty = true;
     }
 
-    internal sealed class ReplicatedFieldBinding<T> : ReplicatedFieldBinding
+    [Preserve]
+    internal class ReplicatedFieldBinding<T> : ReplicatedFieldBinding
         where T : unmanaged
     {
-        private readonly ReactiveProperty<T> _reactive;
-        private T _pendingValue;
-        private bool _hasPendingValue;
-        private bool _suppressNotification;
+        protected readonly ReactiveProperty<T> _reactive;
+        protected T _pendingValue;
+        protected bool _hasPendingValue;
+        protected bool _suppressNotification;
 
         public ReplicatedFieldBinding(ReactiveProperty<T> reactive)
         {
             _reactive = reactive;
         }
+
+        public override unsafe int Size => sizeof(T);
 
         public override void SubscribeAsAuthority(ref DisposableBag disposables)
         {
@@ -55,12 +67,16 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _hasPendingValue = true;
         }
 
-        public override void ApplyFromNetwork()
+        public override unsafe void Skip(FastBufferReader reader)
+        {
+            T discard = default;
+            reader.ReadBytesSafe((byte*)&discard, sizeof(T));
+        }
+
+        public override void ApplyFromNetwork(double receivedTime)
         {
             if (!_hasPendingValue) return;
-            _suppressNotification = true;
-            _reactive.Value = _pendingValue;
-            _suppressNotification = false;
+            WriteSuppressed(_pendingValue);
             _hasPendingValue = false;
         }
 
@@ -68,14 +84,46 @@ namespace Rubickanov.ACS.Runtime.Netcode
         {
             IsDirty = false;
         }
+
+        protected void WriteSuppressed(T value)
+        {
+            _suppressNotification = true;
+            _reactive.Value = value;
+            _suppressNotification = false;
+        }
     }
 
+    [Preserve]
     internal static class ReplicatedFieldBindingFactory
     {
         private static readonly Dictionary<Type, Type> BindingTypeCache = new();
+        private static readonly Dictionary<Type, Type> InterpolatedBindingTypeCache = new();
+        private static readonly HashSet<Type> WarnedUnsupportedTypes = new();
 
-        public static ReplicatedFieldBinding Create(object reactiveProperty, Type valueType)
+        public static ReplicatedFieldBinding Create(object reactiveProperty, Type valueType, bool interpolate)
         {
+            if (interpolate)
+            {
+                if (Interpolators.TryGetRaw(valueType, out var lerper))
+                {
+                    if (!InterpolatedBindingTypeCache.TryGetValue(valueType, out var interpBindingType))
+                    {
+                        interpBindingType = typeof(InterpolatedFieldBinding<>).MakeGenericType(valueType);
+                        InterpolatedBindingTypeCache[valueType] = interpBindingType;
+                    }
+
+                    return (ReplicatedFieldBinding)Activator.CreateInstance(interpBindingType, reactiveProperty, lerper);
+                }
+
+                if (WarnedUnsupportedTypes.Add(valueType))
+                {
+                    Debug.LogWarning(
+                        $"[AspectReplicator] InterpolationMode.Linear is set on a field of type '{valueType.Name}', " +
+                        $"but no lerper is registered for this type. Falling back to immediate apply. " +
+                        $"Supported: float, double, Vector2, Vector3, Vector4, Quaternion, Color.");
+                }
+            }
+
             if (!BindingTypeCache.TryGetValue(valueType, out var bindingType))
             {
                 bindingType = typeof(ReplicatedFieldBinding<>).MakeGenericType(valueType);
