@@ -1,0 +1,35 @@
+ACS Netcode Experiment — Setup
+================================
+
+1. PREFAB: "ExperimentEntity"
+   Create a new prefab with these components on the root:
+   - EntityContext
+   - NetworkObject
+   - AspectReplicator
+   - ServerLogic
+   - OwnerInputMover
+   - ExperimentHUD
+   Add a visible mesh (Cube/Sphere) so you can see the entity.
+
+2. SCENE: "ExperimentScene"
+   - NetworkManager (UnityTransport, tick rate ~30)
+     → set Player Prefab = ExperimentEntity
+     → add ExperimentEntity to Network Prefabs list
+   - Empty GameObject with NetworkExperimentBootstrap
+   - Camera (e.g. pos 0,10,-10, look at origin)
+   - Directional Light
+
+3. RUN
+   - Play → click "Host"
+   - Entity auto-spawns for host player
+   - WASD moves it (owner-auth Position)
+   - Server rotates it (server-auth Rotation)
+   - Damage every 3s (Health drops + DamageDealt event fires)
+
+4. MULTIPLAYER PLAY MODE (second client)
+   - Window → Multiplayer → Multiplayer Play Mode
+   - Add a virtual player, set to "Client"
+   - Enter play mode — both peers see each other's entities
+   - Watch interpolation on remote entities
+
+5. Tab hides/shows the connection panel.
