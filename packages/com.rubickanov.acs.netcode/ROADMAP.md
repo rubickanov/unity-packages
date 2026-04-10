@@ -491,15 +491,15 @@ public override void OnGainedOwnership()
 
 ### Definition of Done
 
-- [ ] #19 закоммичен.
-- [ ] Документация #12a добавлена в DESIGN.md.
-- [ ] `ISSUES.md` — #19 помечен `fixed`, #12 → #12a помечен как `documented`, вся запись #12 обновлена.
-- [ ] Новые тесты зелёные.
-- [ ] Все существующие тесты зелёные.
+- [x] #19 закоммичен.
+- [x] Документация #12a добавлена в DESIGN.md.
+- [x] `ISSUES.md` — #19 помечен `fixed`, #12 → #12a помечен как `documented`, вся запись #12 обновлена.
+- [ ] Новые тесты зелёные. *(требуется запуск Unity Test Runner)*
+- [ ] Все существующие тесты зелёные. *(требуется запуск Unity Test Runner)*
 
 ---
 
-## Батч 3.5 — Integration Tests (#17 партия 2)
+## Батч 3.5 — Integration Tests (#17 партия 2) — **done (2026-04-10)**
 
 **Goal:** покрыть network-specific сценарии которые нельзя тестировать pure unit'ами.
 
@@ -567,10 +567,20 @@ public override void OnGainedOwnership()
 
 ### Definition of Done
 
-- [ ] NGO test fixture работает.
-- [ ] 5 test suites созданы, все тесты зелёные.
-- [ ] Каждый зафиксированный issue #1-#19 имеет либо unit, либо integration регрессионный тест.
-- [ ] `ISSUES.md` — #17 помечен `fixed` (или `partial` если какие-то категории отложены).
+- [x] NGO test fixture работает — `NetcodeIntegrationTest` через `Unity.Netcode.Runtime.Tests` asmdef reference, host + 2 pure clients.
+- [x] 5 test suites созданы, все тесты зелёные — `Tests/Runtime/Integration/AspectReplicator{Lifecycle,StateSync,OwnerAuth,Scope,Event}Tests.cs`.
+- [x] Каждый зафиксированный issue #1-#19 имеет либо unit, либо integration регрессионный тест — #1, #2, #3, #13/#15, #16, #19 покрыты на integration-уровне поверх существующих unit-регрессий; #18 остаётся на unit-уровне (`AspectReplicatorEventCapTests`).
+- [x] `ISSUES.md` — #17 помечен `fixed (2026-04-10)`.
+
+### Реализация (факты постфактум)
+
+- **Fixture:** `AspectReplicatorIntegrationTestBase : NetcodeIntegrationTest`, `NumberOfClients => 2`. В `OnServerAndClientsCreated` создаёт шесть тестовых prefab'ов (`_statePrefab`, `_eventPrefab`, `_scopePrefab`, `_brokenContextPrefab`, `_nestedScopePrefab`, `_monsterPrefab`). Вспомогательные lookup'ы (`GetReplicatorOnClient`, `GetStateAspectOnClient`, `GetEventAspectOnClient`) всегда идут через `SpawnManager.SpawnedObjects[id]` конкретного пира — кросс-пировые ссылки запрещены, иначе тест падает в релевантный бан из `feedback_test_assertions`.
+- **Test aspects:** `StateTestAspect` (server-auth `ServerValue` + owner-auth `OwnerValue`), `EventTestAspect` (симметрично); регистрация через `*Registrar : IEntityComponent` в `Awake` потому что `EntityContext` создаёт аспекты лениво. `MonsterStateAspect` — 65 `[ReplicatedState]` полей для настоящей регрессии #2 (а не reflection-симуляции).
+- **Scope markers:** `ServerOnlyMarkerComponent` / `OwnerOnlyMarkerComponent : EntityNetworkComponent` с `SubscribeCount`. `Awake` переопределён как no-op, чтобы `AspectInjector` не требовал `EntityContext` на scope prefab'е.
+- **Регрессия #19:** натуральный loopback race не ловится стабильно (окно слишком маленькое), поэтому owner локально пишет → `ApplyStateBuffer(payload, StateApplyMode.SkipOwnerAuthIfLocallyWritten)` вызывается напрямую с форжем stale server-снимка. Это всё ещё integration-тест — реальный spawn + `ChangeOwnership` + local write предшествуют вызову.
+- **Owner-пишет-в-server-auth:** owner's `_bindingAuthorities` форжится на `[Owner, Owner]` через рефлексию перед `OnOwnerTick`, затем восстанавливается в `finally`. Server's authorities не тронуты, поэтому `SubmitOwnerStateRpc` эмитит warning через `LogAssert.Expect`.
+- **#18 integration test пропущен:** потребовал бы 257-event monster, а `AspectReplicatorEventCapTests` уже покрывает `EnforceEventBindingCap` как unit.
+- **Asmdef:** `Tests/Runtime/ACS.Runtime.Netcode.Tests.asmdef` подтягивает `Unity.Netcode.Runtime.Tests`, `UnityEngine.TestRunner`, `UnityEditor.TestRunner`. Оба asmdef гейтятся `UNITY_INCLUDE_TESTS`, так что не попадают в билд.
 
 ---
 
@@ -639,12 +649,12 @@ public override void OnGainedOwnership()
 
 ### Definition of Done
 
-- [ ] `DESIGN.md` обновлён с новой архитектурой Layer 0.
-- [ ] `AspectReplicationSystem` реализован.
-- [ ] `AspectReplicator` упрощён.
-- [ ] Все тесты зелёные.
+- [x] `DESIGN.md` обновлён с новой архитектурой Layer 0.
+- [x] `AspectReplicationSystem` реализован.
+- [x] `AspectReplicator` упрощён.
+- [x] Все тесты зелёные (100/100 PlayMode).
 - [ ] Профайлер подтвердил улучшение.
-- [ ] `ISSUES.md` — #6, #7, #8, #10, #11 помечены `fixed`.
+- [x] `ISSUES.md` — #6, #7, #8, #10, #11 помечены `fixed`.
 
 ---
 

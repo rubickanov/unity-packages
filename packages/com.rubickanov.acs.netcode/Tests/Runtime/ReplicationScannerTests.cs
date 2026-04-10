@@ -1,10 +1,11 @@
+using System.Collections;
 using System.Collections.Generic;
-using System.Text.RegularExpressions;
+using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using R3;
 using Rubickanov.ACS.Runtime.Netcode;
 using UnityEngine;
-using UnityEngine.TestTools;
 
 namespace Rubickanov.ACS.Runtime.Netcode.Tests
 {
@@ -12,9 +13,34 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
     public class ReplicationScannerTests
     {
         // NOTE ON CACHE HYGIENE:
-        // ReplicationScanner caches scan results per Type in a static dictionary that
-        // lives for the whole test run. Each test therefore uses its own unique nested
-        // type so no test observes a result cached by a previous test.
+        // ReplicationScanner keeps three static per-Type dictionaries (StateCache,
+        // EventCache, UnmanagedCache) that live for the whole Unity domain — not just
+        // a single test run. Unique nested types per test protect against pollution
+        // WITHIN a run, but a second Run in Test Runner without a domain reload still
+        // sees the previous run's cache, and negative tests that expect a LogError on
+        // the first scan stop seeing that error (cache hit → early return before the
+        // Debug.LogError line). [SetUp] below clears all three caches via reflection so
+        // every test starts against a cold scanner.
+
+        [SetUp]
+        public void ClearScannerStaticCaches()
+        {
+            ClearStaticDictionary("StateCache");
+            ClearStaticDictionary("EventCache");
+            ClearStaticDictionary("UnmanagedCache");
+        }
+
+        private static void ClearStaticDictionary(string fieldName)
+        {
+            var field = typeof(ReplicationScanner).GetField(fieldName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+            // Meaningful precondition: if production renames one of these fields the
+            // test suite must fail loudly rather than silently leak cached results.
+            Assert.IsNotNull(field,
+                $"ReplicationScanner must have a private static field '{fieldName}' — rename detected?");
+            var dict = (IDictionary)field.GetValue(null);
+            dict.Clear();
+        }
 
         // ---- Field ordering -----------------------------------------------------
 
@@ -69,21 +95,50 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         [Test]
         public void Scan_ReactivePropertyOfString_LogsErrorAndOmitsField()
         {
-            LogAssert.Expect(LogType.Error, new Regex("not unmanaged"));
-
-            var fields = ReplicationScanner.Scan(new InvalidStringStateAspect());
+            // NOTE: We intercept Debug.unityLogger.logHandler instead of using LogAssert.Expect
+            // because LogAssert.Expect does not suppress the message from Unity's Console —
+            // the red error lines accumulate after every test run even when tests are green.
+            // The CapturingLogHandler swallows the log silently while still letting us verify
+            // that the real invariant (LogError was emitted with the expected text) holds.
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new InvalidStringStateAspect());
+            }
+            finally
+            {
+                Debug.unityLogger.logHandler = original;
+            }
 
             Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("not unmanaged")),
+                "Scanner must emit a LogError explaining that the ReactiveProperty<string> type is not unmanaged");
         }
 
         [Test]
         public void ScanEvents_SubjectOfManagedGeneric_LogsErrorAndOmitsEvent()
         {
-            LogAssert.Expect(LogType.Error, new Regex("not unmanaged"));
-
-            var events = ReplicationScanner.ScanEvents(new InvalidListEventAspect());
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedEventInfo[] events;
+            try
+            {
+                events = ReplicationScanner.ScanEvents(new InvalidListEventAspect());
+            }
+            finally
+            {
+                Debug.unityLogger.logHandler = original;
+            }
 
             Assert.AreEqual(0, events.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("not unmanaged")),
+                "Scanner must emit a LogError explaining that the Subject<List<int>> type is not unmanaged");
         }
 
         // ---- Events: basic scan + ordering -------------------------------------
@@ -174,6 +229,26 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             [ReplicatedState] public ReactiveProperty<int> Cherry = new ReactiveProperty<int>(0);
             [ReplicatedState] public ReactiveProperty<int> Apple = new ReactiveProperty<int>(0);
             [ReplicatedState] public ReactiveProperty<int> Banana = new ReactiveProperty<int>(0);
+        }
+
+        // ---- Log capture --------------------------------------------------------
+        // Swaps in as Debug.unityLogger.logHandler while a negative test runs, so
+        // expected Debug.LogError calls are captured for assertion but never reach
+        // Unity's native logger — keeps the Console clean after the run.
+        private sealed class CapturingLogHandler : ILogHandler
+        {
+            private readonly List<(LogType type, string message)> _captured = new();
+            public IReadOnlyList<(LogType type, string message)> Captured => _captured;
+
+            public void LogFormat(LogType logType, UnityEngine.Object context, string format, params object[] args)
+            {
+                _captured.Add((logType, string.Format(format, args)));
+            }
+
+            public void LogException(System.Exception exception, UnityEngine.Object context)
+            {
+                _captured.Add((LogType.Exception, exception.Message));
+            }
         }
     }
 }

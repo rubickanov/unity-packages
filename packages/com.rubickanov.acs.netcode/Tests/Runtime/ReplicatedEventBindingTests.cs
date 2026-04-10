@@ -25,6 +25,36 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         }
 
         /// <summary>
+        /// Mock broadcaster that captures the T-payload bytes (stripping the
+        /// networkObjectId + eventIndex header that OnLocalEvent prepends).
+        /// </summary>
+        private sealed class CapturingBroadcaster : IEventBroadcaster
+        {
+            public readonly List<(byte index, byte[] payload)> Captured = new();
+
+            public unsafe void SendEvent(ulong networkObjectId, byte eventIndex,
+                FastBufferWriter writer, AuthorityMode authority, Reliability reliability,
+                bool isOwnerSubmit)
+            {
+                var reader = new FastBufferReader(writer, Allocator.Temp);
+                try
+                {
+                    reader.ReadValueSafe(out ulong _);
+                    reader.ReadValueSafe(out byte _);
+                    int remaining = reader.Length - reader.Position;
+                    var payload = new byte[remaining];
+                    fixed (byte* ptr = payload)
+                        reader.ReadBytesSafe(ptr, remaining);
+                    Captured.Add((eventIndex, payload));
+                }
+                finally
+                {
+                    reader.Dispose();
+                }
+            }
+        }
+
+        /// <summary>
         /// Subscribes <paramref name="binding"/> as authority with a capturing broadcaster
         /// and returns the list that each invocation appends to. Caller owns the bag.
         /// </summary>
@@ -32,10 +62,9 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             ReplicatedEventBinding<T> binding, byte eventIndex, ref DisposableBag bag)
             where T : unmanaged
         {
-            var captured = new List<(byte, byte[])>();
-            Action<byte, byte[]> broadcaster = (i, b) => captured.Add((i, b));
-            binding.SubscribeAsAuthority(ref bag, eventIndex, broadcaster);
-            return captured;
+            var broadcaster = new CapturingBroadcaster();
+            binding.SubscribeAsAuthority(ref bag, eventIndex, broadcaster, networkObjectId: 0, isOwnerSubmit: false);
+            return broadcaster.Captured;
         }
 
         /// <summary>
@@ -57,7 +86,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             finally { writer.Dispose(); }
         }
 
-        // ---- Authority path: OnLocalEvent → broadcaster -------------------------
+        // ---- Authority path: OnLocalEvent -> broadcaster -------------------------
 
         [Test]
         public void SubscribeAsAuthority_LocalOnNext_InvokesBroadcasterOnceWithDeclaredEventIndex()
@@ -114,7 +143,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             // Guard: the constructor must not eager-subscribe the internal OnLocalEvent handler.
             // If it did, Subject.OnNext would call `_broadcaster!.Invoke(...)` with broadcaster
-            // still null → NullReferenceException. The local counter also proves the subject
+            // still null -> NullReferenceException. The local counter also proves the subject
             // itself still works (sanity check), which in turn proves `binding` is alive and
             // observably connected to the subject — no synthetic IsNotNull needed.
             var subject = new Subject<int>();
@@ -128,7 +157,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             }
         }
 
-        // ---- Non-authority path: ApplyFromNetwork → subject.OnNext (#12b) -------
+        // ---- Non-authority path: ApplyFromNetwork -> subject.OnNext (#12b) -------
 
         [Test]
         public void ApplyFromNetwork_FiresLocalSubjectSubscriber_RegressionTwelveB()
@@ -186,14 +215,14 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             }
         }
 
-        // ---- Sender → wire bytes → receiver round-trip --------------------------
+        // ---- Sender -> wire bytes -> receiver round-trip --------------------------
 
         [Test]
         public unsafe void RoundTrip_Int_CapturedBroadcasterBytesReplayedViaReceiverApplyFromNetwork_DeliversSameValue()
         {
-            // Full production path: sender (authority) subject.OnNext → OnLocalEvent →
-            // broadcaster bytes → receiver binding reads those same bytes via ApplyFromNetwork
-            // → receiver's local subscriber sees the value.
+            // Full production path: sender (authority) subject.OnNext -> OnLocalEvent ->
+            // broadcaster bytes -> receiver binding reads those same bytes via ApplyFromNetwork
+            // -> receiver's local subscriber sees the value.
             var senderSubject = new Subject<int>();
             var sender = CreateBinding(senderSubject);
             var bag = new DisposableBag();
@@ -289,7 +318,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         [Test]
         public void Authority_PassedToConstructor_ExposedViaProperty()
         {
-            // Guards against constructor-arg swap (authority ↔ reliability).
+            // Guards against constructor-arg swap (authority <-> reliability).
             var subject = new Subject<int>();
             var binding = CreateBinding(subject, authority: AuthorityMode.Owner);
 

@@ -31,18 +31,41 @@ namespace Rubickanov.EQS
         public virtual bool PreferBatch => false;
 
         /// <summary>
-        /// Scores all alive items in one call. Override for vectorized or Physics batch operations.
+        /// Items per chunk when the engine runs <see cref="ScoreBatch"/>.
+        /// The engine checks the frame budget between chunks, so smaller values
+        /// give finer-grained budget control at the cost of more job overhead.
+        /// </summary>
+        public virtual int BatchChunkSize => 32;
+
+        /// <summary>
+        /// Scores items in the half-open range [<paramref name="startIndex"/>, <paramref name="endExclusive"/>)
+        /// in one call. Override for vectorized or Physics batch operations (e.g. RaycastCommand).
         /// Default implementation loops over <see cref="Score"/>.
         /// </summary>
         public virtual void ScoreBatch(
             EQSQueryContext context, IReadOnlyList<EQSItem> items,
-            bool[] alive, float[] rawScores, int count)
+            bool[] alive, float[] rawScores, int startIndex, int endExclusive)
         {
-            for (int i = 0; i < count; i++)
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (PreferBatch) WarnFallbackOnce();
+#endif
+            for (int i = startIndex; i < endExclusive; i++)
             {
                 if (!alive[i]) continue;
                 rawScores[i] = Score(context, items[i]);
             }
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static readonly HashSet<Type> _warnedTypes = new();
+
+        private void WarnFallbackOnce()
+        {
+            var type = GetType();
+            if (_warnedTypes.Add(type))
+                Debug.LogWarning(
+                    $"{type.Name}: PreferBatch=true but ScoreBatch not overridden — falling back to per-item Score().");
+        }
+#endif
     }
 }

@@ -73,3 +73,11 @@ The actual working directory when Claude starts is `unity-project-pckgs/`, so pa
 - **`link.sh <project> [local|remote|status]`** switches a *consumer* project's manifest between local file paths (dev) and git URLs (release). Don't run it against `unity-project-pckgs` itself — that sandbox stays local.
 - **`docs/generate.sh`** regenerates the DocFX site. `docs/docfx.json`, `docs/index.md`, `docs/toc.yml`, `docs/guides/toc.yml`, `docs/api/index.md` are regenerated on every run — don't hand-edit them.
 - **Bumping a package version:** edit `packages/com.rubickanov.<name>/package.json`.
+
+## Tests
+
+- NUnit, AAA structure (Arrange / Act / Assert). No phase-label comments — blank line separation between phases is enough.
+- Name: `Method_Scenario_ExpectedBehavior` (e.g. `Scan_FieldsDeclaredInReverseAlphabeticalOrder_ReturnedAlphabetically`).
+- One behavior per test. Multiple related asserts in a single test are fine — don't split artificially.
+- Assertion messages only when the failure cause isn't obvious from the assert itself.
+- Prefer per-test fixtures (nested classes, fresh instances) over shared state when the SUT has static/global state that could leak between tests.

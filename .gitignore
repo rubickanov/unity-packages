@@ -9,7 +9,7 @@ Thumbs.db
 *.csproj
 
 # Claude Code
-.claude/*local*
+**/.claude/*local*
 
 
 # Unity project library directory.

@@ -42,8 +42,9 @@ namespace Rubickanov.EQS
             _lastResult = _query.RunSync(context);
 
             _generatedItems.Clear();
-            if (_queryConfig.Generator != null)
-                _queryConfig.Generator.Generate(context, _generatedItems);
+            var items = _query.Items;
+            for (int i = 0; i < items.Count; i++)
+                _generatedItems.Add(items[i]);
         }
 
         private void OnDrawGizmosSelected()

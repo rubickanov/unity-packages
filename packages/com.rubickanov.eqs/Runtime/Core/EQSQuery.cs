@@ -28,6 +28,11 @@ namespace Rubickanov.EQS
 
         public EQSQueryStatus Status => _status;
 
+        /// <summary>
+        /// The items produced by the generator. Read-only; valid after <see cref="Start"/>.
+        /// </summary>
+        public IReadOnlyList<EQSItem> Items => _items;
+
         public EQSQuery(EQSQueryConfig config)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
@@ -117,17 +122,31 @@ namespace Rubickanov.EQS
                 // First pass: score all items for this test
                 if (test.PreferBatch)
                 {
-                    // Batch path — score all items in one call
-                    test.ScoreBatch(_context, _items, _alive!, _rawTestScores!, itemCount);
+                    // Batch path — chunked so the budget is honoured between chunks.
+                    int chunkSize = Math.Max(1, test.BatchChunkSize);
 
-                    for (int i = 0; i < itemCount; i++)
+                    while (_currentItemIndex < itemCount)
                     {
-                        if (!_alive![i]) continue;
-                        if (_rawTestScores![i] < 0f)
+                        if (_stopwatch.Elapsed.TotalMilliseconds > budgetMs)
                         {
-                            _alive[i] = false;
-                            _rawTestScores[i] = -1f;
+                            _stopwatch.Stop();
+                            return false;
                         }
+
+                        int end = Math.Min(_currentItemIndex + chunkSize, itemCount);
+                        test.ScoreBatch(_context, _items, _alive!, _rawTestScores!, _currentItemIndex, end);
+
+                        for (int i = _currentItemIndex; i < end; i++)
+                        {
+                            if (!_alive![i]) continue;
+                            if (_rawTestScores![i] < 0f)
+                            {
+                                _alive[i] = false;
+                                _rawTestScores[i] = -1f;
+                            }
+                        }
+
+                        _currentItemIndex = end;
                     }
                 }
                 else

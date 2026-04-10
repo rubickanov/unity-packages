@@ -14,6 +14,8 @@ namespace Rubickanov.EQS
         [NonSerialized] private EQSQuery? _query;
         [NonSerialized] private Transform? _transform;
 
+        public EQSQueryStatus? QueryStatus => _query?.Status;
+
         protected override BTStatus OnExecute(BTContext ctx)
         {
             _transform ??= ((Component)ctx.Owner!).transform;
