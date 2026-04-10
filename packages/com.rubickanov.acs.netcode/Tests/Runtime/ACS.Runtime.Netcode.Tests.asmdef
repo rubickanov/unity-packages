@@ -2,13 +2,14 @@
     "name": "ACS.Runtime.Netcode.Tests",
     "rootNamespace": "Rubickanov.ACS.Runtime.Netcode.Tests",
     "references": [
+        "ACS.Runtime",
         "ACS.Runtime.Netcode",
         "Unity.Netcode.Runtime",
-        "Unity.Collections"
+        "Unity.Collections",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
     ],
-    "includePlatforms": [
-        "Editor"
-    ],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,
     "overrideReferences": true,

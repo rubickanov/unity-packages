@@ -43,3 +43,15 @@ public class NetworkHealthSync : EntityNetworkComponent
 **EntityNetworkComponent** extends `NetworkBehaviour` and implements `IEntityComponent`. It provides access to `Context` (lazily resolved via `GetComponentInParent<EntityContext>()`) and calls `EntityInjector.Inject` in `Awake()` for DI support.
 
 Subscribe in `OnNetworkSpawn()`, unsubscribe in `OnNetworkDespawn()` -- same lifecycle pattern as standard Netcode components but with ACS aspect access.
+
+## IL2CPP Support
+
+Built-in unmanaged types (`int`, `float`, `bool`, `double`, `Vector2`, `Vector3`, `Vector4`, `Quaternion`, `Color`) work on IL2CPP automatically via AOT hints.
+
+If you use **custom unmanaged structs** in `[ReplicatedState]` / `[ReplicatedEvent]`, add a `link.xml` to your project's `Assets/` to prevent stripping:
+
+```xml
+<linker>
+  <assembly fullname="ACS.Runtime.Netcode" preserve="all"/>
+</linker>
+```

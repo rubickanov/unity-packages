@@ -306,6 +306,137 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             finally { bag.Dispose(); }
         }
 
+        // ---- OwnerWroteSinceSpawn -----------------------------------------------
+
+        [Test]
+        public void OwnerWroteSinceSpawn_NewBinding_IsFalse()
+        {
+            // A freshly-built binding has not been subscribed and nothing has written
+            // through it — the flag must be false. If this ever flips, the owner-auth
+            // initial-sync fast path (ISSUES.md #19) blocks every legitimate snapshot.
+            var reactive = new ReactiveProperty<int>(0);
+            var binding = CreateBinding(reactive);
+            Assert.IsFalse(binding.OwnerWroteSinceSpawn);
+        }
+
+        [Test]
+        public void OwnerWroteSinceSpawn_AfterAuthoritySubscribeReplay_IsTrue_RequiresExplicitReset()
+        {
+            // Regression contract: R3 ReactiveProperty replays the current value on
+            // Subscribe, so SubscribeAsAuthority synthesizes a "write" immediately.
+            // This test pins that behaviour so AspectReplicator.OnNetworkSpawn MUST
+            // keep calling ResetOwnerWroteSinceSpawn right after the subscribe — if
+            // this test starts failing, either R3 changed semantics or someone removed
+            // the flag assignment from the subscribe callback, and both branches need
+            // to re-examine the reset call in OnNetworkSpawn.
+            var reactive = new ReactiveProperty<int>(0);
+            var binding = CreateBinding(reactive);
+            var bag = new DisposableBag();
+            try
+            {
+                binding.SubscribeAsAuthority(ref bag);
+
+                Assert.IsTrue(binding.OwnerWroteSinceSpawn,
+                    "subscribe replay MUST set the flag — OnNetworkSpawn relies on this to " +
+                    "know that an explicit ResetOwnerWroteSinceSpawn is required after subscribe.");
+            }
+            finally { bag.Dispose(); }
+        }
+
+        [Test]
+        public void OwnerWroteSinceSpawn_AfterResetAndAuthorityWrite_IsTrue()
+        {
+            var reactive = new ReactiveProperty<int>(0);
+            var binding = CreateBinding(reactive);
+            var bag = new DisposableBag();
+            try
+            {
+                binding.SubscribeAsAuthority(ref bag);
+                binding.ResetOwnerWroteSinceSpawn();
+                Assert.IsFalse(binding.OwnerWroteSinceSpawn, "precondition: reset must zero the flag");
+
+                reactive.Value = 123;
+
+                Assert.IsTrue(binding.OwnerWroteSinceSpawn,
+                    "a real authority-side write after reset must flip the flag back to true.");
+            }
+            finally { bag.Dispose(); }
+        }
+
+        [Test]
+        public void OwnerWroteSinceSpawn_AfterResetAndSuppressedWrite_RemainsFalse()
+        {
+            // Core suppression contract: when a non-authority peer receives state via
+            // ApplyFromNetwork → WriteSuppressed, the subscribe callback sees the change
+            // but bails out on _suppressNotification. OwnerWroteSinceSpawn must stay
+            // false — otherwise initial-sync on the pure-client owner would permanently
+            // skip every owner-auth field after the first snapshot, re-introducing the
+            // permanent-default failure mode that #19 exists to avoid.
+            var src = new ReactiveProperty<int>(0);
+            var dst = new ReactiveProperty<int>(0);
+            var sender = CreateBinding(src);
+            var receiver = CreateBinding(dst);
+
+            var bag = new DisposableBag();
+            try
+            {
+                receiver.SubscribeAsAuthority(ref bag);
+                receiver.ResetOwnerWroteSinceSpawn();
+
+                src.Value = 77;
+                unsafe
+                {
+                    var writer = new FastBufferWriter(sizeof(int), Allocator.Temp);
+                    try
+                    {
+                        sender.WriteTo(writer);
+                        var reader = new FastBufferReader(writer, Allocator.Temp);
+                        try
+                        {
+                            receiver.ReadFrom(reader);
+                            receiver.ApplyFromNetwork(0);
+                        }
+                        finally { reader.Dispose(); }
+                    }
+                    finally { writer.Dispose(); }
+                }
+
+                Assert.AreEqual(77, dst.Value, "precondition: receiver must have absorbed the value");
+                Assert.IsFalse(receiver.OwnerWroteSinceSpawn,
+                    "WriteSuppressed must NOT flip OwnerWroteSinceSpawn — the flag only tracks " +
+                    "real local authority writes, not applied network snapshots.");
+            }
+            finally { bag.Dispose(); }
+        }
+
+        [Test]
+        public void ResetOwnerWroteSinceSpawn_IsIdempotentAcrossSuccessiveWrites()
+        {
+            // Guard rail against a subtle refactor bug: a typo'd Reset that disposed
+            // the subscription or cleared _suppressNotification could stop future
+            // authority writes from ever flipping the flag. Round-trip the full cycle
+            // twice to ensure Reset does not break subscribe.
+            var reactive = new ReactiveProperty<int>(0);
+            var binding = CreateBinding(reactive);
+            var bag = new DisposableBag();
+            try
+            {
+                binding.SubscribeAsAuthority(ref bag);
+                binding.ResetOwnerWroteSinceSpawn();
+
+                reactive.Value = 1;
+                Assert.IsTrue(binding.OwnerWroteSinceSpawn);
+
+                binding.ResetOwnerWroteSinceSpawn();
+                Assert.IsFalse(binding.OwnerWroteSinceSpawn);
+
+                reactive.Value = 2;
+                Assert.IsTrue(binding.OwnerWroteSinceSpawn,
+                    "Reset must not break the subscribe — subsequent writes still flip the flag.");
+            }
+            finally { bag.Dispose(); }
+        }
+
         // ---- Test fixtures ------------------------------------------------------
 
         private struct PackedStruct

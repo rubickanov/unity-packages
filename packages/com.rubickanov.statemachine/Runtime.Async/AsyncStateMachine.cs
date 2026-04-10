@@ -176,7 +176,6 @@ namespace Rubickanov.StateMachine
 
                 _hasPendingTransition = false;
                 nextKey = _pendingKey;
-                _transitionDepth = 0;
             }
         }
     }

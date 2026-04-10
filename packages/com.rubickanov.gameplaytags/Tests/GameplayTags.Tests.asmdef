@@ -1,0 +1,23 @@
+{
+    "name": "GameplayTags.Tests",
+    "rootNamespace": "Rubickanov.GameplayTags.Tests",
+    "references": [
+        "GameplayTags.Runtime",
+        "GameplayTags.Unity"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

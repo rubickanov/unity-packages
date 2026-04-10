@@ -11,7 +11,15 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,
-    "defineConstraints": [],
-    "versionDefines": [],
+    "defineConstraints": [
+        "EQS_BEHAVIOR_TREE_INTEGRATION"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.rubickanov.behaviortree",
+            "expression": "0.0.0",
+            "define": "EQS_BEHAVIOR_TREE_INTEGRATION"
+        }
+    ],
     "noEngineReferences": false
 }

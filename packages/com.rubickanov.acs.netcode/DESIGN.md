@@ -114,6 +114,41 @@ public class WeaponAspect : IEntityAspect
 }
 ```
 
+### AspectReplicationSystem
+
+Centralized replication system (pure C# class, one per `NetworkManager`). Eliminates
+per-entity tick subscriptions, per-tick `byte[]` allocations, and per-entity RPC overhead.
+
+- Subscribes once to `NetworkTickSystem.Tick`
+- Maintains `Dictionary<ulong, AspectReplicator>` of registered replicators
+- **Server tick**: collects dirty bindings from all replicators, writes one batched
+  `FastBufferWriter`, sends via `CustomMessagingManager.SendNamedMessage("ACS_StateBatch")`
+  to all non-host clients. Zero managed `byte[]` allocations.
+- **Owner tick**: for each pure-client-owner replicator, sends per-entity
+  `ACS_OwnerSubmit` to server.
+- Events use named messages (`ACS_EventBcast`, `ACS_OwnerEvt`, etc.) instead of RPCs.
+- Initial sync: `ACS_SyncReq` / `ACS_SyncReply` named messages.
+
+Named message channels:
+
+| Channel | Direction | Delivery | Purpose |
+|---|---|---|---|
+| `ACS_StateBatch` | server→clients | Reliable | Batched dirty state per tick |
+| `ACS_OwnerSubmit` | owner→server | Reliable | Owner-auth field submission |
+| `ACS_EventBcast` / `ACS_EventBcastU` | server→clients | Reliable / Unreliable | Event broadcast |
+| `ACS_OwnerEvt` / `ACS_OwnerEvtU` | owner→server | Reliable / Unreliable | Owner event submission |
+| `ACS_SyncReq` / `ACS_SyncReply` | client↔server | Reliable | Late-join initial sync |
+
+Wire format for `ACS_StateBatch`:
+```
+[ushort entityCount]
+per entity:
+  [ulong  networkObjectId]
+  [int    serverTick]         // for interpolation timestamps
+  [byte[] dirtyMask]          // (bindingCount+7)/8 bytes
+  [bytes  ...fieldPayloads]   // variable, binding-index order
+```
+
 ### AspectReplicator
 
 Single `NetworkBehaviour` per entity. Must be added to the prefab manually (alongside `NetworkObject`).
@@ -121,17 +156,47 @@ NGO requires all `NetworkBehaviour` components to exist on the prefab before spa
 dynamic `AddComponent` does not work for network replication.
 
 Responsibilities:
-- On `OnNetworkSpawn`: scans all aspects in `EntityContext` via reflection
+- On `OnNetworkSpawn`: scans all aspects in `EntityContext` via reflection, registers with `AspectReplicationSystem`
 - For each `[ReplicatedState]` field:
   - Create a `ReplicatedFieldBinding<T>`
   - On authority side: subscribe to `ReactiveProperty<T>` → mark dirty
-  - On each server tick: if dirty → serialize → send via dirty-mask RPC
-  - On client: deserialize → write to `ReactiveProperty<T>` with suppression flag
+  - System collects dirty on tick → serializes → sends batched named message
+  - On client: system routes incoming message → `ApplyStateBuffer` → write to `ReactiveProperty<T>` with suppression flag
 - For each `[ReplicatedEvent]` field:
   - Create a `ReplicatedEventBinding<T>`
-  - On authority side: subscribe to `Subject<T>` → serialize payload → send RPC immediately
-  - On client: deserialize → call `Subject.OnNext(payload)` with suppression flag
+  - On authority side: subscribe to `Subject<T>` → serialize → send via `IEventBroadcaster` (named message)
+  - On client: system routes → `DispatchEvent` → call `Subject.OnNext(payload)`
 - Caches reflection data (same pattern as `AspectInjector`)
+
+### Suppression contract (fields)
+
+`ReplicatedFieldBinding<T>` holds a `_suppressNotification` flag and a
+`WriteSuppressed` helper that lifts the flag around an assignment to
+`_reactive.Value`. The subscribe callback registered in `SubscribeAsAuthority`
+MUST check the flag and bail out when it is set.
+
+Why: when a pure-client owner late-joins, `ACS_SyncReply` delivers a
+snapshot that lands through `ApplyStateBuffer → ReadFrom → ApplyFromNetwork
+→ WriteSuppressed → _reactive.Value = ...`. Writing to a `ReactiveProperty`
+fires the subscribe callback; without the guard, the authority-side
+subscription would mark the freshly-applied field as dirty and the next
+owner tick would echo the value back to the server — an infinite
+relay loop on every late-join.
+
+The same subscribe callback also maintains `OwnerWroteSinceSpawn` (see
+`ISSUES.md` #19): the flag is set only when a real authority-side write
+lands under `_suppressNotification == false`. `ApplyStateBuffer` uses
+the flag in `StateApplyMode.SkipOwnerAuthIfLocallyWritten` mode to decide
+whether an incoming initial-sync snapshot may overwrite an owner-auth
+field — this is the whole point of the suppression contract: it
+distinguishes "applied network state" from "local authority write".
+
+`ReplicatedEventBinding<T>` does NOT carry an equivalent guard — events
+were reviewed in batch 3.1 and the suppression path was removed as dead
+code. `Subject<T>.OnNext` does not replay, and the authority subscription
+routes through a direct broadcaster rather than a reactive write back
+into the same subject, so no echo loop is possible. See `ISSUES.md`
+history for #12.
 
 ### Event binding details
 
@@ -534,15 +599,15 @@ public class NetworkInstaller : IInstaller
 
 Status legend: [x] done, [ ] not started, [~] in progress
 
-- [x] **1. [Replicated] state sync (Layer 0)** — server→client sync via dirty-tick RPC
+- [x] **1. [Replicated] state sync (Layer 0)** — server→client sync via `AspectReplicationSystem`
   - `ReplicatedStateAttribute`, `AuthorityMode`, `InterpolationMode` enums
   - `ReplicationScanner` with reflection + caching + stable field sort
   - `ReplicatedFieldBinding<T>` with unsafe unmanaged serialization + feedback-loop guard
-  - `AspectReplicator` (`NetworkBehaviour`) with dirty-bitmask RPC broadcast
-  - Host double-apply guard (`if (IsHost) return;` in RPC)
+  - `AspectReplicator` (`NetworkBehaviour`) — binding scan + state application
+  - `AspectReplicationSystem` — centralized tick, batched `CustomMessagingManager` named messages
+  - Host excluded from broadcast targets (no self-delivery guard needed)
   - Manual placement on prefab (NGO requires NetworkBehaviours at prefab build time)
-  - >64 fields warning
-  - Note: only `AuthorityMode.Server` actually wired — `Owner` path not yet functional
+  - >256 fields warning (variable-length byte[] mask)
 
 - [x] **2. [ReplicatedEvent] event broadcast (Layer 0.5)** — `Subject<T>` via instant RPC
   - Hard-rename `[Replicated]` → `[ReplicatedState]` (single test consumer, no deprecated alias)
@@ -610,5 +675,5 @@ Status legend: [x] done, [ ] not started, [~] in progress
 - [ ] Managed type support for replication (`string`, `FixedString`, `INetworkSerializable`) — requires `ReplicatedFieldBinding_Serializable<T>` alternate path
 - [ ] `FastBufferWriter` pre-calculation from `sizeof(T)` of bindings at init time (avoid autogrow reallocation)
 - [ ] IL2CPP: document `[Preserve]` requirement for `MakeGenericType` with value types
-- [ ] Replace per-tick `byte[]` RPC allocation with `CustomMessagingManager` or pooled buffers (Layer 5)
+- [x] Replace per-tick `byte[]` RPC allocation with `CustomMessagingManager` (batch 3.6, 2026-04-10)
 - [ ] Runtime ownership changes: rebuild owner-auth bindings and owner-tick subscription in `OnGainedOwnership` / `OnLostOwnership` so possession-style handoff works mid-session

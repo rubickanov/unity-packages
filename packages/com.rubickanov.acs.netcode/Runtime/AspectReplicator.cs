@@ -7,6 +7,28 @@ using UnityEngine;
 
 namespace Rubickanov.ACS.Runtime.Netcode
 {
+    // How ApplyStateBuffer decides whether to apply each incoming owner-auth field.
+    // Server-auth fields are always applied regardless of the mode — the server is
+    // the sole writer, so there is no local-write to preserve on the receiving end.
+    internal enum StateApplyMode
+    {
+        // Apply every field in the payload, server-auth and owner-auth alike. Used
+        // only by tests that set up a synthetic replicator with no owner-auth state
+        // to protect.
+        ApplyAll,
+        // Skip every owner-auth field unconditionally. The normal broadcast path
+        // passes this on peers that own the entity: they hold fresher local values
+        // than whatever the server relays, so server copies must be discarded.
+        SkipOwnerAuth,
+        // Skip an owner-auth field only if this peer has already written to it
+        // locally since spawn/ownership (OwnerWroteSinceSpawn == true). Used by the
+        // initial-sync path: lets server-preset values (e.g. WeaponId) reach a
+        // pure-client owner that has not touched the field yet, while protecting
+        // any fresh local write that landed between RequestInitialStateRpc and
+        // SendInitialStateRpc. See ISSUES.md #19.
+        SkipOwnerAuthIfLocallyWritten,
+    }
+
     [DisallowMultipleComponent]
     public class AspectReplicator : NetworkBehaviour
     {
@@ -15,27 +37,37 @@ namespace Rubickanov.ACS.Runtime.Netcode
         private ReplicatedFieldBinding[] _interpolatedBindings = Array.Empty<ReplicatedFieldBinding>();
         private ReplicatedEventBinding[] _eventBindings = Array.Empty<ReplicatedEventBinding>();
         private Behaviour[] _ownerScopedComponents = Array.Empty<Behaviour>();
+        private readonly List<IEntityComponent> _scopeComponentsBuffer = new();
         private DisposableBag _disposables;
+        private DisposableBag _ownerDisposables;
         private double _tickInterval;
         private double _interpolationDelaySeconds;
-        // Fixed-capacity payload size for state RPCs: sizeof(int serverTick) +
-        // sizeof(ulong dirtyMask) + sum of each binding's field size (worst case = all dirty).
-        // OnOwnerTick does not write serverTick, so this is a loose upper bound there — the
-        // 4-byte slack is negligible for Temp allocations.
+        // Fixed-capacity payload size for state messages: sizeof(int serverTick) +
+        // _maskByteCount (variable-length dirty mask) + sum of each binding's field size
+        // (worst case = all dirty).
         private int _statePayloadCap;
-        private Action<byte, byte[]> _reliableBroadcaster = null!;
-        private Action<byte, byte[]> _unreliableBroadcaster = null!;
-        private Action<byte, byte[]> _submitOwnerReliableBroadcaster = null!;
-        private Action<byte, byte[]> _submitOwnerUnreliableBroadcaster = null!;
+        private int _maskByteCount;
+        private byte[] _dirtyMaskBuffer = Array.Empty<byte>();
+        private AspectReplicationSystem? _system;
+
+        // Internal surface exposed to AspectReplicationSystem.
+        internal ReplicatedFieldBinding[] Bindings => _bindings;
+        internal AuthorityMode[] BindingAuthorities => _bindingAuthorities;
+        internal ReplicatedEventBinding[] EventBindings => _eventBindings;
+        internal int StatePayloadCap => _statePayloadCap;
+        internal int MaskByteCount => _maskByteCount;
+        internal byte[] DirtyMaskBuffer => _dirtyMaskBuffer;
 
         public override void OnNetworkSpawn()
         {
             // Apply [NetworkScope] first so ServerOnly / OwnerOnly components stop ticking
-            // as early as possible on peers where they should not run.
-            // Note: NGO does not guarantee OnNetworkSpawn order between NetworkBehaviours
-            // on the same NetworkObject — an EntityNetworkComponent's OnNetworkSpawn may
-            // already have fired before we disable it. Update() will still be suppressed,
-            // and its DisposableBag is released on OnNetworkDespawn.
+            // as early as possible on peers where they should not run. NGO does not guarantee
+            // OnNetworkSpawn order between NetworkBehaviours on the same NetworkObject, but
+            // EntityNetworkComponent routes subscribe/dispose through OnEnable/OnDisable: if
+            // a sibling's OnNetworkSpawn happened to fire before us its subscription is
+            // released synchronously via OnDisable when we flip enabled=false here — before
+            // any aspect event can fire. The reverse order stays silent because TrySubscribe
+            // also checks enabled. Regression #16.
             ApplyNetworkScopes();
 
             var context = GetComponent<EntityContext>();
@@ -75,7 +107,20 @@ namespace Rubickanov.ACS.Runtime.Netcode
                     var binding = ReplicatedFieldBindingFactory.Create(reactive, info.ValueType, shouldInterpolate);
 
                     if (isAuthority)
-                        binding.SubscribeAsAuthority(ref _disposables);
+                    {
+                        // Owner-auth subscriptions go into a separate bag so they can be
+                        // disposed/re-created on ownership transfer without touching
+                        // server-auth subscriptions that live for the entity's full lifetime.
+                        ref var bag = ref (info.Authority == AuthorityMode.Owner ? ref _ownerDisposables : ref _disposables);
+                        binding.SubscribeAsAuthority(ref bag);
+                        // R3 ReactiveProperty.Subscribe replays the current value, so the
+                        // callback fires once synthetically with _suppressNotification == false
+                        // and flips OwnerWroteSinceSpawn to true before the entity has done any
+                        // real work. Without this reset, initial-sync on a late-joining owner
+                        // would see the flag already set and skip every server-preset owner-auth
+                        // field — the exact failure mode #19 is supposed to close.
+                        binding.ResetOwnerWroteSinceSpawn();
+                    }
 
                     allBindings.Add(binding);
                     allBindingAuthorities.Add(info.Authority);
@@ -102,23 +147,23 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _eventBindings = allEventBindings.ToArray();
             _interpolatedBindings = allInterpolatedBindings.ToArray();
 
-            if (_bindings.Length > 64)
+            if (_bindings.Length > 256)
             {
-                Debug.LogError($"[AspectReplicator] Entity '{gameObject.name}' has {_bindings.Length} replicated fields, max is 64. Excess fields will be dropped.");
-                Array.Resize(ref _bindings, 64);
-                Array.Resize(ref _bindingAuthorities, 64);
+                Debug.LogError($"[AspectReplicator] Entity '{gameObject.name}' has {_bindings.Length} replicated fields, max is 256. Excess fields will be dropped.");
+                Array.Resize(ref _bindings, 256);
+                Array.Resize(ref _bindingAuthorities, 256);
             }
 
             // Compute worst-case payload capacity AFTER the clamp so _statePayloadCap reflects
-            // exactly the bindings that will actually be written. Must be done before tick-subscribe
-            // AND before RequestInitialStateRpc below — the server handler reads this field to size
-            // its writer for the initial snapshot reply.
-            int payloadCap = sizeof(int) + sizeof(ulong);
+            // exactly the bindings that will actually be written.
+            _maskByteCount = (_bindings.Length + 7) / 8;
+            _dirtyMaskBuffer = new byte[_maskByteCount];
+            int payloadCap = sizeof(int) + _maskByteCount;
             for (int i = 0; i < _bindings.Length; i++)
                 payloadCap += _bindings[i].Size;
             _statePayloadCap = payloadCap;
 
-            // Interpolation timing (≈2 ticks behind newest snapshot).
+            // Interpolation timing (~2 ticks behind newest snapshot).
             uint tickRate = NetworkManager.NetworkTickSystem.TickRate;
             if (tickRate > 0)
             {
@@ -131,62 +176,44 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 _interpolationDelaySeconds = 0;
                 _interpolatedBindings = Array.Empty<ReplicatedFieldBinding>();
             }
-            
-            
 
-            if (_eventBindings.Length > 256)
-            {
-                Debug.LogError($"[AspectReplicator] Entity '{gameObject.name}' has {_eventBindings.Length} replicated events, max is 256. Excess events will not be subscribed.");
-                Array.Resize(ref _eventBindings, 256);
-            }
+            EnforceEventBindingCap(ref _eventBindings, gameObject.name);
 
-            // Authority-side event subscriptions. Lambdas (not method groups) keep the Rpc call site direct
-            // so NGO's IL post-processor intercepts it cleanly. Cached once per entity, shared across bindings.
-            _reliableBroadcaster = BroadcastEventReliableRpc;
-            _unreliableBroadcaster = BroadcastEventUnreliableRpc;
-            _submitOwnerReliableBroadcaster = SubmitOwnerEventReliableRpc;
-            _submitOwnerUnreliableBroadcaster = SubmitOwnerEventUnreliableRpc;
-            
-            for (int i = 0; i < _eventBindings.Length; i++)
-            {
-                var binding = _eventBindings[i];
-                bool isAuthority = binding.Authority == AuthorityMode.Server ? IsServer : IsOwner;
-                if (!isAuthority) continue;
+            // Register with the centralized replication system.
+            _system = AspectReplicationSystem.GetOrCreate(NetworkManager);
+            _system.Register(this);
 
-                // Host-owner (IsServer && IsOwner) bypasses the owner→server hop and broadcasts
-                // directly to NotServer. Pure client owner submits to server, which relays.
-                bool useOwnerSubmit = binding.Authority == AuthorityMode.Owner && !IsServer;
-                Action<byte, byte[]> broadcaster = useOwnerSubmit
-                    ? (binding.Reliability == Reliability.Reliable ? _submitOwnerReliableBroadcaster : _submitOwnerUnreliableBroadcaster)
-                    : (binding.Reliability == Reliability.Reliable ? _reliableBroadcaster : _unreliableBroadcaster);
-                binding.SubscribeAsAuthority(ref _disposables, (byte)i, broadcaster);
-            }
-            
-
-            if (IsServer)
-                NetworkManager.NetworkTickSystem.Tick += OnServerTick;
-
-            // Pure client owner broadcasts its own owner-auth state via the owner tick.
-            // Host-owner's owner-auth dirty fields are picked up by OnServerTick above.
-            if (IsOwner && !IsServer)
-                NetworkManager.NetworkTickSystem.Tick += OnOwnerTick;
+            // Subscribe event bindings that this peer is authority for.
+            SubscribeEventBindingsAsAuthority();
 
             // Late-joining clients miss state for fields that never go dirty after spawn
             // (MaxHealth, WeaponId, TeamColor). Pull a full snapshot from the server.
             // Host (IsServer) skip: already has the latest values locally.
             if (!IsServer && _bindings.Length > 0)
-                RequestInitialStateRpc();
+                _system.RequestInitialSync(this);
+        }
+
+        // Extracted to keep the cap invariant unit-testable without spinning up a NetworkManager.
+        // Why the cap is exactly 256: event indices are packed into a byte on the wire (see the
+        // (byte)i cast in the SubscribeAsAuthority loop above). Without this trim, binding #256
+        // wraps to byte 0 and collides with the first event — peers would silently route event
+        // payloads to the wrong subject. Regression guard: ISSUES.md #18.
+        internal static void EnforceEventBindingCap(ref ReplicatedEventBinding[] bindings, string entityName)
+        {
+            if (bindings.Length > 256)
+            {
+                Debug.LogError($"[AspectReplicator] Entity '{entityName}' has {bindings.Length} replicated events, max is 256. Excess events will not be subscribed.");
+                Array.Resize(ref bindings, 256);
+            }
         }
 
         public override void OnNetworkDespawn()
         {
-            if (IsServer)
-                NetworkManager.NetworkTickSystem.Tick -= OnServerTick;
-
-            if (IsOwner && !IsServer)
-                NetworkManager.NetworkTickSystem.Tick -= OnOwnerTick;
+            _system?.Unregister(this);
+            _system = null;
 
             _interpolatedBindings = Array.Empty<ReplicatedFieldBinding>();
+            _ownerDisposables.Dispose();
             _disposables.Dispose();
         }
 
@@ -200,18 +227,65 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 _interpolatedBindings[i].TickRender(renderTime);
         }
 
-        public override void OnGainedOwnership() => ReapplyOwnerScope();
-        public override void OnLostOwnership() => ReapplyOwnerScope();
+        public override void OnGainedOwnership()
+        {
+            // Subscribe owner-auth field and event bindings now that this peer
+            // is the authority. Previous owner's subscriptions were disposed in
+            // their OnLostOwnership.
+            SubscribeOwnerFieldBindings();
+            SubscribeEventBindingsAsAuthority();
+
+            ReapplyOwnerScope();
+        }
+
+        public override void OnLostOwnership()
+        {
+            // Tear down owner-auth subscriptions — this peer is no longer the
+            // authority for those fields/events.
+            _ownerDisposables.Dispose();
+            _ownerDisposables = default;
+
+            ReapplyOwnerScope();
+        }
+
+        private void SubscribeOwnerFieldBindings()
+        {
+            for (int i = 0; i < _bindings.Length; i++)
+            {
+                if (_bindingAuthorities[i] != AuthorityMode.Owner) continue;
+                _bindings[i].SubscribeAsAuthority(ref _ownerDisposables);
+                _bindings[i].ResetOwnerWroteSinceSpawn();
+            }
+        }
+
+        private void SubscribeEventBindingsAsAuthority()
+        {
+            if (_system == null) return;
+
+            for (int i = 0; i < _eventBindings.Length; i++)
+            {
+                var binding = _eventBindings[i];
+                bool isAuthority = binding.Authority == AuthorityMode.Server ? IsServer : IsOwner;
+                if (!isAuthority) continue;
+
+                // Host-owner (IsServer && IsOwner) bypasses the owner->server hop and broadcasts
+                // directly to NotServer. Pure client owner submits to server, which relays.
+                bool isOwnerSubmit = binding.Authority == AuthorityMode.Owner && !IsServer;
+                ref var bag = ref (binding.Authority == AuthorityMode.Owner ? ref _ownerDisposables : ref _disposables);
+                binding.SubscribeAsAuthority(ref bag, (byte)i, _system, NetworkObjectId, isOwnerSubmit);
+            }
+        }
 
         private void ApplyNetworkScopes()
         {
             var myNetworkObject = NetworkObject;
-            var components = GetComponentsInChildren<IEntityComponent>(includeInactive: true);
+            _scopeComponentsBuffer.Clear();
+            GetComponentsInChildren(includeInactive: true, _scopeComponentsBuffer);
             List<Behaviour>? ownerScoped = null;
 
-            for (int i = 0; i < components.Length; i++)
+            for (int i = 0; i < _scopeComponentsBuffer.Count; i++)
             {
-                var component = components[i];
+                var component = _scopeComponentsBuffer[i];
 
                 // Skip any IEntityComponent that is not a Behaviour (pure C# or otherwise).
                 if (component is not Behaviour behaviour) continue;
@@ -243,104 +317,55 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 _ownerScopedComponents[i].enabled = IsOwner;
         }
 
-        private void OnServerTick()
+        // ------------------------------------------------------------------
+        // State application — called by AspectReplicationSystem
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Apply incoming state from a FastBufferReader (named message path).
+        /// The reader position is at serverTick (mask + fields follow).
+        /// </summary>
+        internal unsafe void ApplyStateBuffer(FastBufferReader reader, StateApplyMode mode)
         {
-            // Build dirty mask across all fields. Owner-auth fields relayed from clients
-            // are marked dirty inside SubmitOwnerStateRpc and get picked up here as well.
-            ulong dirtyMask = 0;
+            reader.ReadValueSafe(out int serverTick);
+            var mask = stackalloc byte[_maskByteCount];
+            reader.ReadBytesSafe(mask, _maskByteCount);
+            double receivedTime = serverTick * _tickInterval;
+
             for (int i = 0; i < _bindings.Length; i++)
             {
-                if (_bindings[i].IsDirty)
-                    dirtyMask |= 1UL << i;
-            }
+                if ((mask[i >> 3] & (1 << (i & 7))) == 0) continue;
 
-            if (dirtyMask == 0) return;
-
-            var writer = new FastBufferWriter(_statePayloadCap, Allocator.Temp);
-            try
-            {
-                // Tag the payload with the current server tick so non-authority clients can
-                // stamp interpolation snapshots on a monotonic timeline even when several RPCs
-                // arrive in the same frame.
-                int serverTick = NetworkManager.NetworkTickSystem.ServerTime.Tick;
-                writer.WriteValueSafe(serverTick);
-                writer.WriteValueSafe(dirtyMask);
-
-                for (int i = 0; i < _bindings.Length; i++)
+                // Server-auth fields always apply. Owner-auth fields apply or skip
+                // depending on mode — the short-circuit on authority keeps server-auth
+                // fields out of the decision entirely.
+                bool skip = _bindingAuthorities[i] == AuthorityMode.Owner && mode switch
                 {
-                    if ((dirtyMask & (1UL << i)) != 0)
-                    {
-                        _bindings[i].WriteTo(writer);
-                        _bindings[i].ClearDirty();
-                    }
+                    StateApplyMode.SkipOwnerAuth => true,
+                    StateApplyMode.SkipOwnerAuthIfLocallyWritten => _bindings[i].OwnerWroteSinceSpawn,
+                    _ => false,
+                };
+
+                if (skip)
+                {
+                    _bindings[i].Skip(reader);
+                    continue;
                 }
 
-                BroadcastStateRpc(writer.ToArray());
-            }
-            finally
-            {
-                writer.Dispose();
+                _bindings[i].ReadFrom(reader);
+                _bindings[i].ApplyFromNetwork(receivedTime);
             }
         }
 
-        private void OnOwnerTick()
-        {
-            // Collect dirty owner-auth fields only. Server-auth fields are not subscribed
-            // on the owner side, so they never go dirty here.
-            ulong dirtyMask = 0;
-            for (int i = 0; i < _bindings.Length; i++)
-            {
-                if (_bindingAuthorities[i] != AuthorityMode.Owner) continue;
-                if (_bindings[i].IsDirty)
-                    dirtyMask |= 1UL << i;
-            }
-
-            if (dirtyMask == 0) return;
-
-            var writer = new FastBufferWriter(_statePayloadCap, Allocator.Temp);
-            try
-            {
-                writer.WriteValueSafe(dirtyMask);
-
-                for (int i = 0; i < _bindings.Length; i++)
-                {
-                    if ((dirtyMask & (1UL << i)) != 0)
-                    {
-                        _bindings[i].WriteTo(writer);
-                        _bindings[i].ClearDirty();
-                    }
-                }
-
-                SubmitOwnerStateRpc(writer.ToArray());
-            }
-            finally
-            {
-                writer.Dispose();
-            }
-        }
-
-        internal void ApplyStateBuffer(byte[] payload, bool skipOwnerFields)
+        /// <summary>
+        /// Shim for existing unit tests that pass byte[] payloads.
+        /// </summary>
+        internal void ApplyStateBuffer(byte[] payload, StateApplyMode mode)
         {
             var reader = new FastBufferReader(payload, Allocator.Temp);
             try
             {
-                reader.ReadValueSafe(out int serverTick);
-                reader.ReadValueSafe(out ulong dirtyMask);
-                double receivedTime = serverTick * _tickInterval;
-
-                for (int i = 0; i < _bindings.Length; i++)
-                {
-                    if ((dirtyMask & (1UL << i)) == 0) continue;
-
-                    if (skipOwnerFields && _bindingAuthorities[i] == AuthorityMode.Owner)
-                    {
-                        _bindings[i].Skip(reader);
-                        continue;
-                    }
-
-                    _bindings[i].ReadFrom(reader);
-                    _bindings[i].ApplyFromNetwork(receivedTime);
-                }
+                ApplyStateBuffer(reader, mode);
             }
             finally
             {
@@ -348,163 +373,62 @@ namespace Rubickanov.ACS.Runtime.Netcode
             }
         }
 
-        [Rpc(SendTo.NotServer)]
-        private void BroadcastStateRpc(byte[] payload)
+        /// <summary>
+        /// Server-side: apply owner-submitted state, validate authority, re-mark dirty for relay.
+        /// </summary>
+        internal unsafe void ApplyOwnerSubmission(FastBufferReader reader)
         {
-            // Host is both server and client — it already wrote to aspects directly,
-            // so the incoming RPC is redundant. Skip to avoid double-apply.
-            if (IsHost) return;
+            var mask = stackalloc byte[_maskByteCount];
+            reader.ReadBytesSafe(mask, _maskByteCount);
 
-            // Pure client owner: it is authority for owner-auth fields and already has the
-            // latest local value. Skipping avoids a relay race where an older owner-written
-            // value from the server overwrites a fresher local write.
-            ApplyStateBuffer(payload, skipOwnerFields: IsOwner);
+            for (int i = 0; i < _bindings.Length; i++)
+            {
+                if ((mask[i >> 3] & (1 << (i & 7))) == 0) continue;
+
+                if (_bindingAuthorities[i] != AuthorityMode.Owner)
+                {
+                    // Owner tried to write a server-auth field — reject but keep the reader aligned.
+                    Debug.LogWarning($"[AspectReplicator] Owner submitted server-auth field index {i} on '{gameObject.name}'. Dropping.");
+                    _bindings[i].Skip(reader);
+                    continue;
+                }
+
+                _bindings[i].ReadFrom(reader);
+                // Server does not interpolate — it holds truth and relays via ServerTick.
+                _bindings[i].ApplyFromNetwork(0);
+                // Re-mark dirty so the next ServerTick relays to other clients.
+                _bindings[i].MarkDirty();
+            }
         }
 
-        [Rpc(SendTo.Server, RequireOwnership = false)]
-        private void RequestInitialStateRpc(RpcParams rpcParams = default)
+        /// <summary>
+        /// Build a full-snapshot payload for initial sync (server-side).
+        /// Writes serverTick + full mask + all field values into the provided writer.
+        /// </summary>
+        internal unsafe void BuildInitialSyncPayload(FastBufferWriter writer)
         {
             if (_bindings.Length == 0) return;
 
-            // Full mask covering every existing binding. Special-case length==64 because
-            // `1UL << 64` is mask-to-63 in C# (== 1), not 0, which would corrupt the mask.
-            ulong fullMask = _bindings.Length == 64
-                ? ulong.MaxValue
-                : (1UL << _bindings.Length) - 1UL;
+            // Full mask: set every bit for every binding.
+            for (int j = 0; j < _maskByteCount; j++) _dirtyMaskBuffer[j] = 0xFF;
 
-            var writer = new FastBufferWriter(_statePayloadCap, Allocator.Temp);
-            try
-            {
-                int serverTick = NetworkManager.NetworkTickSystem.ServerTime.Tick;
-                writer.WriteValueSafe(serverTick);
-                writer.WriteValueSafe(fullMask);
+            int serverTick = NetworkManager.NetworkTickSystem.ServerTime.Tick;
+            writer.WriteValueSafe(serverTick);
+            fixed (byte* maskPtr = _dirtyMaskBuffer)
+                writer.WriteBytesSafe(maskPtr, _maskByteCount);
 
-                for (int i = 0; i < _bindings.Length; i++)
-                    _bindings[i].WriteTo(writer);
-
-                // ToArray() allocates a managed byte[] per late-joining client per entity.
-                // Deliberate deferral: fix #6 will eliminate this along with the per-tick allocation.
-                SendInitialStateRpc(
-                    writer.ToArray(),
-                    RpcTarget.Single(rpcParams.Receive.SenderClientId, RpcTargetUse.Temp));
-            }
-            finally
-            {
-                writer.Dispose();
-            }
+            for (int i = 0; i < _bindings.Length; i++)
+                _bindings[i].WriteTo(writer);
         }
 
-        [Rpc(SendTo.SpecifiedInParams)]
-        private void SendInitialStateRpc(byte[] payload, RpcParams rpcParams = default)
-        {
-            // IMPORTANT: skipOwnerFields: false here — unlike BroadcastStateRpc.
-            // On spawn, the pure-client owner has default(T) locally for owner-auth fields
-            // because the ReactiveProperty was just constructed. The server may hold a
-            // non-default pre-set value (e.g. WeaponId initialized server-side before
-            // ownership transfer) that the owner MUST receive — otherwise the owner stays
-            // stuck at default forever. The theoretical downside (owner writes locally
-            // between sending the request and receiving the snapshot) is a transient
-            // ~ms-scale window; the permanent-default failure mode is strictly worse.
-            //
-            // TODO: revisit when Owner-auth re-analysis (#12 in ISSUES.md) lands — a
-            // per-binding "owner has written locally since spawn" flag would eliminate
-            // the residual race cleanly.
-            ApplyStateBuffer(payload, skipOwnerFields: false);
-        }
+        // ------------------------------------------------------------------
+        // Event dispatch — called by AspectReplicationSystem
+        // ------------------------------------------------------------------
 
-        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
-        private void SubmitOwnerStateRpc(byte[] payload)
-        {
-            var reader = new FastBufferReader(payload, Allocator.Temp);
-            try
-            {
-                reader.ReadValueSafe(out ulong dirtyMask);
-
-                for (int i = 0; i < _bindings.Length; i++)
-                {
-                    if ((dirtyMask & (1UL << i)) == 0) continue;
-
-                    if (_bindingAuthorities[i] != AuthorityMode.Owner)
-                    {
-                        // Owner tried to write a server-auth field — reject but keep the reader aligned.
-                        Debug.LogWarning($"[AspectReplicator] Owner submitted server-auth field index {i} on '{gameObject.name}'. Dropping.");
-                        _bindings[i].Skip(reader);
-                        continue;
-                    }
-
-                    _bindings[i].ReadFrom(reader);
-                    // Server does not interpolate — it holds truth and relays via OnServerTick.
-                    _bindings[i].ApplyFromNetwork(0);
-                    // Re-mark dirty so the next OnServerTick relays to other clients via BroadcastStateRpc.
-                    _bindings[i].MarkDirty();
-                }
-            }
-            finally
-            {
-                reader.Dispose();
-            }
-        }
-
-        [Rpc(SendTo.NotServer)]
-        private void BroadcastEventReliableRpc(byte eventIndex, byte[] payload)
-        {
-            DispatchEvent(eventIndex, payload);
-        }
-
-        [Rpc(SendTo.NotServer, Delivery = RpcDelivery.Unreliable)]
-        private void BroadcastEventUnreliableRpc(byte eventIndex, byte[] payload)
-        {
-            DispatchEvent(eventIndex, payload);
-        }
-
-        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
-        private void SubmitOwnerEventReliableRpc(byte eventIndex, byte[] payload)
-        {
-            HandleOwnerEvent(eventIndex, payload, reliable: true);
-        }
-
-        [Rpc(SendTo.Server, Delivery = RpcDelivery.Unreliable, InvokePermission = RpcInvokePermission.Owner)]
-        private void SubmitOwnerEventUnreliableRpc(byte eventIndex, byte[] payload)
-        {
-            HandleOwnerEvent(eventIndex, payload, reliable: false);
-        }
-
-        private void HandleOwnerEvent(byte eventIndex, byte[] payload, bool reliable)
-        {
-            if (eventIndex >= _eventBindings.Length)
-            {
-                Debug.LogError($"[AspectReplicator] Owner event index {eventIndex} out of range ({_eventBindings.Length} bindings) on '{gameObject.name}'.");
-                return;
-            }
-
-            var binding = _eventBindings[eventIndex];
-            if (binding.Authority != AuthorityMode.Owner)
-            {
-                Debug.LogWarning($"[AspectReplicator] Owner submitted server-auth event index {eventIndex} on '{gameObject.name}'. Dropping.");
-                return;
-            }
-
-            // Relay to other clients. On host this also delivers back to DispatchEvent,
-            // which skips via the IsHost guard so there is no double-dispatch.
-            if (reliable)
-                BroadcastEventReliableRpc(eventIndex, payload);
-            else
-                BroadcastEventUnreliableRpc(eventIndex, payload);
-
-            // Fire locally on the server so server-side listeners see the event. The server
-            // is not subscribed as authority for owner-auth events, so this cannot re-serialize.
-            var reader = new FastBufferReader(payload, Allocator.Temp);
-            try
-            {
-                binding.ApplyFromNetwork(reader);
-            }
-            finally
-            {
-                reader.Dispose();
-            }
-        }
-
-        private void DispatchEvent(byte eventIndex, byte[] payload)
+        /// <summary>
+        /// Client-side: dispatch an incoming event from the server broadcast.
+        /// </summary>
+        internal void DispatchEvent(byte eventIndex, FastBufferReader reader)
         {
             // Host already fired the Subject locally on the authority side — skip to avoid double-apply.
             if (IsHost) return;
@@ -521,14 +445,69 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // fired the Subject locally at user-write time. The server relay is a duplicate.
             if (IsOwner && binding.Authority == AuthorityMode.Owner) return;
 
-            var reader = new FastBufferReader(payload, Allocator.Temp);
-            try
+            binding.ApplyFromNetwork(reader);
+        }
+
+        /// <summary>
+        /// Server-side: handle an owner-submitted event — validate, relay, and fire locally.
+        /// </summary>
+        internal void HandleOwnerEvent(byte eventIndex, FastBufferReader reader, IEventBroadcaster broadcaster)
+        {
+            if (eventIndex >= _eventBindings.Length)
             {
-                binding.ApplyFromNetwork(reader);
+                Debug.LogError($"[AspectReplicator] Owner event index {eventIndex} out of range ({_eventBindings.Length} bindings) on '{gameObject.name}'.");
+                return;
             }
-            finally
+
+            var binding = _eventBindings[eventIndex];
+            if (binding.Authority != AuthorityMode.Owner)
             {
-                reader.Dispose();
+                Debug.LogWarning($"[AspectReplicator] Owner submitted server-auth event index {eventIndex} on '{gameObject.name}'. Dropping.");
+                return;
+            }
+
+            // Read the event payload, relay to clients, and fire locally on the server.
+            int payloadSize = binding.PayloadSize;
+            unsafe
+            {
+                byte* temp = stackalloc byte[payloadSize];
+                reader.ReadBytesSafe(temp, payloadSize);
+
+                // Build relay message for other clients.
+                var relayWriter = new FastBufferWriter(sizeof(ulong) + sizeof(byte) + payloadSize, Allocator.Temp);
+                try
+                {
+                    relayWriter.WriteValueSafe(NetworkObjectId);
+                    relayWriter.WriteValueSafe(eventIndex);
+                    relayWriter.WriteBytesSafe(temp, payloadSize);
+
+                    broadcaster.SendEvent(NetworkObjectId, eventIndex, relayWriter,
+                        binding.Authority, binding.Reliability, isOwnerSubmit: false);
+                }
+                finally
+                {
+                    relayWriter.Dispose();
+                }
+
+                // Fire locally on the server so server-side listeners see the event.
+                var localWriter = new FastBufferWriter(payloadSize, Allocator.Temp);
+                try
+                {
+                    localWriter.WriteBytesSafe(temp, payloadSize);
+                    var localReader = new FastBufferReader(localWriter, Allocator.Temp);
+                    try
+                    {
+                        binding.ApplyFromNetwork(localReader);
+                    }
+                    finally
+                    {
+                        localReader.Dispose();
+                    }
+                }
+                finally
+                {
+                    localWriter.Dispose();
+                }
             }
         }
     }

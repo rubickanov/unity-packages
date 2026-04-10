@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using R3;
 using Unity.Collections;
 using Unity.Netcode;
@@ -14,6 +15,16 @@ namespace Rubickanov.ACS.Runtime.Netcode
         public bool IsDirty { get; protected set; }
         public virtual bool IsInterpolated => false;
         public abstract int Size { get; }
+
+        // True once the authority side has written to the underlying reactive after
+        // the most recent ResetOwnerWroteSinceSpawn (i.e. after spawn or after gaining
+        // ownership). Owner-auth initial-sync uses this to detect whether a pure-client
+        // owner has already produced a local value; if it has, incoming server state
+        // for that field must be ignored to avoid overwriting the fresh local write.
+        // See ISSUES.md #19.
+        protected bool _ownerWroteSinceSpawn;
+        public bool OwnerWroteSinceSpawn => _ownerWroteSinceSpawn;
+        public void ResetOwnerWroteSinceSpawn() => _ownerWroteSinceSpawn = false;
 
         public abstract void WriteTo(FastBufferWriter writer);
         public abstract void ReadFrom(FastBufferReader reader);
@@ -48,6 +59,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             {
                 if (_suppressNotification) return;
                 IsDirty = true;
+                _ownerWroteSinceSpawn = true;
             }).AddTo(ref disposables);
         }
 
@@ -96,8 +108,8 @@ namespace Rubickanov.ACS.Runtime.Netcode
     [Preserve]
     internal static class ReplicatedFieldBindingFactory
     {
-        private static readonly Dictionary<Type, Type> BindingTypeCache = new();
-        private static readonly Dictionary<Type, Type> InterpolatedBindingTypeCache = new();
+        private static readonly Dictionary<Type, Func<object, ReplicatedFieldBinding>> FieldFactories = new();
+        private static readonly Dictionary<Type, Func<object, object, ReplicatedFieldBinding>> InterpFactories = new();
         private static readonly HashSet<Type> WarnedUnsupportedTypes = new();
 
         public static ReplicatedFieldBinding Create(object reactiveProperty, Type valueType, bool interpolate)
@@ -106,13 +118,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
             {
                 if (Interpolators.TryGetRaw(valueType, out var lerper))
                 {
-                    if (!InterpolatedBindingTypeCache.TryGetValue(valueType, out var interpBindingType))
+                    if (!InterpFactories.TryGetValue(valueType, out var interpFactory))
                     {
-                        interpBindingType = typeof(InterpolatedFieldBinding<>).MakeGenericType(valueType);
-                        InterpolatedBindingTypeCache[valueType] = interpBindingType;
+                        interpFactory = BuildInterpFactory(valueType);
+                        InterpFactories[valueType] = interpFactory;
                     }
 
-                    return (ReplicatedFieldBinding)Activator.CreateInstance(interpBindingType, reactiveProperty, lerper);
+                    return interpFactory(reactiveProperty, lerper);
                 }
 
                 if (WarnedUnsupportedTypes.Add(valueType))
@@ -124,13 +136,40 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 }
             }
 
-            if (!BindingTypeCache.TryGetValue(valueType, out var bindingType))
+            if (!FieldFactories.TryGetValue(valueType, out var factory))
             {
-                bindingType = typeof(ReplicatedFieldBinding<>).MakeGenericType(valueType);
-                BindingTypeCache[valueType] = bindingType;
+                factory = BuildFieldFactory(valueType);
+                FieldFactories[valueType] = factory;
             }
 
-            return (ReplicatedFieldBinding)Activator.CreateInstance(bindingType, reactiveProperty);
+            return factory(reactiveProperty);
+        }
+
+        private static Func<object, ReplicatedFieldBinding> BuildFieldFactory(Type valueType)
+        {
+            var bindingType = typeof(ReplicatedFieldBinding<>).MakeGenericType(valueType);
+            var reactiveType = typeof(ReactiveProperty<>).MakeGenericType(valueType);
+            var ctor = bindingType.GetConstructor(new[] { reactiveType })!;
+
+            var param = Expression.Parameter(typeof(object), "reactive");
+            var body = Expression.New(ctor, Expression.Convert(param, reactiveType));
+            return Expression.Lambda<Func<object, ReplicatedFieldBinding>>(body, param).Compile();
+        }
+
+        private static Func<object, object, ReplicatedFieldBinding> BuildInterpFactory(Type valueType)
+        {
+            var bindingType = typeof(InterpolatedFieldBinding<>).MakeGenericType(valueType);
+            var reactiveType = typeof(ReactiveProperty<>).MakeGenericType(valueType);
+            var lerpType = typeof(Lerp<>).MakeGenericType(valueType);
+            var ctor = bindingType.GetConstructor(new[] { reactiveType, lerpType })!;
+
+            var paramReactive = Expression.Parameter(typeof(object), "reactive");
+            var paramLerper = Expression.Parameter(typeof(object), "lerper");
+            var body = Expression.New(ctor,
+                Expression.Convert(paramReactive, reactiveType),
+                Expression.Convert(paramLerper, lerpType));
+            return Expression.Lambda<Func<object, object, ReplicatedFieldBinding>>(
+                body, paramReactive, paramLerper).Compile();
         }
     }
 }
