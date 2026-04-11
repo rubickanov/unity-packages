@@ -180,9 +180,9 @@ namespace Rubickanov.ACS.Editor
         private static bool IsFieldWritten(string source, string fieldVar, string fieldName)
         {
             string escaped = Regex.Escape(fieldVar) + @"\." + Regex.Escape(fieldName);
-            return Regex.IsMatch(source, escaped + @"\.Value\s*=")
+            return Regex.IsMatch(source, escaped + @"\.Value\s*[\+\-\*\/]?=")
                    || Regex.IsMatch(source, escaped + @"\.OnNext\(")
-                   || Regex.IsMatch(source, escaped + @"\b\s*=[^=]");
+                   || Regex.IsMatch(source, escaped + @"\b\s*[\+\-\*\/]?=[^=]");
         }
 
         private static bool IsFieldRead(string source, string fieldVar, string fieldName)
