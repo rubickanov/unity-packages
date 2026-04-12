@@ -50,20 +50,23 @@ namespace Rubickanov.ACS.Editor
         {
             DrawDefaultInspector();
 
-            if (_aspects == null || _aspects.Count == 0) return;
-
-            EditorGUILayout.Space(4);
-
-            var headerStyle = new GUIStyle(EditorStyles.boldLabel)
+            if (_aspects != null && _aspects.Count > 0)
             {
-                fontSize = 11,
-                normal = { textColor = DimColor }
-            };
-            EditorGUILayout.LabelField("ASPECTS", headerStyle);
+                EditorGUILayout.Space(4);
 
-            foreach (var aspect in _aspects)
-                DrawAspect(aspect);
+                var headerStyle = new GUIStyle(EditorStyles.boldLabel)
+                {
+                    fontSize = 11,
+                    normal = { textColor = DimColor }
+                };
+                EditorGUILayout.LabelField("ASPECTS", headerStyle);
 
+                foreach (var aspect in _aspects)
+                    DrawAspect(aspect);
+            }
+
+            // Runtime data always shows in play mode — World and other contexts may hold aspects
+            // without having any IEntityComponent children to drive the static ASPECTS analysis.
             if (Application.isPlaying)
             {
                 EditorGUILayout.Space(8);

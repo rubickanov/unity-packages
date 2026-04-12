@@ -1,0 +1,1469 @@
+# ACS — Ideas
+
+Расширения поверх acs, которые переиспользуют существующую архитектуру (аспекты, ReactiveProperty, EntityContext, сканеры).
+
+---
+
+## 0. World — расширение core ACS
+
+Не отдельный пакет, а часть основного `com.rubickanov.acs`. World — центральная точка фреймворка: глобальный стейт (аспекты мира) + знание о мире (реестр всех сущностей).
+
+### Концепция
+
+World — это entity. Тот же `EntityContext`, те же аспекты, та же реактивность. Но с двумя дополнениями:
+1. **Синглтон с глобальным доступом** — `World.Instance`
+2. **Реестр сущностей** — знает обо всех `EntityContext` в сцене и какие аспекты на них созданы
+
+### SingletonEntityContext
+
+Промежуточный базовый класс для синглтон-сущностей (World — первый, но паттерн переиспользуемый):
+
+```csharp
+public abstract class SingletonEntityContext<T> : EntityContext where T : SingletonEntityContext<T>
+{
+    public static T Instance { get; private set; }
+
+    protected override void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = (T)this;
+        base.Awake();
+    }
+
+    protected virtual void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+    }
+}
+```
+
+### World
+
+```csharp
+public class World : SingletonEntityContext<World>
+{
+    // --- Реестр сущностей (знание о мире) ---
+
+    private readonly Dictionary<Type, HashSet<EntityContext>> _aspectIndex = new();
+
+    internal void Register(EntityContext entity, Type aspectType)
+    {
+        if (!_aspectIndex.TryGetValue(aspectType, out var set))
+        {
+            set = new HashSet<EntityContext>();
+            _aspectIndex[aspectType] = set;
+        }
+        set.Add(entity);
+    }
+
+    internal void Unregister(EntityContext entity)
+    {
+        foreach (var set in _aspectIndex.Values)
+            set.Remove(entity);
+    }
+
+    // --- Queries (часть core) ---
+
+    public static EntityQuery<T> Query<T>() where T : IEntityAspect
+        => new(Instance._aspectIndex);
+
+    public static EntityQuery<T1, T2> Query<T1, T2>()
+        where T1 : IEntityAspect where T2 : IEntityAspect
+        => new(Instance._aspectIndex);
+}
+```
+
+### Регистрация — автоматическая
+
+`EntityContext.Require<T>()` при создании аспекта регистрирует себя в World:
+
+```csharp
+// В EntityContext.Require<T>() — добавить одну строку
+public T Require<T>() where T : IEntityAspect, new()
+{
+    // ... существующая логика создания аспекта ...
+    World.Instance?.Register(this, typeof(T));  // ← новое
+    return aspect;
+}
+```
+
+`EntityContext.OnDestroy` снимает регистрацию. Индекс всегда актуален, без ручного управления.
+
+### Использование
+
+```csharp
+// --- Мировой стейт (аспекты на World) ---
+
+public class TimeAspect : IEntityAspect
+{
+    [ReplicatedState] public readonly ReactiveProperty<float> TimeOfDay = new(0f);
+    [ReplicatedState] public readonly ReactiveProperty<int> Day = new(1);
+    [ReplicatedEvent]  public readonly Subject<Unit> DayStarted = new();
+}
+
+public class WeatherAspect : IEntityAspect
+{
+    [ReplicatedState] public readonly ReactiveProperty<WeatherType> Current = new(WeatherType.Clear);
+    [ReplicatedState] public readonly ReactiveProperty<float> Intensity = new(0f);
+}
+
+// Доступ
+var time = World.Require<TimeAspect>().TimeOfDay.Value;
+var weather = World.Require<WeatherAspect>().Current.Value;
+```
+
+```csharp
+// --- Queries (знание о мире) ---
+
+// Все живые враги
+var alive = World.Query<HealthAspect>()
+    .Where(h => h.Health.Value > 0);
+
+// Все сущности с двумя аспектами
+foreach (var (entity, health, pos) in World.Query<HealthAspect, PositionAspect>())
+    Debug.Log($"{entity.name} at {pos.Position.Value}, hp={health.Health.Value}");
+```
+
+```csharp
+// --- Подписка на мировой стейт из сущности ---
+
+public class ZombieBehavior : EntityComponent
+{
+    [Aspect] private MovementAspect _movement;
+
+    protected override void OnSubscribe(ref DisposableBag disposables)
+    {
+        World.Require<TimeAspect>().TimeOfDay
+            .Subscribe(time => _movement.Speed.Value = time > 20f ? 5f : 2f)
+            .AddTo(ref disposables);
+    }
+}
+```
+
+### Что работает бесплатно
+
+Поскольку World — это entity:
+- `[ReplicatedState]` на мировых аспектах → синк по сети (нужен NetworkObject + AspectReplicator на World GameObject)
+- `[PersistedState]` → сохранение мирового состояния
+- `acs.debug` → мировые аспекты видны в визуализаторе
+- `acs.live` → тюнишь TimeOfDay слайдером в браузере
+- `acs.rules` → "когда ночь + дождь → спавн больше зомби"
+
+### Queries — часть core, не отдельный пакет
+
+Базовые queries (по типам аспектов, фильтрация, итерация) — часть core ACS через World. Расширенные spatial queries (`WithinRadius`, `Nearest`, spatial hash grid) — отдельно, в `acs.queries` или как расширение `com.rubickanov.eqs`.
+
+---
+
+## 1. acs.persistence
+
+Отдельный пакет-расширение. Даёт **только примитивы**: snapshot состояния аспектов и restore обратно. Ни слотов, ни автосейва, ни резолверов префабов, ни storage backend'ов. Куда писать snapshot, когда его делать, как резолвить id в префаб — всё это решает вышестоящий слой (save-система конкретной игры или отдельный `com.rubickanov.save`).
+
+Причина — слоты, UI слот-селектора, тайминг, cloud sync, платформенные save API, метадата (timestamp, скриншот, playtime), persistent identity — это продуктовые концерны. ACS не должен иметь про них мнение. Его зона ответственности — стейт аспектов, и максимум что он должен уметь — сериализовать его и применить обратно.
+
+### Использование
+
+```csharp
+public class PlayerAspect : IEntityAspect
+{
+    [PersistedState]
+    [ReplicatedState(Authority = AuthorityMode.Server)]
+    public readonly ReactiveProperty<float> Health = new(100f);
+
+    [PersistedState]
+    public readonly ReactiveProperty<Vector3> Position = new();
+
+    // Не помечен — runtime-only, не сохраняется
+    public readonly ReactiveProperty<bool> IsInCombat = new(false);
+}
+```
+
+Атрибут `[PersistedState]` — маркер для scanner'а. Два атрибута на одном поле (`[PersistedState]` + `[ReplicatedState]`) — каждый работает в своём pipeline.
+
+### API — snapshot / restore
+
+Весь public API — это extension methods на `EntityContext` плюс итератор на `World`:
+
+```csharp
+namespace Rubickanov.ACS.Runtime.Persistence
+{
+    public static class EntityPersistenceExtensions
+    {
+        // Сериализованный стейт всех [PersistedState] полей всех аспектов сущности.
+        // Чистый value object — без привязки к GameObject, можно передавать, хранить, пересылать.
+        public static AspectSnapshot Snapshot(this EntityContext entity);
+
+        // Применить snapshot обратно: пишет значения в ReactiveProperty.
+        // Netcode/UI/правила реагируют как на обычный write.
+        public static void Restore(this EntityContext entity, AspectSnapshot snapshot);
+
+        // true — хотя бы у одного аспекта есть [PersistedState] поле. Кэш scanner'а.
+        public static bool HasPersistedState(this EntityContext entity);
+    }
+
+    public static class WorldPersistenceExtensions
+    {
+        // Обход всех сущностей с persisted state. Без реестра slot'ов — просто enumerate.
+        public static IEnumerable<EntityContext> PersistedEntities(this World world);
+    }
+}
+```
+
+`AspectSnapshot` — сериализуемый value object (структура или record) с таблицей `aspectType → fieldName → value` и версиями аспектов. Всё. ACS не знает про файлы, бэкенды, слоты, манифесты, prefabId.
+
+### World — тоже сущность
+
+World — это entity (см. секцию 0), так что `world.Snapshot()` / `world.Restore(snap)` работают на нём как и на любой другой сущности. Мировой стейт (TimeOfDay, Weather) сохраняется/восстанавливается тем же API.
+
+### Как это выглядит на уровне игры
+
+Save-систему пишет конкретная игра (или отдельный пакет). ACS только поставляет снепшоты — всё остальное выше:
+
+```csharp
+// Код в game layer или в отдельном com.rubickanov.save
+public class SaveService
+{
+    private readonly IStorage _storage;
+    private readonly Func<EntityContext, string> _getId;        // как получить стабильный id
+    private readonly Func<EntityContext, string> _getPrefabId;  // как получить prefabId для респауна
+    private readonly Func<string, GameObject> _resolvePrefab;   // как спавнить по prefabId
+
+    public async Task SaveSlot(string slot)
+    {
+        var manifest = new Manifest();
+        foreach (var entity in World.Instance.PersistedEntities())
+            manifest.Add(_getId(entity), _getPrefabId(entity), entity.Snapshot());
+        await _storage.Write(slot, manifest);
+    }
+
+    public async Task LoadSlot(string slot)
+    {
+        var manifest = await _storage.Read<Manifest>(slot);
+        foreach (var entry in manifest.Entries)
+        {
+            var entity = FindOrSpawn(entry.Id, entry.PrefabId);
+            entity.Restore(entry.Snapshot);
+        }
+    }
+}
+```
+
+ACS не участвует в решениях "куда писать", "когда писать", "как резолвить". Игра сама подставляет id-провайдер и prefab-резолвер. Всё что ACS экспонирует — snapshot/restore.
+
+### Сценарии (glue со стороны игры)
+
+**Дисконнект/реконнект (DayZ-style):**
+
+```csharp
+// Отключился
+await saveService.WritePlayer(playerId, player.Snapshot());
+
+// Реконнект
+var entity = Instantiate(playerPrefab).GetComponent<EntityContext>();
+var snapshot = await saveService.ReadPlayer(playerId);
+entity.Restore(snapshot);
+// Restore пишет в ReactiveProperty → netcode marks dirty → реплицируется клиенту
+```
+
+**Чекпоинты:** save-слой пишет снепшоты под нужным именем слота. ACS про слоты не знает.
+
+**Автосейв:** таймер живёт в save-слое или в game loop, дёргает `SaveService.SaveSlot("autosave")` с нужной периодичностью.
+
+### Persistent identity — не здесь
+
+Стабильный id сущности через рестарты — это не ACS концерн. Скорее всего компонент `PersistentIdentity` живёт в save-пакете или в `utils`, save-слой конфигурирует `SaveService` чтобы он знал как получить id из сущности. ACS просто оперирует снепшотами без привязки.
+
+### Архитектура
+
+```
+AspectSnapshot (struct/record, public)
+└── aspectType → fieldName → value, плюс версии аспектов
+
+PersistenceScanner (internal, зеркало ReplicationScanner)
+├── reflection + кэш per-type: находит [PersistedState] поля
+└── строит PersistedFieldBinding<T> для каждого поля
+
+Extensions
+├── entity.Snapshot()   — проходит по аспектам, собирает AspectSnapshot
+├── entity.Restore(s)   — читает snapshot, пишет в ReactiveProperty
+└── world.PersistedEntities() — enumerator по реестру World с фильтром HasPersistedState
+```
+
+Никаких MonoBehaviour на сущностях, никаких глобальных систем, никаких таймеров, никаких реестров слотов. Чистая библиотека функций поверх аспектов.
+
+### Версионирование (schema migration)
+
+Принадлежит acs.persistence: это про эволюцию стейта аспектов, а не про save-систему.
+
+```csharp
+[AspectVersion(3)]
+public class PlayerAspect : IEntityAspect
+{
+    [PersistedState] public readonly ReactiveProperty<float> Health = new(100f);
+    [PersistedState] public readonly ReactiveProperty<float> MaxHealth = new(100f);  // добавлено в v2
+    [PersistedState] public readonly ReactiveProperty<int> ArmorClass = new(0);      // добавлено в v3
+
+    // Мигратор v1 → v2: MaxHealth не существовал, ставим дефолт
+    static void Migrate_1_to_2(AspectData data) => data.SetIfMissing("MaxHealth", 100f);
+
+    // Мигратор v2 → v3: ArmorClass не существовал
+    static void Migrate_2_to_3(AspectData data) => data.SetIfMissing("ArmorClass", 0);
+}
+```
+
+При `Restore`:
+1. Читаем версию аспекта из snapshot
+2. Если старше текущей — прогоняем `Migrate_N_to_M` по цепочке
+3. Применяем результат
+
+Формат snapshot со строковыми ключами полей помогает — неизвестные поля игнорируются, отсутствующие заполняются дефолтами. Мигратор нужен только когда дефолт недостаточен (переименование, преобразование типа, перенос данных между полями).
+
+### Интеграция с netcode
+
+`Restore` пишет в ReactiveProperty → netcode видит dirty → реплицирует. Ноль клея:
+
+```
+Restore(snapshot) → Health.Value = 73 → ReactiveProperty fires
+                                      → ReplicatedFieldBinding marks dirty
+                                      → server tick broadcasts to clients
+```
+
+### Что вынесено наружу
+
+- **Storage backends** (file, PlayerPrefs, encrypted, cloud) — `com.rubickanov.storage` или save-пакет
+- **Слоты, манифест, UI слот-селектора, cloud sync** — save-слой игры
+- **Автосейв, чекпоинты, триггеры сохранения** — game loop
+- **Persistent identity** — save-пакет или utils
+- **Prefab resolution** — save-слой (ACS не знает что такое префаб)
+- **Сериализатор конкретного формата** (JSON / MsgPack / бинарный) — save-слой (acs.persistence может дать дефолтный JSON для удобства, но не навязывает)
+
+### Что переиспользуется из netcode
+
+- `ReplicationScanner` — паттерн сканирования атрибутов (reflection + кэш per-type)
+- `ReplicatedFieldBinding` — паттерн чтения/записи полей аспекта
+
+Основная работа — сканер и field bindings. Всё остальное, что было в старом плане (AspectPersistor, AspectPersistenceSystem, manifest, PersistentIdentity, auto-save), перенесено на уровень выше и из ACS убрано.
+
+---
+
+## 2. acs.codegen
+
+Source generators вместо runtime reflection. Compile-time кодогенерация для:
+
+### Что генерируем
+
+**Aspect injection (замена AspectInjector):**
+
+Сейчас:
+```csharp
+// Runtime: reflection ищет [Aspect] поля, кэширует per-type, инжектит через SetValue
+AspectInjector.Inject(context, component);
+```
+
+Source generator создаёт:
+```csharp
+// Сгенерировано в compile-time
+partial class OwnerInputMover
+{
+    private void __InjectAspects(EntityContext context)
+    {
+        _aspect = context.Require<ExperimentAspect>();
+    }
+}
+```
+
+Нулевой runtime cost — нет reflection, нет Dictionary lookup, нет кэша.
+
+**Replication scanner (замена ReplicationScanner):**
+
+Сейчас:
+```csharp
+// Runtime: reflection сканирует [ReplicatedState] поля, сортирует, кэширует
+var fields = ReplicationScanner.Scan(aspect);
+```
+
+Source generator создаёт:
+```csharp
+// Сгенерировано: стабильный порядок полей, типы известны
+static class ExperimentAspect__ReplicationInfo
+{
+    public static readonly ReplicatedFieldInfo[] Fields = new[]
+    {
+        new ReplicatedFieldInfo("Health", typeof(float), AuthorityMode.Server, InterpolationMode.None),
+        new ReplicatedFieldInfo("Position", typeof(Vector3), AuthorityMode.Owner, InterpolationMode.Linear),
+        new ReplicatedFieldInfo("Rotation", typeof(Quaternion), AuthorityMode.Server, InterpolationMode.Linear),
+    };
+}
+```
+
+**Persistence scanner (если acs.persistence реализован):**
+
+Аналогично — `[PersistedState]` поля сканируются в compile-time.
+
+### Что это даёт
+
+- Нулевой runtime cost — reflection на старте полностью убран
+- IL2CPP safe — нет `MakeGenericType`, нет `GetValue`/`SetValue`, нет stripping проблем
+- Ошибки в compile-time — забыл `[Aspect]` на неправильном типе → ошибка компиляции, а не LogError в рантайме
+- `AotHints.cs` больше не нужен
+
+### Сложность
+
+Высокая. Unity + source generators = нетривиальный setup (отдельный .NET Standard 2.0 проект, интеграция с asmdef). Делать последним, когда reflection станет реальным bottleneck или IL2CPP начнёт ломаться на кастомных типах.
+
+---
+
+## 3. acs.queries → перенесено в core (World)
+
+**Базовые queries** (по типам аспектов, фильтрация, итерация) стали частью core ACS через `World.Query<T>()` — см. секцию 0.
+
+**Этот пакет** — только если нужны **расширенные spatial queries**, которые не входят в core:
+
+### Spatial queries
+
+`WithinRadius` / `Nearest` / spatial hash grid — для больших миров (500+ сущностей):
+
+```csharp
+// Расширение поверх World.Query
+var targets = World.Query<HealthAspect, PositionAspect>()
+    .WithinRadius(origin, 20f)    // ← spatial extension
+    .Nearest(origin);              // ← spatial extension
+```
+
+Реализация: spatial hash grid, обновляется при изменении `ReactiveProperty<Vector3>` Position. Без spatial extensions — `World.Query<T>()` итерирует линейно (O(n)), с extensions — O(1) lookup по ячейке.
+
+### Интеграция с EQS
+
+`com.rubickanov.eqs` уже делает spatial queries для AI. Spatial queries могут стать его data source:
+
+```csharp
+public class EntityQueryGenerator : EQSGenerator
+{
+    public override IEnumerable<Vector3> Generate(Vector3 origin)
+    {
+        return World.Query<PositionAspect>()
+            .WithinRadius(origin, 30f)
+            .Select(e => e.Position.Value);
+    }
+}
+```
+
+Возможно не отдельный пакет, а часть EQS. Решить при реализации.
+
+---
+
+## 4. acs.debug
+
+Runtime визуализатор аспектов. Оверлей в play mode — все сущности, их аспекты, значения полей в реалтайме.
+
+### Что показывает
+
+- Список сущностей с EntityContext, фильтр по аспектам
+- Значения всех ReactiveProperty на выбранной сущности, обновляются live
+- Кто подписан на какое поле (subscription count)
+- Dirty state — какие поля помечены dirty прямо сейчас
+- Сетевой трафик per field — сколько байт ушло на репликацию конкретного поля за секунду
+- Authority — кто пишет (server/owner), визуально отличается
+- Timeline — график значения поля за последние N секунд (Health over time)
+
+### Реализация
+
+EditorWindow + runtime компонент. В play mode подписывается на все `ReactiveProperty` выбранной сущности, рисует через IMGUI или UI Toolkit. Для сетевых метрик — hook в `AspectReplicationSystem` (счётчик байт per binding).
+
+Не влияет на production — `#if UNITY_EDITOR` или отдельный Editor asmdef.
+
+---
+
+## 5. acs.replay
+
+Запись и воспроизведение изменений аспектов. Третье переиспользование паттерна сериализации (после netcode и persistence).
+
+### Использование
+
+```csharp
+// Начать запись
+var recording = ReplaySystem.StartRecording(entity);
+
+// Остановить, получить данные
+var clip = recording.Stop();
+
+// Воспроизвести на другой сущности (ghost)
+var ghost = Instantiate(ghostPrefab);
+ReplaySystem.Play(ghost, clip, speed: 1f);
+
+// Сохранить на диск
+await clip.SaveAsync("killcam_2026-04-11.replay");
+```
+
+### Формат записи
+
+```
+[timestamp, entityId, aspectType, fieldName, value]
+[0.000, "player_1", "PlayerAspect", "Position", (0, 0, 0)]
+[0.016, "player_1", "PlayerAspect", "Position", (0.1, 0, 0.2)]
+[0.350, "player_1", "PlayerAspect", "Health", 85.0]
+```
+
+Подписывается на `ReactiveProperty.Subscribe` — каждое изменение записывается с timestamp. Воспроизведение — пишет значения обратно в ReactiveProperty по таймлайну.
+
+### Сценарии
+
+- **Killcam** — запись последних 10 секунд жертвы, воспроизведение после смерти
+- **Spectator mode** — запись матча целиком, просмотр с любой камеры
+- **Баг-репорты** — приложить replay к тикету, разработчик видит точное состояние
+- **Балансировка** — графики Health/DPS/позиции за бой, анализ post-mortem
+- **Обучение** — воспроизвести эталонное прохождение как ghost
+
+### Интеграция
+
+Сериализация та же что в netcode (бинарная для компактности) и persistence (JSON для анализа). Один `ReplayFieldBinding<T>` по образцу `ReplicatedFieldBinding<T>`.
+
+---
+
+## 6. acs.reactive
+
+Computed properties — производные значения, автоматически пересчитываемые при изменении источников.
+
+### Проблема
+
+Сейчас derived state = ручной `Subscribe` + `CombineLatest`:
+
+```csharp
+// Boilerplate на каждое вычисляемое значение
+_health.Health.CombineLatest(_health.MaxHealth, (h, max) => h / max)
+    .Subscribe(v => _health.HealthPercent.Value = v)
+    .AddTo(ref _disposables);
+```
+
+### С acs.reactive
+
+```csharp
+public class HealthAspect : IEntityAspect
+{
+    [ReplicatedState] public readonly ReactiveProperty<float> Health = new(100f);
+    [ReplicatedState] public readonly ReactiveProperty<float> MaxHealth = new(100f);
+
+    // Auto-computed, read-only для внешнего кода
+    [Computed] public readonly IReadOnlyReactiveProperty<float> HealthPercent;
+    [Computed] public readonly IReadOnlyReactiveProperty<bool> IsDead;
+
+    public HealthAspect()
+    {
+        HealthPercent = Health.CombineLatest(MaxHealth, (h, max) => max > 0 ? h / max : 0f)
+            .ToReadOnlyReactiveProperty();
+        IsDead = Health.Select(h => h <= 0f)
+            .ToReadOnlyReactiveProperty();
+    }
+}
+```
+
+`[Computed]` — маркер для сканеров: не реплицировать, не сохранять, не включать в dirty mask. Значение всегда вычисляется из источников локально.
+
+### Расширенные паттерны
+
+```csharp
+// Debounce — не спамить подписчиков при быстрых изменениях
+[Debounced(0.1f)]
+public readonly ReactiveProperty<Vector3> SmoothedPosition;
+
+// Throttle — максимум N обновлений в секунду
+[Throttled(10)]
+public readonly ReactiveProperty<float> UIHealth; // UI не нужно 60 fps обновлений
+```
+
+### Реализация
+
+Если делать через codegen (acs.codegen) — source generator видит `[Computed]` и генерирует subscription wiring. Без codegen — runtime helper:
+
+```csharp
+ComputedProperty.Bind(HealthPercent, Health, MaxHealth, (h, max) => h / max);
+```
+
+---
+
+## 7. acs.pooling
+
+Интеграция entity pooling с lifecycle аспектов.
+
+### Проблема
+
+При object pooling (NGO или свой) сущность возвращается в пул, но аспекты остаются в грязном состоянии — Health = 0 от прошлой жизни, Position от места смерти, подписки живые. При повторном использовании нужен ручной reset каждого поля.
+
+### Использование
+
+```csharp
+public class ZombieAspect : IEntityAspect
+{
+    [ResetOnRecycle] public readonly ReactiveProperty<float> Health = new(100f);
+    [ResetOnRecycle] public readonly ReactiveProperty<Vector3> Position = new();
+    [ResetOnRecycle] public readonly ReactiveProperty<bool> IsAggro = new(false);
+
+    // Не ресетится — сохраняет значение между жизнями
+    public readonly ReactiveProperty<int> TotalKills = new(0);
+}
+```
+
+`[ResetOnRecycle]` — при возврате в пул значение сбрасывается к initial (тому что в `new(...)`). Без атрибута — поле сохраняется между переиспользованиями.
+
+### Архитектура
+
+```csharp
+// При возврате в пул
+AspectPoolManager.OnRecycle(entity);
+// → scanner находит все [ResetOnRecycle] поля
+// → записывает initial values (кэшированы per-type при первом scan)
+// → suppressed write (как в netcode — без триггера подписок)
+// → отписка компонентов через OnDisable lifecycle
+
+// При повторном spawn
+AspectPoolManager.OnReuse(entity);
+// → аспекты уже в чистом состоянии
+// → OnEnable → подписки заново
+```
+
+### Интеграция с NGO
+
+NGO поддерживает `INetworkPrefabInstanceHandler` для кастомного pooling. `AspectPoolManager` реализует этот интерфейс — NGO дёргает Instantiate/Destroy, менеджер подставляет pool + aspect reset.
+
+---
+
+## 8. acs.sync
+
+Автомост между аспектами и Unity-компонентами. Убирает bridge-компоненты которые вручную пишут `transform.position = _aspect.Position.Value` в Update или в Subscribe.
+
+### Проблема
+
+Почти в каждом проекте на ACS есть "bridge" компонент — подписывается на аспект и синхронизирует значения в Transform, Rigidbody, Animator и т.д. Это boilerplate: компонент, [Aspect] поле, OnSubscribe, Subscribe, AddTo. На каждое поле.
+
+### Использование
+
+```csharp
+public class MovementAspect : IEntityAspect
+{
+    [SyncToTransform(Target = TransformField.Position)]
+    public readonly ReactiveProperty<Vector3> Position = new();
+
+    [SyncToTransform(Target = TransformField.Rotation)]
+    public readonly ReactiveProperty<Quaternion> Rotation = new();
+}
+
+public class PhysicsAspect : IEntityAspect
+{
+    [SyncToRigidbody(Target = RigidbodyField.Velocity)]
+    public readonly ReactiveProperty<Vector3> Velocity = new();
+}
+```
+
+Один атрибут вместо целого компонента. Сканер находит атрибуты при spawn, подписывается, bridge-код исчезает.
+
+### Архитектура
+
+`AspectSyncSystem` — компонент на сущности (или часть `EntityContext`). При Awake/OnEnable сканирует все аспекты, находит `[SyncTo*]` атрибуты, создаёт подписки. Кэш per-type как в ReplicationScanner.
+
+Поддерживаемые цели:
+- `TransformField` — Position, Rotation, LocalPosition, LocalRotation, LocalScale
+- `RigidbodyField` — Velocity, AngularVelocity
+- Можно расширять через `ISyncTarget` интерфейс для кастомных компонентов
+
+### Направление синка
+
+По умолчанию — **aspect → компонент** (reactive push). Обратное направление (transform → aspect) опционально через `[SyncFromTransform]` — полезно когда физика двигает rigidbody и нужно обновить аспект.
+
+---
+
+## 9. acs.animation
+
+Reactive binding аспектов к Animator. Убирает ручной `animator.SetFloat`/`SetBool`/`SetTrigger` в Update.
+
+### Проблема
+
+В каждом проекте:
+```csharp
+// Этот код пишется на каждую сущность с аниматором
+void Update()
+{
+    _animator.SetFloat("Speed", _movement.Speed.Value);
+    _animator.SetBool("IsGrounded", _movement.Grounded.Value);
+    _animator.SetFloat("Health", _health.Health.Value);
+}
+```
+
+### Использование
+
+```csharp
+public class MovementAspect : IEntityAspect
+{
+    [AnimatorParam("Speed")]
+    public readonly ReactiveProperty<float> MoveSpeed = new(0f);
+
+    [AnimatorParam("IsGrounded")]
+    public readonly ReactiveProperty<bool> Grounded = new(true);
+
+    [AnimatorTrigger("Jump")]
+    public readonly Subject<Unit> Jump = new(); // OnNext → SetTrigger
+}
+
+public class CombatAspect : IEntityAspect
+{
+    [AnimatorParam("AttackType")]
+    public readonly ReactiveProperty<int> AttackType = new(0);
+
+    [AnimatorTrigger("Attack")]
+    public readonly Subject<Unit> Attack = new();
+}
+```
+
+`ReactiveProperty` → `SetFloat`/`SetBool`/`SetInt` при изменении. `Subject` → `SetTrigger` при OnNext. Нет Update, нет bridge-компонента.
+
+### Архитектура
+
+`AspectAnimatorBinder` — компонент рядом с `Animator`. Сканирует аспекты, строит подписки. Кэш per-type. При spawn подписывается, при despawn отписывается.
+
+Маппинг типов:
+- `ReactiveProperty<float>` → `SetFloat`
+- `ReactiveProperty<int>` → `SetInteger`
+- `ReactiveProperty<bool>` → `SetBool`
+- `Subject<Unit>` → `SetTrigger`
+- `Subject<T>` → `SetTrigger` (payload игнорируется)
+
+### Валидация
+
+Editor-time проверка: если `[AnimatorParam("Speed")]` а в AnimatorController нет параметра "Speed" — warning в консоли при spawn, а не молчаливый no-op.
+
+---
+
+## 10. acs.rules
+
+Декларативный rules engine поверх реактивных аспектов. Data-driven игровые правила без хардкода.
+
+### Проблема
+
+Игровая логика типа "когда здоровье < 20% и персонаж горит — включить панику" живёт внутри компонентов как if/else. Геймдизайнер хочет поменять порог с 20% на 30% — нужен программист.
+
+### Использование
+
+```csharp
+// Правило как ScriptableObject — редактируется в инспекторе
+[CreateAssetMenu]
+public class PanicRule : AspectRule
+{
+    [SerializeField] float healthThreshold = 0.2f;
+    [SerializeField] GameplayTag requiredTag = "Status.Burning";
+
+    public override void Configure(RuleBuilder builder)
+    {
+        builder
+            .When<HealthAspect>(h => h.HealthPercent.Value < healthThreshold)
+            .And<TagsAspect>(t => t.Has(requiredTag))
+            .Apply<StatusAspect>((status) => status.Panic.Value = true)
+            .Remove<StatusAspect>((status) => status.Panic.Value = false); // когда условие перестаёт выполняться
+    }
+}
+```
+
+```csharp
+// Регистрация
+RuleSystem.Register(panicRule);
+// Всё. Проверяется реактивно — при изменении Health или Tags, не в Update.
+```
+
+### Ключевое — реактивность
+
+Правила **не** проверяются каждый кадр. `RuleSystem` подписывается на `ReactiveProperty` полей в условии. Правило вычисляется только когда одно из условий изменилось. 100 правил × 500 сущностей — нагрузка только при реальных изменениях.
+
+### Интеграция
+
+- `com.rubickanov.gameplaytags` — условия на теги (`Has`, `HasAny`, `HasAll`)
+- `com.rubickanov.gas` — правила как альтернатива GameplayEffects для простых случаев
+- `com.rubickanov.behaviortree` — BT ноды могут проверять active rules
+
+### Уровни сложности
+
+**Simple** — ScriptableObject с полями-порогами, без кода. Геймдизайнер справится.
+
+**Advanced** — кастомные условия и действия через C#:
+
+```csharp
+builder
+    .When<PositionAspect, ZoneAspect>((pos, zone) =>
+        Vector3.Distance(pos.Position.Value, zone.Center.Value) < zone.Radius.Value)
+    .Apply<BuffAspect>(buff => buff.InSafeZone.Value = true);
+```
+
+---
+
+## 11. acs.testing
+
+Тест-утилиты для ACS. Fluent builder для сборки сущностей и assert-хелперы без GameObject, сцены и NetworkManager.
+
+### Проблема
+
+Сейчас чтобы протестировать компонент нужно руками создавать GameObject, вешать EntityContext, создавать аспекты, мокать подписки. Много boilerplate на каждый тест.
+
+### Использование
+
+```csharp
+// Fluent builder — собрать сущность для теста
+var entity = ACSTestFixture.Create()
+    .WithAspect(new HealthAspect { Health = { Value = 50f } })
+    .WithAspect(new PositionAspect())
+    .WithComponent<DamageReceiver>()
+    .Build();
+
+// Assert — значение поля
+entity.AssertAspect<HealthAspect>(h => h.Health.Value == 50f);
+
+// Assert — поле изменилось после действия
+entity.AssertChanged<HealthAspect>(h => h.Health, () =>
+{
+    entity.GetComponent<DamageReceiver>().TakeDamage(10f);
+});
+
+// Assert — событие сработало
+entity.AssertFired<CombatAspect>(c => c.OnDeath, () =>
+{
+    entity.Require<HealthAspect>().Health.Value = 0f;
+});
+
+// Assert — поле НЕ изменилось
+entity.AssertNotChanged<HealthAspect>(h => h.Health, () =>
+{
+    entity.GetComponent<DamageReceiver>().TakeDamage(0f);
+});
+```
+
+### Что под капотом
+
+`ACSTestFixture.Create()` создаёт реальный GameObject с EntityContext (нужен для AspectInjector), но без сцены и без MonoBehaviour lifecycle. `Build()` возвращает обёртку с доступом к аспектам и компонентам.
+
+`AssertChanged` — подписывается на ReactiveProperty, выполняет action, проверяет что callback сработал. `AssertFired` — то же для Subject.
+
+### Для netcode-тестов
+
+```csharp
+// Сборка сущности с network-мокой
+var entity = ACSTestFixture.Create()
+    .WithAspect(new StateTestAspect())
+    .AsNetworked(isServer: true, isOwner: false)
+    .Build();
+
+// Проверить что binding пометился dirty
+entity.AssertDirty<StateTestAspect>(s => s.Health);
+```
+
+`AsNetworked` подставляет мок-флаги `IsServer`/`IsOwner` без реального NetworkManager.
+
+---
+
+## 12. acs.live
+
+Веб-панель для живой настройки аспектов в реалтайме. Из игры стримится состояние по WebSocket в браузер — на телефоне, планшете, втором мониторе.
+
+### Как работает
+
+```
+Unity (game) ←— WebSocket —→ Browser (панель)
+```
+
+Игра поднимает lightweight WebSocket сервер. Панель в браузере подключается, получает список сущностей и аспектов, показывает значения live. Слайдеры, чекбоксы, инпуты — меняешь значение в браузере, оно пишется в ReactiveProperty в игре.
+
+### Сценарии
+
+- **Плейтест** — геймдизайнер сидит рядом с тестером, на планшете тюнит Health, DamageMultiplier, SpawnRate в реалтайме. Нашли хороший баланс — записали значения.
+- **Демо/стриминг** — показываешь игру, параллельно на втором экране видишь все внутренности. "Вот смотрите, Health падает когда горит, вот Regeneration поднимает".
+- **Удалённый dedicated сервер** — подключаешься к серверу из дома, видишь состояние всех игроков, можешь вмешаться.
+
+### Архитектура
+
+```
+ACSLiveServer (MonoBehaviour, singleton)
+├── WebSocket server (порт конфигурируется)
+├── EntityRegistry — список сущностей с EntityContext
+├── AspectSerializer — JSON snapshot аспектов (переиспользуется из persistence)
+├── Change listener — подписки на ReactiveProperty, push при изменении
+└── Write handler — входящие изменения → ReactiveProperty.Value = ...
+```
+
+### Протокол
+
+```json
+// Сервер → браузер: snapshot сущности
+{ "type": "snapshot", "entityId": "player_1", "aspects": { "HealthAspect": { "Health": 73.5 } } }
+
+// Сервер → браузер: поле изменилось
+{ "type": "changed", "entityId": "player_1", "aspect": "HealthAspect", "field": "Health", "value": 65.0 }
+
+// Браузер → сервер: изменить значение
+{ "type": "set", "entityId": "player_1", "aspect": "HealthAspect", "field": "Health", "value": 100.0 }
+```
+
+### Веб-панель
+
+Простой SPA (можно на vanilla JS, без фреймворков). Встроен в пакет как WebGL ресурс — открываешь `localhost:7777` и панель уже там. Никаких npm/node зависимостей.
+
+### Безопасность
+
+Dev-only. `#if DEVELOPMENT_BUILD || UNITY_EDITOR` — в release билде сервер не компилируется. Опционально: пароль на подключение.
+
+---
+
+## 13. acs.mirror
+
+Зеркало аспектов во внешнюю базу данных. Состояние сущностей доступно из внешних инструментов — админ-панели, аналитика, GM-тулзы.
+
+### Отличие от live
+
+`acs.live` — dev-time, WebSocket, прямое подключение к процессу игры. Для разработки и плейтестов.
+
+`acs.mirror` — production, через базу данных (Redis, Firebase, PostgreSQL). Для live-сервисов, GM-инструментов, аналитики.
+
+### Как работает
+
+```
+Game Server → MirrorSystem → Database ← Admin Panel / Analytics / GM Tools
+```
+
+`MirrorSystem` подписывается на `[Mirrored]` поля, при изменении пишет в базу. Внешние инструменты читают из базы. Обратная связь: GM записал в базу → MirrorSystem подхватил → записал в ReactiveProperty → игра отреагировала.
+
+### Использование
+
+```csharp
+public class PlayerAspect : IEntityAspect
+{
+    [Mirrored]  // синхронизируется с внешней базой
+    [ReplicatedState(Authority = AuthorityMode.Server)]
+    public readonly ReactiveProperty<float> Health = new(100f);
+
+    [Mirrored]
+    [PersistedState]
+    public readonly ReactiveProperty<int> Gold = new(0);
+
+    // Не зеркалится — только внутри игры
+    public readonly ReactiveProperty<Vector3> Velocity = new();
+}
+```
+
+### Сценарии
+
+- **GM-панель** — саппорт видит "игрок X застрял с Health=0, Gold=-500". Кликает "починить" → Health = 100, Gold = 0 → изменения прилетают в игру через mirror.
+- **Аналитика** — дашборд показывает среднее Health по всем игрокам, экономику сервера (суммарный Gold), популярные предметы. Всё в реалтайме.
+- **Античит** — внешний сервис мониторит Speed, Position. Аномалия → автоматический бан.
+- **Межсерверная коммуникация** — два game-сервера зеркалят в одну базу. Игрок перешёл на другой сервер → его состояние уже в базе.
+
+### Бэкенды
+
+```
+IMirrorBackend
+├── RedisMirrorBackend      — быстрый, pub/sub для обратной связи
+├── FirebaseMirrorBackend   — для мобилок, real-time database
+└── PostgresMirrorBackend   — для аналитики, SQL-запросы по состоянию
+```
+
+### Throttling
+
+Не каждое изменение ReactiveProperty нужно писать в базу. `[Mirrored(IntervalMs = 1000)]` — максимум раз в секунду. Для Position при 60fps без throttle база умрёт.
+
+---
+
+## 14. acs.simulate
+
+Headless симуляция логики аспектов без рендера. Прогон тысяч боёв за секунды для балансировки, или dedicated сервер без GPU.
+
+### Два уровня
+
+**Уровень 1: Unity headless build** — Unity без рендера. MonoBehaviour, GameObject — всё работает. Подходит для dedicated серверов. Простой — не нужен рефактор, `BuildTarget.Server` и готово.
+
+**Уровень 2: чистый .NET без Unity** — console app, прогон 10000 боёв за секунду. Это сложнее, требует отделения логики от MonoBehaviour.
+
+### Подход для уровня 2
+
+Интерфейс `IEntityLogic` — контракт на чистую тикаемую логику:
+
+```csharp
+public interface IEntityLogic
+{
+    void Tick(float dt);
+}
+```
+
+Компоненты в Unity реализуют интерфейс, оставаясь MonoBehaviour:
+
+```csharp
+[NetworkScope(NetworkScope.ServerOnly)]
+public class BurnDamage : EntityComponent, IEntityLogic
+{
+    [Aspect] private HealthAspect _health;
+    [Aspect] private StatusAspect _status;
+
+    public void Tick(float dt)
+    {
+        if (_status.IsBurning.Value)
+            _health.Health.Value -= 10f * dt;
+    }
+
+    void Update() => Tick(Time.deltaTime);
+}
+```
+
+В Unity — работает как обычно. Для headless без Unity — нужен рефактор: вынести логику в pure C# классы, MonoBehaviour остаётся тонкой обёрткой. Или писать новые логики сразу как pure C# + отдельный MonoBehaviour-раннер.
+
+### Headless runner
+
+```csharp
+// Console app — без Unity
+var entity = new SimulationContext();
+var health = entity.Require<HealthAspect>();
+var status = entity.Require<StatusAspect>();
+
+var burn = new BurnDamageLogic(); // pure C# версия
+AspectInjector.Inject(entity, burn);
+
+status.IsBurning.Value = true;
+health.Health.Value = 100f;
+
+// Прогон
+for (int tick = 0; tick < 10000; tick++)
+    burn.Tick(0.016f);
+
+Console.WriteLine($"Health after 160s of burn: {health.Health.Value}");
+```
+
+### Сценарии
+
+- **Балансировка** — прогнать 10000 боёв "воин vs маг", собрать winrate, средний TTK, распределение DPS. Без Unity, без рендера, за секунды.
+- **Dedicated сервер** — уровень 1 (Unity headless). Всё работает из коробки.
+- **CI/CD** — автотест "после патча баланса средний TTK не упал ниже 5 секунд". Прогоняется в pipeline как console app.
+- **Monte Carlo** — рандомизированные параметры, тысячи прогонов, статистика. "При каком значении ArmorClass выживаемость > 70%?"
+
+### Ограничения
+
+Для уровня 2 (без Unity): аспекты используют `Vector3`, `Quaternion` из `UnityEngine.dll`. Это просто структуры — можно зареференсить `UnityEngine.CoreModule.dll` из console app, работает в любом .NET рантайме. "Без Unity" = без GameObject/MonoBehaviour/рендера, математика остаётся.
+
+---
+
+## 15. acs.bindings
+
+Декларативная привязка аспектов к UI. Как `acs.sync` для Transform/Rigidbody, но для UI элементов.
+
+### Использование
+
+```csharp
+public class PlayerHudView : MonoBehaviour
+{
+    [SerializeField] Slider healthBar;
+    [SerializeField] TMP_Text goldLabel;
+
+    [BindTo(nameof(healthBar))]         // ReactiveProperty<float> → Slider.value
+    [Aspect] private HealthAspect _health;
+
+    [BindTo(nameof(goldLabel), format: "Gold: {0}")]  // ReactiveProperty<int> → TMP_Text.text
+    [Aspect] private InventoryAspect _inventory;
+}
+```
+
+Сканер находит `[BindTo]` атрибуты, подписывается на ReactiveProperty, пишет в UI. Bridge-компонент исчезает.
+
+### Сомнения
+
+Честно — непонятно, насколько это реально нужно. Ui пакет (`com.rubickanov.ui`) уже решает свои задачи по-своему, и привязка к конкретным элементам (Slider, TMP_Text, Image.fillAmount) — это кастомный код для каждого типа таргета. Получится пухлый маппинг "тип поля + тип UI элемента + форматтер".
+
+Альтернатива — писать ViewModel-подобные классы в `ui` пакете которые знают про аспекты. Возможно это чище.
+
+Делать последним, если вообще.
+
+---
+
+## 16. acs.commands
+
+Командный паттерн для мутаций аспектов. Вместо прямого `Health.Value = x` — через типизированные команды.
+
+### Использование
+
+```csharp
+public readonly struct DealDamageCommand : IAspectCommand
+{
+    public EntityRef Target;
+    public float Amount;
+    public DamageType Type;
+
+    public void Execute(CommandContext ctx)
+    {
+        var health = ctx.Get<HealthAspect>(Target);
+        health.Health.Value -= Amount;
+    }
+}
+
+// Выполнение
+CommandBus.Send(new DealDamageCommand { Target = enemy, Amount = 10f });
+```
+
+### Что даёт
+
+- **Лог команд** — replay через команды вместо значений, меньше размер
+- **Валидация** — `IValidator<DealDamageCommand>` проверяет на сервере до execute (античит)
+- **Undo/redo** — для GM-тулзов и редакторов уровней
+- **Батчинг** — несколько команд в одной транзакции, atomic apply
+- **Сетевая отправка** — команда = готовое ServerRpc (для предсказания)
+
+### Сомнения
+
+Это шаг в сторону от реактивного подхода. Сейчас весь фреймворк построен на "пишем в ReactiveProperty, подписчики реагируют". Команды добавляют слой между намерением и изменением, и тогда ломается красота прямого `Health.Value -= 10`.
+
+Есть риск что это превратится в архитектурный мандат — "теперь ВСЕ мутации через команды". Это уже не ACS, это CQRS на Unity.
+
+Возможно полезно только для конкретных use case (античит, GM-откат), и тогда это не отдельный пакет, а паттерн который юзер применяет где нужно. В core ACS включать нет смысла.
+
+---
+
+## Фундаментальные проблемы
+
+Не отдельные пакеты, а вещи которые нужно решить в core ACS.
+
+### Pure core — расщепление entity/world на IEntity + Unity adapter
+
+Сейчас `EntityContext : MonoBehaviour`, `World : SingletonEntityContext<World> : MonoBehaviour`. Значит **entity = GameObject**, всегда. Это спаивает две ортогональные роли: **identity + composition** (чистые данные) и **representation** (Unity-объект). Пока всё в сцене — не мешает. Как только появляется item в инвентаре, buff, quest, headless-прогон симуляции — упирается в MB-lifecycle и Unity-зависимости.
+
+Сейчас реально Unity-bound только одна вещь — `EntityComponent` (ему нужны `Awake`/`Update`/Transform). Всё остальное — `_aspects` словарь, `World._registry`, `EntityQuery`, `AspectInjector` — уже pure C#, просто живёт на `MonoBehaviour`.
+
+#### Что это даёт
+
+Один рефактор разблокирует сразу несколько пунктов из роадмапа:
+
+- **Pocket entities** — item в инвентаре, buff, spell-instance, quest. Aspects + queries без GameObject'а.
+- **simulate Уровень 2** (`acs.simulate`, см. выше) — прогон логики в console app, 10000 боёв за секунду. Без этого L2 не взлетает в принципе.
+- **persistence без сцены** — snapshot/restore aspects до загрузки уровня (save main menu, delayed spawn).
+- **replay в pure C#** — детерминированный прогон сохранённого стрима событий без подъёма Unity.
+- **Часть тестов в edit-mode** — сейчас aspect/replicator-тесты под `UNITY_INCLUDE_TESTS` в Play mode, часть могла бы быть обычным NUnit.
+- **Entity references** (следующая секция) — `TryResolve` не спотыкается о Unity fake-null, потому что detached entity не MonoBehaviour.
+
+#### Дизайн
+
+Расщепить в два слоя:
+
+```csharp
+// Pure — живёт где угодно
+public interface IEntity
+{
+    uint RuntimeId { get; }
+    T Require<T>() where T : class, IEntityAspect, new();
+    bool TryGet<T>(out T? aspect) where T : class, IEntityAspect;
+    bool Has<T>() where T : class, IEntityAspect;
+    IEnumerable<object> GetAllAspects();
+    event Action<IEntity>? Destroyed;
+}
+
+// POCO — для pocket entities, симуляции, тестов
+public sealed class DetachedEntity : IEntity, IDisposable { ... }
+
+// MB-обёртка — текущее поведение, плюс реализует IEntity
+public class EntityContext : MonoBehaviour, IEntity { ... }
+```
+
+`World` аналогично расщепляется:
+
+```csharp
+// Pure — registry + queries + lifecycle events
+public sealed class WorldCore
+{
+    internal void Register(IEntity entity, Type aspectType);
+    internal void Unregister(IEntity entity);
+    public EntityQuery<T> Query<T>() where T : class, IEntityAspect;
+    // ... остальные Query<T1..Tn>
+}
+
+// MB-адаптер — singleton, FindObjectsByType safety-net, execution order
+[DefaultExecutionOrder(-1000)]
+public sealed class World : SingletonEntityContext<World>
+{
+    private static WorldCore _core = new();
+    public static WorldCore Core => _core;
+    // static Query<T>() проксирует в _core
+}
+```
+
+`EntityQuery<T>` уже pure, трогать не надо — он просто начинает работать с `IEntity` вместо `EntityContext`.
+
+#### Три слоя компонентного поведения
+
+Соблазн — «раз entity теперь pure, давайте и компоненты тоже все pure, а MonoBehaviour — просто runner». На практике универсальная связка `Logic + Runner` создаёт boilerplate там, где он не нужен. Компоненты разделяются на три категории по тому, **зачем им вообще MB**:
+
+**1. Reactive-only логика (~80% кейсов) — MB не нужен вообще.**
+
+Большинство текущих `EntityComponent`'ов — это `OnSubscribe` с подписками на aspect-события. MB тут нужен только ради auto-dispose через `OnDisable`. Если у `IEntity` есть событие `Destroyed` — пропадает последний аргумент за MB:
+
+```csharp
+public sealed class HealthRegenLogic : IDisposable
+{
+    private DisposableBag _bag;
+
+    public HealthRegenLogic(HealthAspect h)
+    {
+        h.Damage.Subscribe(dmg => h.Current.Value -= dmg).AddTo(ref _bag);
+    }
+
+    public void Dispose() => _bag.Dispose();
+}
+
+// Attach — entity.Destroyed → logic.Dispose() вызывается автоматически
+entity.AttachLogic(new HealthRegenLogic(entity.Require<HealthAspect>()));
+```
+
+**Это pure, работает в simulate L2, тестируется обычным NUnit edit-mode.** И это **один файл**, не два — runner'а нет вообще.
+
+**2. Tickable логика (~15%) — нужен Update, но не Unity API.**
+
+Кулдаун-таймеры, per-second регенерация, tick-based AI. Для них раскол logic + runner оправдан, но **runner один общий** на entity, не индивидуальный:
+
+```csharp
+public interface ITickable { void Tick(float dt); }
+
+public sealed class CooldownLogic : ITickable, IDisposable { ... }
+
+// Один общий MB-раннер на entity, держит List<ITickable>
+public sealed class EntityTickRunner : MonoBehaviour
+{
+    private readonly List<ITickable> _tickables = new();
+    void Update()
+    {
+        var dt = Time.deltaTime;
+        for (int i = 0; i < _tickables.Count; i++) _tickables[i].Tick(dt);
+    }
+}
+```
+
+В simulate L2 `EntityTickRunner` заменяется на headless tick-loop с фиксированным `dt` — та же `CooldownLogic` работает без изменений. Deterministic: источник времени инжектится раннером.
+
+**3. Unity-bound поведение (~5%) — MB по существу.**
+
+Движение через `Rigidbody.AddForce`, HUD на Canvas, `Animator.SetTrigger`, particle-респонс. Здесь Unity API не аксессуар, а **и есть смысл компонента**. Пытаться вытаскивать «logic» бессмысленно — она в самом своём factor'е завязана на Unity. Честнее оставить `EntityComponent : MonoBehaviour` и не притворяться pure:
+
+```csharp
+public sealed class HealthHUD : EntityComponent { ... }
+public sealed class CharacterMotorRunner : EntityComponent { ... }
+```
+
+Эти компоненты в simulate L2 **не едут и не должны** — это граница.
+
+Netcode (`AspectReplicator : NetworkBehaviour`) по той же логике остаётся unity-bound.
+
+#### Почему не универсальное «logic + runner» для всего
+
+1. **Boilerplate.** Для reactive-only 80% случаев runner — чистая церемония. Pure-класс уже самодостаточен, MB ничего не добавляет кроме auto-dispose, а он закрывается `entity.Destroyed`.
+2. **Generic runner — ловушка.** `Runner<TLogic, TAspect1, TAspect2, ...>` вырождается в типовую лапшу или в reflection-магию. В обоих случаях хуже прямого attach.
+3. **Unity-bound, притворяющийся pure, лжёт.** Если Logic дёргает `Transform.position`, она не pure. Маскировка добавляет слой без пользы.
+
+Правило выбора для автора компонента: **нужен ли мне Unity API в этом классе?** Нет подписок на Unity — `IEntityLogic`. Нужен `Update` но не Unity API — `ITickable`. Нужен Transform/Rigidbody/Animator — `EntityComponent : MonoBehaviour`.
+
+#### Что НЕ решается этим рефактором
+
+- **Детерминизм симуляции.** `Time.deltaTime`, `Random.value`, физика — не детерминистичны. Для Monte Carlo прогонов нужен deterministic random (есть в `utils`) + явный `tick(dt)` вместо `Update`. Это дисциплина, а не архитектура.
+- **Физика/анимация.** В simulate L2 Rigidbody/Animator не едут, нужна аналитическая модель или исключение из симы.
+- **Pocket entities в netcode.** У DetachedEntity нет NetworkObject, реплицировать его напрямую нельзя. Либо через «родительский» GameObject (owner инвентаря), либо pocket entities не сетевые. Граница.
+
+#### Оценка сложности
+
+- `IEntity` интерфейс + `DetachedEntity` + адаптация `EntityContext` + событие `Destroyed` — **день**, включая тесты.
+- Расщепление `World` → `WorldCore` + `World` MB. `AspectInjector`/`EntityInjector` — проверить, где именно нужен MB-доступ (похоже, нигде, всё через `IEntity`) — **день**.
+- `IEntityLogic` / `ITickable` / `EntityTickRunner` + `entity.AttachLogic(...)` с auto-dispose по `Destroyed` — **день**.
+- Миграция netcode: `AspectReplicator` сейчас держит `EntityContext`, проверить что замена на `IEntity` не ломает сканер полей и `ReplicatedFieldBinding`. Ожидаемо тривиально — сканер и так через reflection.
+- Миграция тестов — по ходу, часть переедет в edit-mode.
+
+Итого **3–4 дня на core + адаптация acs.netcode**, и после этого pocket entities / simulate L2 / persistence пишутся без переделки фундамента.
+
+#### Порядок
+
+Делать **до** Entity references и Reactive коллекций — обе фичи проще писать поверх `IEntity`, чем потом переписывать. World как концепция уже есть (базовая реализация), но расщепление на `WorldCore` + `World` — часть этой задачи.
+
+### Reactive коллекции
+
+Инвентарь, список баффов, очередь умений — не выразить реактивно. `ReactiveProperty<int[]>` при изменении одного элемента пересоздаёт массив и перетриггеривает всё.
+
+```csharp
+// Сейчас — костыли
+public readonly ReactiveProperty<int> Slot0 = new();
+public readonly ReactiveProperty<int> Slot1 = new();
+// ... или ReactiveProperty<InventoryData> (struct, копируется целиком)
+
+// Нужно
+public readonly ReactiveList<ItemStack> Inventory = new();
+// → Subscribe на Add/Remove/Replace/Move/Clear
+// → UI обновляет только изменённый слот
+// → netcode реплицирует дельту, а не весь список
+```
+
+`ReactiveList<T>`, `ReactiveDictionary<TKey, TValue>`. Автор R3 (neuecc) сделал отдельный пакет `ObservableCollections` — возможно интеграция с ним. Для netcode — нужно научить реплицировать коллекции (дельта: add/remove/replace), не только одиночные значения. Большая задача.
+
+### Entity references — отношения между сущностями
+
+"Зомби таргетит игрока" — нет стандартного способа выразить safe ссылку на другую сущность. Голая ссылка ломается: `EntityContext` — `MonoBehaviour`, после Destroy даёт Unity fake-null, не сериализуется, не реплицируется.
+
+```csharp
+// Сейчас — голая ссылка, ломается при despawn
+public readonly ReactiveProperty<EntityContext> Target = new();
+
+// Нужно
+public readonly ReactiveProperty<EntityRef> Target = new();
+```
+
+#### Дизайн — value-type struct, pull-based резолв
+
+```csharp
+public readonly struct EntityRef : IEquatable<EntityRef>
+{
+    public readonly uint Id;
+    public readonly uint Generation; // для переиспользования id через pooling
+    public static readonly EntityRef None = default;
+
+    public bool TryResolve(out EntityContext entity);
+    public bool TryGet<T>(out T aspect) where T : class, IEntityAspect;
+    public bool Equals(EntityRef other) => Id == other.Id && Generation == other.Generation;
+}
+```
+
+Почему именно так, а не class с подпиской на OnDestroy:
+
+- **Value type** — нет дангляшей на Destroyed MonoBehaviour, fake-null не бьёт.
+- **`IEquatable<EntityRef>`** — R3 `ReactiveProperty<EntityRef>` из коробки корректно дедуплицирует через `EqualityComparer<T>.Default`. Никаких кастомных comparer'ов.
+- **Pull-based резолв** — при каждом обращении спрашиваем `EntityRegistry`. Если цель умерла, `TryResolve` возвращает false. Никаких слабых ссылок и инвалидаций.
+- **Сериализуется тривиально** — `uint Id + uint Generation = 8 байт` по проводу и в save.
+- **Generational id** — необходим если появится pooling (респавн AI). Без generation: поол переиспользует `EntityContext`, старый EntityRef резолвится на нового владельца. С generation — старый id считается мёртвым навсегда.
+
+#### Что нужно в core ACS для EntityRef
+
+Сейчас у `EntityContext` **нет стабильного id** вообще, `EntityRegistry._index` — это `Dictionary<Type, HashSet<EntityContext>>`, без lookup по id. Минимальный diff:
+
+```csharp
+// EntityContext
+public uint RuntimeId { get; internal set; }
+public uint Generation { get; internal set; }
+
+// EntityRegistry
+private readonly Dictionary<uint, EntityContext> _byId = new();
+public bool TryGet(uint id, out EntityContext entity);
+
+// World
+private uint _idCounter;
+// при Register — назначает id, при Unregister — bump'ит generation в своей таблице
+```
+
+#### Destroy-событие для реактивности
+
+"Зомби таргетит игрока, игрок умер, зомби должен среагировать" — `ReactiveProperty<EntityRef>` сам по себе **не среагирует**, потому что значение Target не меняется при смерти цели, меняется только результат резолва.
+
+Решение — отдельное событие `World.OnEntityDestroyed(EntityRef)`. Подписчик слушает либо смену `Target.Value`, либо destroy'й текущего Target'а.
+
+```csharp
+// Core ACS предоставляет хелпер
+public static Observable<EntityContext?> Resolve(this ReactiveProperty<EntityRef> prop)
+{
+    return prop.CombineLatest(World.OnEntityDestroyed, (@ref, destroyed) =>
+    {
+        if (destroyed.Equals(@ref)) return null;
+        return @ref.TryResolve(out var e) ? e : null;
+    });
+}
+```
+
+#### Chained subscription — подписаться на Health моего таргета
+
+Самый частый use case и место протечки boilerplate'а. Нужен хелпер в core:
+
+```csharp
+// Хочется
+Target.ObserveAspect<HealthAspect>(health => health?.Health)
+      .Subscribe(hp => ui.SetHealth(hp));
+// → при смене Target автоматически отписываемся от старого Health, подписываемся на новый
+// → при destroy таргета даём null
+// → при смене Health.Value — пропагируем
+```
+
+Реализация — композиция R3 combinator'ов (`SelectMany` / `Switch`) + событие destroy. Это не rocket science, но именно тут человек тупит, поэтому хелпер обязателен.
+
+### ID-архитектура — почему один id на всё не работает
+
+Возникает соблазн унифицировать runtime/netcode/persistence id в один тип. Нельзя — три домена требуют конфликтующих свойств:
+
+| Домен | Источник правды | Время жизни | Генератор | Размер |
+|---|---|---|---|---|
+| Runtime | локальный процесс | одна сессия | свой counter в World | uint + generation |
+| Netcode (NGO) | **сервер** | сетевая сессия | `NetworkManager` | 64 бит `NetworkObjectId` |
+| Persistence | save-файл | **между запусками** | при первом "рождении" | GUID или long |
+
+Почему невозможно унифицировать:
+
+1. **Netcode id раздаёт сервер.** Клиент до прихода spawn-сообщения не может выдумать себе id. Если `EntityRef.Id == NetworkObjectId`, клиент не может создать EntityRef до spawn'а → ломается "подписаться заранее".
+2. **Persistent id должен переживать перезапуск.** Runtime counter начинается с нуля каждую сессию. Если класть runtime id в save, нужно резервировать диапазоны при load → хрупко, ломается при переносе save между машинами/патчами.
+3. **Не все entity сетевые.** World-синглтоны, UI-сущности, offline — нет `NetworkObjectId`. Унификация "runtime id = NetworkObjectId" требует второй диапазон для не-сетевых → два пространства id в одном поле.
+4. **Не все entity persisted.** FX, projectile'ы — GUID не нужен, 16 байт на ref жалко.
+5. **NGO протекает в core.** Если `EntityRef` знает про `NetworkObjectId`, `com.rubickanov.acs` зависит от NGO → ломает принцип "core работает standalone".
+
+#### Правильный ответ — runtime id в core, маппинги на границах
+
+```
+┌──────────────────────────────────────────────┐
+│  CORE ACS                                    │
+│  struct EntityRef { uint Id; uint Gen; }     │
+│  EntityContext.RuntimeId ← World генерирует  │
+└───────────┬────────────────────┬─────────────┘
+            │                    │
+   ┌────────▼──────────┐  ┌──────▼──────────────┐
+   │ acs.netcode       │  │ acs.persistence     │
+   │ Dict<netId,       │  │ Dict<Guid,          │
+   │      runtimeId>   │  │      runtimeId>     │
+   │                   │  │                     │
+   │ При репликации    │  │ При save: пишет Guid│
+   │ EntityRef поля:   │  │ При load: резолвит  │
+   │ runtime → netId   │  │   Guid в runtime id │
+   │ на отправке,      │  │   по таблице        │
+   │ netId → runtime   │  │                     │
+   │ на приёме         │  │                     │
+   └───────────────────┘  └─────────────────────┘
+```
+
+**acs.netcode** держит две таблицы `ulong netId ↔ uint runtimeId`, обновляет на `OnNetworkSpawn`/`OnNetworkDespawn`. `ReplicatedFieldBinding<EntityRef>` конвертит на границе сериализации. Если entity на приёмнике ещё не пришёл (race) — `EntityRef.None` + буферизация, как NGO делает для `NetworkObjectReference`.
+
+**acs.persistence** (будущий) помечает сущности `[Persisted]`, они получают `Guid PersistentId` при первом рождении (хранится в save). При load создаём entity → назначаем runtime id → регистрируем `Guid→runtime` маппинг → восстанавливаем поля с конверсией EntityRef'ов.
+
+#### Soft вариант (не делать сейчас)
+
+GUID как source of truth для persisted, runtime id как кэш. Экономит одну таблицу в persistence слое ценой 16 байт в каждом `EntityContext`. Netcode всё равно отдельный. Сложность в core ради маленькой выгоды — отложить.
+
+#### Оценка сложности
+
+- Core: runtime id + generation + `EntityRef` + lookup в Registry + `None` — **1 день**, включая тесты.
+- Хелпер `ObserveAspect<T>` и событие `OnEntityDestroyed` — **1–2 дня**.
+- Netcode интеграция — **неделя**, в `acs.netcode`.
+- Generational id для pooling — **потом, когда появится pooling**.
+- Persistence интеграция — отдельный пакет, когда до него дойдёт.
+
+---
+
+## Приоритет
+
+**Core (часть com.rubickanov.acs):**
+0. **World** — фундамент: глобальный стейт + реестр сущностей + базовые queries. Делать первым, остальные зависят от него.
+- **Pure core (IEntity + WorldCore)** — расщепить `EntityContext`/`World` на pure C# ядро + Unity-адаптер. Разблокирует pocket entities (item/buff без GameObject), simulate L2, persistence/replay без сцены. Делать до остальных core-фич — проще писать их поверх `IEntity`, чем переписывать.
+- **Entity references** — `struct EntityRef` + runtime id в `IEntity` + `ObserveAspect` хелпер + `World.OnEntityDestroyed` событие. Блокирует netcode/persistence для relationship'ов, делать после Pure core.
+- **Reactive коллекции** — ReactiveList/ReactiveDictionary через интеграцию `ObservableCollections` (neuecc). Плюс netcode delta sync. Большая задача.
+
+**Пакеты-расширения:**
+1. **persistence** — минимальные примитивы Snapshot/Restore, переиспользует scanner + field bindings из netcode. Save-систему пишет игра сверху
+2. **sync** — убирает самый частый boilerplate, минимум кода для реализации
+3. **animation** — тот же паттерн что sync, убирает ещё один слой bridge-кода
+4. **debug** — помогает при разработке всего остального, окупается сразу
+5. **rules** — мощный инструмент для геймдизайнеров, хорошо ложится на reactive
+6. **pooling** — нужен при масштабе (десятки AI с респавном)
+7. **replay** — нишевый но эффектный, переиспользует существующую сериализацию
+8. **reactive** — quality of life, сокращает boilerplate
+9. **testing** — окупается при написании тестов для новых пакетов
+10. **live** — dev-time remote inspector, кайф для плейтестов
+11. **mirror** — production, GM-тулзы, аналитика
+12. **simulate** — headless прогон для балансировки и CI
+13. **queries (spatial)** — spatial hash, WithinRadius/Nearest. Возможно часть EQS
+14. **codegen** — высокая сложность, делать когда reflection станет bottleneck
+15. **bindings** — под вопросом, пересекается с `ui` пакетом. Может не понадобиться
+16. **commands** — под вопросом, ломает реактивный стиль. Скорее паттерн чем пакет

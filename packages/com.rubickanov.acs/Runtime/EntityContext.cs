@@ -20,6 +20,15 @@ namespace Rubickanov.ACS.Runtime
         private readonly Dictionary<Type, object> _aspects = new();
 
         /// <summary>
+        /// Hook for derived classes (e.g. <see cref="SingletonEntityContext{T}"/>) to run
+        /// initialization before Start. Keep the base class free of Awake behavior so aspects
+        /// remain lazy — callers only pay for what they use.
+        /// </summary>
+        protected virtual void Awake()
+        {
+        }
+
+        /// <summary>
         /// Returns the aspect of type <typeparamref name="T"/>, creating it if it doesn't exist yet.
         /// </summary>
         public T Require<T>() where T : class, IEntityAspect, new()
@@ -29,6 +38,7 @@ namespace Rubickanov.ACS.Runtime
                 return (T)existing;
             var instance = new T();
             _aspects[type] = instance;
+            World.Instance?.Register(this, type);
             return instance;
         }
 
@@ -62,6 +72,11 @@ namespace Rubickanov.ACS.Runtime
         private void Start()
         {
             OnContextInitialized?.Invoke(this);
+        }
+
+        protected virtual void OnDestroy()
+        {
+            World.Instance?.Unregister(this);
         }
     }
 }

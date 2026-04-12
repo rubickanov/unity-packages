@@ -72,6 +72,21 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         internal int ReplicatorCount => _replicators.Count;
 
+        /// <summary>
+        /// Re-subscribes <see cref="OnTick"/> to the tail of the multicast delegate.
+        /// Called by <see cref="PredictionManager{TInput}"/> when it is created after this
+        /// system already exists, so the prediction Simulate pass always runs before the
+        /// replication ServerTick in the same frame. Without this, server-side Simulate
+        /// writes would mark bindings dirty just after ServerTick drained them, adding a
+        /// one-tick relay delay.
+        /// </summary>
+        internal void RequeueTick()
+        {
+            if (_disposed) return;
+            _networkManager.NetworkTickSystem.Tick -= OnTick;
+            _networkManager.NetworkTickSystem.Tick += OnTick;
+        }
+
         internal void Register(AspectReplicator replicator)
         {
             var id = replicator.NetworkObjectId;
@@ -260,17 +275,19 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
                 if (!anyDirty) continue;
 
-                int payloadSize = sizeof(ulong) + maskByteCount;
+                int payloadSize = sizeof(ulong) + sizeof(int) + maskByteCount;
                 for (int i = 0; i < bindings.Length; i++)
                 {
                     if ((maskBuffer[i >> 3] & (1 << (i & 7))) != 0)
                         payloadSize += bindings[i].Size;
                 }
 
+                int clientTick = _networkManager.NetworkTickSystem.ServerTime.Tick;
                 var writer = new FastBufferWriter(payloadSize, Allocator.Temp);
                 try
                 {
                     writer.WriteValueSafe(rep.NetworkObjectId);
+                    writer.WriteValueSafe(clientTick);
                     fixed (byte* maskPtr = maskBuffer)
                         writer.WriteBytesSafe(maskPtr, maskByteCount);
 
@@ -315,13 +332,18 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 }
 
                 var mode = rep.IsOwner ? StateApplyMode.SkipOwnerAuth : StateApplyMode.ApplyAll;
-                rep.ApplyStateBuffer(reader, mode);
+                rep.ApplyStateBuffer(reader, mode, out int serverTick);
+                // Step 7: hand the just-applied server tick to the prediction pipeline
+                // so locally-owning entities can rewind+replay against authoritative
+                // state. No-op on entities without [Predicted] fields.
+                rep.NotifyServerStateApplied(serverTick);
             }
         }
 
         private unsafe void OnOwnerSubmitReceived(ulong senderClientId, FastBufferReader reader)
         {
             reader.ReadValueSafe(out ulong networkObjectId);
+            reader.ReadValueSafe(out int senderTick);
 
             if (!_byNetworkObjectId.TryGetValue(networkObjectId, out var rep) || !rep.IsSpawned)
             {
@@ -329,7 +351,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 return;
             }
 
-            rep.ApplyOwnerSubmission(reader);
+            rep.ApplyOwnerSubmission(reader, senderTick);
         }
 
         private void OnEventBroadcastReceived(ulong senderClientId, FastBufferReader reader)
@@ -382,7 +404,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             if (!_byNetworkObjectId.TryGetValue(networkObjectId, out var rep) || !rep.IsSpawned)
                 return;
 
-            rep.ApplyStateBuffer(reader, StateApplyMode.SkipOwnerAuthIfLocallyWritten);
+            rep.ApplyStateBuffer(reader, StateApplyMode.SkipOwnerAuthIfLocallyWritten, out _);
         }
 
         // ------------------------------------------------------------------

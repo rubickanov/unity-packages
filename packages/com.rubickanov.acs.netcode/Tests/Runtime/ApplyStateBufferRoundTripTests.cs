@@ -51,7 +51,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             where T : unmanaged
         {
             return (ReplicatedFieldBinding<T>)
-                ReplicatedFieldBindingFactory.Create(reactive, typeof(T), interpolate: false);
+                ReplicatedFieldBindingFactory.Create(reactive, typeof(T), FieldBindingKind.Plain);
         }
 
         private void SetBindings(ReplicatedFieldBinding[] bindings, AuthorityMode[] authorities)

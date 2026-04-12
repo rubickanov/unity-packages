@@ -9,6 +9,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// This class is never called at runtime — it exists solely to ensure IL2CPP
     /// generates native code for common generic binding specializations.
     /// For custom unmanaged structs, users must add a link.xml entry.
+    /// <para>
+    /// Prediction pipeline (<see cref="PredictionManager{TInput}"/>) is instantiated
+    /// via reflection on the user's <see cref="IInputCommand"/> struct, which IL2CPP
+    /// cannot discover statically. Games using IL2CPP must preserve their concrete
+    /// <c>PredictionManager&lt;MyInput&gt;</c> and <c>ISimulate&lt;MyInput&gt;</c>
+    /// specializations through their own link.xml.
+    /// </para>
     /// </summary>
     [Preserve]
     internal static class AotHints
@@ -39,6 +46,16 @@ namespace Rubickanov.ACS.Runtime.Netcode
             new ReplicatedEventBinding<int>(default!, default, default);
             new ReplicatedEventBinding<float>(default!, default, default);
             new ReplicatedEventBinding<bool>(default!, default, default);
+
+            // ReactivePropertyExtensions.Smooth<T> — ensure IL2CPP generates the
+            // InterpolationRegistry.TryGetInterpolatedValue<T> specialization.
+            ReactivePropertyExtensions.Smooth(default(ReactiveProperty<float>)!);
+            ReactivePropertyExtensions.Smooth(default(ReactiveProperty<double>)!);
+            ReactivePropertyExtensions.Smooth(default(ReactiveProperty<Vector2>)!);
+            ReactivePropertyExtensions.Smooth(default(ReactiveProperty<Vector3>)!);
+            ReactivePropertyExtensions.Smooth(default(ReactiveProperty<Vector4>)!);
+            ReactivePropertyExtensions.Smooth(default(ReactiveProperty<Quaternion>)!);
+            ReactivePropertyExtensions.Smooth(default(ReactiveProperty<Color>)!);
         }
     }
 }

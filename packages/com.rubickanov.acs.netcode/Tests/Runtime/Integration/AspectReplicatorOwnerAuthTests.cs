@@ -261,7 +261,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
                 var forgedReader = new FastBufferReader(forgedWriter, Allocator.Temp);
                 try
                 {
-                    serverReplicator.ApplyOwnerSubmission(forgedReader);
+                    serverReplicator.ApplyOwnerSubmission(forgedReader, senderTick: 0);
                 }
                 finally
                 {

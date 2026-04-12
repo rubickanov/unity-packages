@@ -4,27 +4,30 @@ Entity composition framework for Unity. Aspects hold reactive data, components d
 
 ## Dependencies
 
-None.
+- `R3` — reactive primitives (`ReactiveProperty<T>`, `Subject<T>`, `DisposableBag`)
 
 ## Architecture
 
 ```
 IEntityAspect (marker interface)
     ^
-    |  Require<T>()
-EntityContext (aspect registry per entity)
+    |  Require<T>() / [Aspect] injection
+EntityContext (per-entity aspect registry)
     ^
     |  Context property
-EntityComponent (MonoBehaviour base class)
-```
+EntityComponent (MonoBehaviour base, OnSubscribe hook)
 
-**EntityContext** lives on the root GameObject and lazily creates aspects on first `Require<T>()` call. Components on the same entity (or children) share aspects through the context — no direct references between components.
+
+SingletonEntityContext<T>   →   World (scene-wide singleton + entity registry)
+    ↓                               ↓
+EntityContext              EntityQuery<T1..T8> (find entities by aspect types)
+```
 
 ## Assemblies
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **ACS.Runtime** | Yes | Core framework: EntityContext, EntityComponent, EntityInjector |
+| **ACS.Runtime** | Yes | Core framework: EntityContext, EntityComponent, World, EntityQuery |
 | **ACS.Editor** | Editor | EntityContext inspector with aspect usage analysis |
 
 ## Core Concepts
@@ -33,12 +36,14 @@ EntityComponent (MonoBehaviour base class)
 
 **Component** — Single unit of behavior that reads and writes aspects. Extends **EntityComponent** (MonoBehaviour). One component, one job.
 
-**EntityContext** — MonoBehaviour on the entity root that serves as the shared aspect registry. Components obtain aspects via `Context.Require<T>()`.
+**EntityContext** — MonoBehaviour on the entity root that serves as the shared aspect registry. Components obtain aspects via `[Aspect]` field injection or `Context.Require<T>()`.
+
+**World** — Singleton **EntityContext** that also tracks every other context in the scene. Hosts world-scoped aspects (time of day, weather) accessed via `World.Require<T>()`, and answers aspect-type queries via `World.Query<T>()`.
 
 ## Quick Start
 
 1. Add **EntityContext** to the root GameObject of your entity.
-2. Define an aspect (pure data):
+2. Define an aspect:
 
 ```csharp
 public class HealthAspect : IEntityAspect
@@ -49,39 +54,29 @@ public class HealthAspect : IEntityAspect
 }
 ```
 
-3. Write a component that uses it:
+3. Write a component that reacts to it:
 
 ```csharp
 public class DamageFlashObserver : EntityComponent
 {
-    private HealthAspect _health = default!;
-    private DisposableBag _disposables;
+    [Aspect] private HealthAspect _health = default!;
 
-    protected override void Awake()
+    protected override void OnSubscribe(ref DisposableBag disposables)
     {
-        base.Awake();
-        _health = Context.Require<HealthAspect>();
-    }
-
-    private void OnEnable()
-    {
-        _health.Hit.Subscribe(OnHit).AddTo(ref _disposables);
-    }
-
-    private void OnDisable()
-    {
-        _disposables.Dispose();
+        _health.Hit.Subscribe(OnHit).AddTo(ref disposables);
     }
 
     private void OnHit(DamageInfo info) { /* flash logic */ }
 }
 ```
 
+The `[Aspect]` attribute resolves the field from the context in `Awake`. `OnSubscribe` wires subscriptions that are automatically disposed on `OnDisable`.
+
 ## Usage
 
 ### Defining Aspects
 
-Aspects are pure data. Only `ReactiveProperty<T>` fields and `Subject<T>` events:
+Aspects are pure data — only `ReactiveProperty<T>` fields and `Subject<T>` events. No methods, no constructors with arguments:
 
 ```csharp
 public class MovementAspect : IEntityAspect
@@ -92,21 +87,47 @@ public class MovementAspect : IEntityAspect
 }
 ```
 
-### Obtaining Aspects
+### Injecting Aspects into Components
 
-Components get aspects from the context in `Awake()`. Multiple components requesting the same aspect type get the same instance:
+Mark fields with `[Aspect]` — injection happens in `EntityComponent.Awake` via reflection (cached per component type). Multiple components requesting the same type share the same instance:
 
 ```csharp
-protected override void Awake()
+public class CharacterController : EntityComponent
 {
-    base.Awake();
-    _movement = Context.Require<MovementAspect>();
+    [Aspect] private MovementAspect _movement = default!;
+    [Aspect] private HealthAspect _health = default!;
+
+    private void Update()
+    {
+        if (_health.IsAlive.Value)
+            transform.position += _movement.Velocity.Value * Time.deltaTime;
+    }
 }
 ```
 
-### Querying Aspects
+For non-component consumers (plain C# classes) call the injector directly:
 
-**EntityContext** provides `TryGet<T>()` for optional aspects and `Has<T>()` for existence checks:
+```csharp
+AspectInjector.Inject(context, myPlainClassInstance);
+```
+
+### Component Lifecycle
+
+Override `OnSubscribe` — the base class hands you a `DisposableBag` that is disposed on `OnDisable` and re-populated on the next `OnEnable`:
+
+```csharp
+protected override void OnSubscribe(ref DisposableBag disposables)
+{
+    _health.CurrentHealth.Subscribe(OnHealthChanged).AddTo(ref disposables);
+    _movement.Velocity.Subscribe(OnVelocityChanged).AddTo(ref disposables);
+}
+```
+
+If you override `Awake`, always call `base.Awake()` — that is what triggers aspect injection.
+
+### Optional Aspects
+
+Use `TryGet<T>()` when an aspect may or may not be present, and `Has<T>()` for plain existence checks:
 
 ```csharp
 if (Context.TryGet<ShieldAspect>(out var shield))
@@ -116,31 +137,91 @@ if (Context.Has<FlyingAspect>())
     ApplyGravity = false;
 ```
 
-### Component Lifecycle
+`[Aspect]` injection is not optional — missing types will throw because `Require<T>` creates the aspect if absent. Use `TryGet<T>` for the opt-in case.
 
-Subscribe in `OnEnable()`, dispose in `OnDisable()`:
+### World — Global State and Queries
+
+Add a **World** MonoBehaviour to a GameObject in your scene. It is itself an `EntityContext`, so world-scoped aspects work exactly like entity aspects:
 
 ```csharp
-private void OnEnable()
+public class TimeAspect : IEntityAspect
 {
-    _health.CurrentHealth.Subscribe(OnHealthChanged).AddTo(ref _disposables);
+    public readonly ReactiveProperty<float> TimeOfDay = new(0f);
+    public readonly ReactiveProperty<int> Day = new(1);
+    public readonly Subject<Unit> DayStarted = new();
 }
 
-private void OnDisable()
+// Read / write world state from anywhere
+var time = World.Require<TimeAspect>().TimeOfDay.Value;
+```
+
+Components can also inject world aspects via a static accessor inside `OnSubscribe`:
+
+```csharp
+public class ZombieBehavior : EntityComponent
 {
-    _disposables.Dispose();
+    [Aspect] private MovementAspect _movement = default!;
+
+    protected override void OnSubscribe(ref DisposableBag disposables)
+    {
+        World.Require<TimeAspect>().TimeOfDay
+            .Subscribe(t => _movement.MoveSpeed.Value = t > 20f ? 5f : 2f)
+            .AddTo(ref disposables);
+    }
 }
 ```
 
+`World.Query<T>()` returns every aspect of that type currently in the scene. Multi-argument overloads (up to 8) yield tuples of `(entity, aspect1, aspect2, ...)`:
+
+```csharp
+// All living health aspects
+var alive = World.Query<HealthAspect>()
+    .Where(h => h.CurrentHealth.Value > 0);
+
+// Entities carrying both health and position
+foreach (var (entity, health, pos) in World.Query<HealthAspect, PositionAspect>())
+    Debug.Log($"{entity.name} @ {pos.Value.Value}, hp={health.CurrentHealth.Value}");
+```
+
+Registration is automatic — every `Require<T>` call on any `EntityContext` registers with the live `World`. Destruction unregisters.
+
+### Custom Singletons
+
+`SingletonEntityContext<T>` is the base for any scene-wide singleton context. Subclass it when you need a second global entity (a `GameSession`, a `MatchDirector`, a `DialogueRuntime`):
+
+```csharp
+public class MatchDirector : SingletonEntityContext<MatchDirector>
+{
+    // Add [Aspect] fields and methods as usual.
+}
+
+// Access anywhere:
+MatchDirector.Instance?.Require<ScoreAspect>();
+```
+
+Duplicate instances self-destruct their GameObject during `Awake`. `Instance` is cleared on destroy.
+
 ### Dependency Injection
 
-ACS does not depend on any DI framework. **EntityInjector** is a static delegate that components call in `Awake()`. Wire it from your container:
+ACS does not depend on any DI framework. **EntityInjector** is a static delegate that components invoke before `[Aspect]` injection — wire it once from your container:
 
 ```csharp
 EntityInjector.Inject = go =>
 {
     var scope = LifetimeScope.Find<LifetimeScope>(go.scene);
     scope?.Container.InjectGameObject(go);
+};
+```
+
+### Extension Hook
+
+`EntityContext.OnContextInitialized` fires once in `Start` after every component's `Awake` has run and aspects have been created. Extension packages (ACS.Netcode, future ACS.Persistence) subscribe here for auto-setup:
+
+```csharp
+EntityContext.OnContextInitialized += context =>
+{
+    if (context.Has<HealthAspect>())
+        AutoWireReplication(context);
 };
 ```
 
@@ -154,10 +235,18 @@ Character (EntityContext)
 ├── PlayerMovementInput    — writes MovementAspect from player input
 ├── CharacterAnimator      — reads MovementAspect, writes AnimationAspect
 └── DamageFlashObserver    — reads HealthAspect.Hit
+
+World (SingletonEntityContext<World>)
+├── TimeAspect             — global time of day
+└── WeatherAspect          — current weather
 ```
 
 ## Design Decisions
 
-- **EntityContext lazy-creates aspects** — `Require<T>()` returns an existing instance or creates a new one. No manual registration needed. Component initialization order does not matter.
-- **Static EntityInjector delegate instead of DI dependency** — keeps the package zero-dependency. Any DI framework (VContainer, Zenject) can plug in with one line.
-- **No EntityNetworkComponent in this package** — netcode support lives in a separate ACS.Netcode extension to avoid a hard dependency on Netcode for GameObjects.
+- **EntityContext lazy-creates aspects** — `Require<T>()` returns an existing instance or creates a new one. No manual registration, no initialization order coupling.
+- **`[Aspect]` injection over `Require<T>` in Awake** — eliminates boilerplate, keeps the Awake override optional, and makes aspect dependencies a declarative part of the component's shape.
+- **`OnSubscribe` hook instead of manual `OnEnable`/`OnDisable`** — guarantees subscriptions are always paired with disposal. Component authors cannot forget to dispose.
+- **World is just an EntityContext** — replication (`[ReplicatedState]`), persistence, and inspector tooling all work on world aspects for free. No separate "world component" abstraction.
+- **Queries ship in core, spatial queries do not** — `World.Query<T>()` is a type-bucket lookup with no physics dependency. Spatial queries (radius, nearest, grid) live in a separate package to keep core dependency-free.
+- **Static EntityInjector delegate instead of DI dependency** — keeps the package zero-DI. Any framework (VContainer, Zenject) plugs in with one line.
+- **No EntityNetworkComponent in this package** — netcode support lives in the ACS.Netcode extension to avoid a hard dependency on Netcode for GameObjects.
