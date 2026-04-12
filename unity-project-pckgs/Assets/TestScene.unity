@@ -119,6 +119,103 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &598159822
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 598159824}
+  - component: {fileID: 598159823}
+  - component: {fileID: 598159826}
+  - component: {fileID: 598159825}
+  - component: {fileID: 598159827}
+  m_Layer: 0
+  m_Name: World
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &598159823
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 598159822}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
+  GlobalObjectIdHash: 512459096
+  InScenePlacedSourceGlobalObjectIdHash: 0
+  DeferredDespawnTick: 0
+  Ownership: 1
+  AlwaysReplicateAsRoot: 0
+  SynchronizeTransform: 1
+  ActiveSceneSynchronization: 0
+  SceneMigrationSynchronization: 0
+  SpawnWithObservers: 1
+  DontDestroyWithOwner: 0
+  AutoObjectParentSync: 1
+  SyncOwnerTransformWhenParented: 1
+  AllowOwnerToParent: 0
+--- !u!4 &598159824
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 598159822}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0, y: 0, z: -0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &598159825
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 598159822}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f4685a0ceaad6926389671c9d3304004, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ACS.Runtime.Netcode::Rubickanov.ACS.Runtime.Netcode.AspectReplicator
+  ShowTopMostFoldoutHeaderGroup: 1
+--- !u!114 &598159826
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 598159822}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: accec4b5a74788b41886b7ca7d89f066, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ACS.Runtime::Rubickanov.ACS.Runtime.World
+--- !u!114 &598159827
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 598159822}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 42ad67f8a75641ffb3020dc1f7e5617f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Experiments.WorldStatsLogic
 --- !u!1 &762971947
 GameObject:
   m_ObjectHideFlags: 0
@@ -320,6 +417,7 @@ GameObject:
   - component: {fileID: 863425803}
   - component: {fileID: 863425805}
   - component: {fileID: 863425806}
+  - component: {fileID: 863425807}
   m_Layer: 0
   m_Name: Netw
   m_TagString: Untagged
@@ -427,8 +525,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: be0013109cad8ba6a9178c0231fabf97, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Experiments.NetworkExperimentBootstrap
-  playerPrefab: {fileID: 1044318716606465932, guid: e061b038cc50d0d1db6ec39ff8a86517, type: 3}
-  spawnSpacing: 3
+--- !u!114 &863425807
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 863425802}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 58b39c59cf6f39ddf83aa2ff7ae3015f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Experiments.WorldStatsHUD
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -436,3 +544,4 @@ SceneRoots:
   - {fileID: 835428864}
   - {fileID: 762971949}
   - {fileID: 863425804}
+  - {fileID: 598159824}

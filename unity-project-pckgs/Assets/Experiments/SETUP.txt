@@ -7,9 +7,23 @@ ACS Netcode Experiment — Setup
    - NetworkObject
    - AspectReplicator
    - ServerLogic
-   - OwnerInputMover
+   - ExperimentInputProvider  (owner-only; reads WASD → ExperimentInputCommand)
+   - ExperimentMover          (ISimulate; writes Position on both owner + server)
    - ExperimentHUD
    Add a visible mesh (Cube/Sphere) so you can see the entity.
+
+   The provider/mover split means one prefab covers every mode. Edit
+   `ExperimentAspect.Position` attributes to flip between:
+     - `Authority = Server` + `[Predicted]`
+         → prediction + reconcile (clean local view)
+     - `Authority = Server` (no `[Predicted]`)
+         → owner sends input, server Simulates, broadcast; owner's local
+           Simulate still runs and snaps back each broadcast
+     - `Authority = Owner` (± `[Predicted]`)
+         → owner's Simulate is the authoritative write, relayed to peers;
+           `[Predicted]` is a no-op here
+   The pipeline bootstraps whenever `ISimulate<T>` is present — `[Predicted]`
+   only controls whether snapshot capture + reconcile run on top of it.
 
 2. SCENE: "ExperimentScene"
    - NetworkManager (UnityTransport, tick rate ~30)

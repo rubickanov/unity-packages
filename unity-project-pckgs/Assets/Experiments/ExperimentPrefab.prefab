@@ -14,6 +14,7 @@ GameObject:
   - component: {fileID: 5616233841412634679}
   - component: {fileID: 8476923404700115543}
   - component: {fileID: 5626345785116802715}
+  - component: {fileID: 3100000000000000001}
   - component: {fileID: 4949837722924466996}
   m_Layer: 0
   m_Name: ExperimentPrefab
@@ -113,8 +114,21 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f9ec440fccc268c57a4c7af3777708b9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Experiments.OwnerInputMover
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::Experiments.ExperimentInputProvider
+  ShowTopMostFoldoutHeaderGroup: 1
+--- !u!114 &3100000000000000001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1044318716606465932}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b3d9f2a1c8e4d5f7a2b4c6d8e9f0a1b, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::Experiments.ExperimentMover
   ShowTopMostFoldoutHeaderGroup: 1
   moveSpeed: 5
 --- !u!114 &4949837722924466996
@@ -127,6 +141,6 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9c7175d8c38d325789c58d880e0bde43, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Experiments.ExperimentHUD
   ShowTopMostFoldoutHeaderGroup: 1

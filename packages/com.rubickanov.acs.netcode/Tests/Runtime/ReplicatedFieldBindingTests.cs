@@ -23,9 +23,9 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             var dst = new ReactiveProperty<T>(default);
 
             var sender = (ReplicatedFieldBinding<T>)
-                ReplicatedFieldBindingFactory.Create(src, typeof(T), interpolate: false);
+                ReplicatedFieldBindingFactory.Create(src, typeof(T), FieldBindingKind.Plain);
             var receiver = (ReplicatedFieldBinding<T>)
-                ReplicatedFieldBindingFactory.Create(dst, typeof(T), interpolate: false);
+                ReplicatedFieldBindingFactory.Create(dst, typeof(T), FieldBindingKind.Plain);
 
             var writer = new FastBufferWriter(sizeof(T), Allocator.Temp);
             try
@@ -49,7 +49,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             where T : unmanaged
         {
             return (ReplicatedFieldBinding<T>)
-                ReplicatedFieldBindingFactory.Create(reactive, typeof(T), interpolate: false);
+                ReplicatedFieldBindingFactory.Create(reactive, typeof(T), FieldBindingKind.Plain);
         }
 
         // ---- Round-trip per unmanaged type --------------------------------------

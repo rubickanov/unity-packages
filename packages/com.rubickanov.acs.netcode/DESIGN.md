@@ -657,15 +657,32 @@ Status legend: [x] done, [ ] not started, [~] in progress
   - Unsupported types (int / bool / enum) with `Linear` → one-time warning + fallback to immediate apply
   - `ApplyFromNetwork()` signature changed to `ApplyFromNetwork(double receivedTime)`; `SubmitOwnerStateRpc` passes `0` (server does not interpolate)
 
-- [ ] **6. IInputCommand + ISimulate + PredictionManager (Layer 3)** — prediction loop
-  - Marker interface `IInputCommand : INetworkSerializable`
-  - `ISimulate { void Simulate(in TInput input, float dt); }`
-  - `PredictionManager` as pure C# DI singleton subscribing to `NetworkTickSystem.Tick`
-  - `[Predicted]` attribute marking fields included in snapshot
+- [x] **6. IInputCommand + ISimulate + PredictionManager (Layer 3)** — prediction pipeline scaffolding (batch 3.7, 2026-04-12)
+  - [x] Marker interface `IInputCommand` (framework constrains `TInput : unmanaged, IInputCommand` so unsafe byte copy works for inputs just like replicated fields — no `INetworkSerializable`)
+  - [x] Generic `ISimulate<TInput> { void Simulate(in TInput input, float dt); }`
+  - [x] `IInputProvider<TInput> { TInput Gather(); }` — component on the owner entity; falls back to `default(TInput)` + one-time warning if absent
+  - [x] `PredictionManager<TInput>` as per-`NetworkManager` singleton (static `GetOrCreate` dictionary — mirrors `AspectReplicationSystem`, no VContainer dependency) subscribing to `NetworkTickSystem.Tick`
+  - [x] Owner: gather input → `ACS_Input:<TInput.FullName>` named message (unreliable-sequenced, `[ulong netObjId][int clientTick][sizeof(TInput)]`) → run local `Simulate` pass
+  - [x] Server: apply last-known input per `NetworkObjectId` → run `Simulate` as authority (writes to `[ReplicatedState, Predicted]` fields go out via the existing replication tick)
+  - [x] Host-owner: server path only; no self-submit round-trip
+  - [x] Defense-in-depth: server rejects `ACS_Input` from clients that do not own the target `NetworkObject`
+  - [x] `[Predicted]` attribute + `PredictionScanner` (parallel to `ReplicationScanner`, alphabetical stable sort, per-type cache, validates `ReactiveProperty<T>` with unmanaged `T`)
+  - [x] `AspectReplicator` hook: after the existing scan, resolve `TInput` from the first `ISimulate<T>` under the entity (stopping at nested `NetworkObject` boundaries) and register with the matching `PredictionManager<TInput>` via a reflection delegate cache
+  - [x] Tick ordering: `PredictionManager` bootstraps BEFORE `AspectReplicationSystem.GetOrCreate` on spawn; if the replication system already exists, `RequeueTick()` pushes its handler to the tail so `Simulate` writes land as dirty bindings in the same tick they get batched
+  - [x] `AotHints` entry for `ReactivePropertyExtensions.Smooth` specializations; users must add `link.xml` for their concrete `PredictionManager<MyInput>` / `ISimulate<MyInput>`
 
-- [ ] **7. SnapshotBuffer + reconciliation (Layer 3)** — rollback machinery
-  - Per-entity ring buffer of `[Predicted]` field values keyed by tick
-  - On server state arrival: restore snapshot → replay inputs from serverTick+1 to currentTick
+- [x] **6.1 Input buffering / dropped-tick policy** — bounded per-tick input history (batch 3.8, 2026-04-12)
+  - [x] `InputBuffer<TInput>` ring (capacity 64 ≈ 2 s @ 30 Hz), tick-keyed slots with strict `slot.Tick == tick` match so wrap-around collisions are reported as a miss rather than a stale positive
+  - [x] Owner: `Inputs.Store(clientTick, input)` every tick — replaces the single-slot `LastInput`/`HasInput` pair so reconcile replay has the exact input sequence to work from
+  - [x] Server: `Inputs.Store(senderTick, input)` on every `ACS_Input` receive; `OnTick` authority pass calls `GetOrHoldLast(serverTick)` so out-of-order arrivals cannot overwrite a newer input with a stale one, while preserving step-6 hold-last semantics when the tagged slot is empty
+
+- [x] **7. SnapshotBuffer + reconciliation (Layer 3)** — rollback machinery (batch 3.8, 2026-04-12)
+  - [x] `SnapshotBuffer` per entity — 64-slot ring of preallocated `byte[predictedPayloadSize]`; zero per-tick allocation after construction
+  - [x] `AspectReplicator` builds `_predictedBindingIndices` + `PredictedPayloadSize` at `OnNetworkSpawn` by joining `PredictionScanner` output to the already-scanned binding array via per-aspect field-name map (stable alphabetical sort on both sides keeps layout deterministic), then exposes `CapturePredictedState(byte[])` / `RestorePredictedState(byte[])` as wrappers over the existing `ReplicatedFieldBinding.WriteTo` / `ReadFrom` primitives
+  - [x] Owner post-simulate capture: after local `Simulate` for tick `T`, `Snapshots.BeginWrite(T)` + `CapturePredictedState` — matches server's post-tick-T broadcast frame so reconcile compares apples-to-apples
+  - [x] Reconcile trigger: `AspectReplicationSystem.OnStateBatchReceived` calls `rep.ApplyStateBuffer(reader, mode, out int serverTick)` then `rep.NotifyServerStateApplied(serverTick)` which dispatches to `PredictionManager<TInput>.OnServerStateApplied` via a new `Reconcile` delegate on `PredictionHookCache`
+  - [x] Replay loop: `for (int t = serverTick + 1; t <= currentTick; t++) { if (Inputs.TryGet(t, ..)) Simulate(..); }` on top of the authoritative values `ApplyStateBuffer` just wrote through `WriteSuppressed`; snapshot refreshed at `currentTick` post-replay so subsequent reconciles rewind to the corrected value
+  - [x] Targets pure-client owner only — host-owner is authority (no replay needed), observers have no prediction state to correct; reconcile bails when `serverTick < OldestTrackedTick` (severe hitch) or `serverTick > currentTick` (clock anomaly), leaving the authoritative value in place
 
 - [ ] **8. Lag compensation (Layer 4)** — server-side hitbox rollback
 - [ ] **9. Delta compression + relevancy (Layer 5)** — optimization
@@ -673,7 +690,15 @@ Status legend: [x] done, [ ] not started, [~] in progress
 ### TODO (cross-cutting, not tied to a specific layer)
 
 - [ ] Managed type support for replication (`string`, `FixedString`, `INetworkSerializable`) — requires `ReplicatedFieldBinding_Serializable<T>` alternate path
-- [ ] `FastBufferWriter` pre-calculation from `sizeof(T)` of bindings at init time (avoid autogrow reallocation)
-- [ ] IL2CPP: document `[Preserve]` requirement for `MakeGenericType` with value types
+- [x] `FastBufferWriter` pre-calculation from `sizeof(T)` of bindings at init time (avoid autogrow reallocation)
+- [x] IL2CPP: document `[Preserve]` requirement for `MakeGenericType` with value types
 - [x] Replace per-tick `byte[]` RPC allocation with `CustomMessagingManager` (batch 3.6, 2026-04-10)
 - [ ] Runtime ownership changes: rebuild owner-auth bindings and owner-tick subscription in `OnGainedOwnership` / `OnLostOwnership` so possession-style handoff works mid-session
+
+- [ ] **Unify replication attributes into a single `[Replicated]` with parameters.** Current design mixes two styles: `[ReplicatedState(Authority, Interpolation)]` is a single attribute with params, while `[Predicted]` is a separate attribute — and `[Predicted]` on an owner-auth field is invalid (runtime warning in `PredictionScanner`). The three concepts are not orthogonal: prediction and interpolation are modes of the same replication channel and do not exist without `[Replicated]`. Refactor:
+  - Rename `ReplicatedStateAttribute` → `ReplicatedAttribute` (drop `State` suffix — on a `ReactiveProperty<T>` it is implicit; symmetry with `ReplicatedEvent` stays via the `Event` suffix where the distinction matters).
+  - Fold `Predicted` into `ReplicatedAttribute` as `bool Predicted { get; set; } = false;` alongside existing `Authority` / `Interpolation` props. Delete `PredictedAttribute`.
+  - Named parameters stay optional: `[Replicated(Authority = Server, Predicted = true)]` leaves `Interpolation = None`, `[Replicated]` is all defaults (Server, None, false).
+  - Move the "Owner + Predicted is invalid" check out of `PredictionScanner`'s reflection-of-a-sibling-attribute path and into attribute validation at scan time — single point of truth, no cross-attribute lookups.
+  - Keep `ReplicatedEventAttribute(Authority, Reliability)` unchanged — events have no interpolation or prediction, nothing to fold in.
+  - Migration: update all aspects in `packages/` (acs, acs.netcode tests, Experiments), update `ReplicationScanner` + `PredictionScanner` to read the unified attribute, update DESIGN.md Layer 0/3 attribute sections to reflect the new shape.

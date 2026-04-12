@@ -41,12 +41,16 @@ namespace Experiments
 
         private void Update()
         {
-            // Sync transform from replicated position so we see the cube move
-            transform.position = _aspect.Position.Value;
-            transform.rotation = _aspect.Rotation.Value;
-
             if (_eventDisplayTimer > 0f)
                 _eventDisplayTimer -= Time.deltaTime;
+        }
+
+        private void LateUpdate()
+        {
+            // Sync transform after AspectReplicator.Update() has run TickRender,
+            // so .Smooth() reads the freshest interpolated value for this frame.
+            transform.position = _aspect.Position.Smooth();
+            transform.rotation = _aspect.Rotation.Smooth();
         }
 
         private void OnGUI()

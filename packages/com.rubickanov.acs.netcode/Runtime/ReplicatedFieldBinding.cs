@@ -30,9 +30,16 @@ namespace Rubickanov.ACS.Runtime.Netcode
         public abstract void ReadFrom(FastBufferReader reader);
         public abstract void Skip(FastBufferReader reader);
         public abstract void SubscribeAsAuthority(ref DisposableBag disposables);
+        // Subscribe a passive sampler that feeds local writes into the binding's render-smoothing
+        // state WITHOUT marking the field dirty. Used by predicted-owner fields: the owner writes
+        // locally via Simulate but is NOT the replication authority, so dirty would mis-trigger a
+        // relay. Default is no-op — only AuthorityRenderBinding overrides it.
+        public virtual void SubscribeForLocalSampling(ref DisposableBag disposables) { }
         public abstract void ApplyFromNetwork(double receivedTime);
         public virtual void TickRender(double renderTime) { }
         public abstract void ClearDirty();
+        public virtual void OnDespawn() { }
+        public virtual void ClearInterpolationState() { }
 
         public void MarkDirty() => IsDirty = true;
     }
@@ -105,26 +112,48 @@ namespace Rubickanov.ACS.Runtime.Netcode
         }
     }
 
+    // Selects which binding flavour the factory produces for a given field.
+    //   Plain                – no smoothing; state round-trips through ReactiveProperty.Value.
+    //   PassiveInterpolated  – non-authority peers receiving network snapshots; buffers them in
+    //                          InterpolatedFieldBinding and lerps behind ≈2 ticks of server time.
+    //   AuthorityRendered    – peers that WRITE the field locally each tick (authority, or
+    //                          predicted-owner). Samples local writes into AuthorityRenderBinding
+    //                          and lerps via wall-clock between the two most recent writes so
+    //                          frame-rate rendering doesn't staircase on tick-rate updates.
+    internal enum FieldBindingKind
+    {
+        Plain,
+        PassiveInterpolated,
+        AuthorityRendered,
+    }
+
     [Preserve]
     internal static class ReplicatedFieldBindingFactory
     {
         private static readonly Dictionary<Type, Func<object, ReplicatedFieldBinding>> FieldFactories = new();
         private static readonly Dictionary<Type, Func<object, object, ReplicatedFieldBinding>> InterpFactories = new();
+        private static readonly Dictionary<Type, Func<object, object, ReplicatedFieldBinding>> AuthorityRenderFactories = new();
         private static readonly HashSet<Type> WarnedUnsupportedTypes = new();
 
-        public static ReplicatedFieldBinding Create(object reactiveProperty, Type valueType, bool interpolate)
+        public static ReplicatedFieldBinding Create(object reactiveProperty, Type valueType, FieldBindingKind kind)
         {
-            if (interpolate)
+            if (kind == FieldBindingKind.PassiveInterpolated || kind == FieldBindingKind.AuthorityRendered)
             {
                 if (Interpolators.TryGetRaw(valueType, out var lerper))
                 {
-                    if (!InterpFactories.TryGetValue(valueType, out var interpFactory))
+                    var cache = kind == FieldBindingKind.PassiveInterpolated
+                        ? InterpFactories
+                        : AuthorityRenderFactories;
+
+                    if (!cache.TryGetValue(valueType, out var factory))
                     {
-                        interpFactory = BuildInterpFactory(valueType);
-                        InterpFactories[valueType] = interpFactory;
+                        factory = kind == FieldBindingKind.PassiveInterpolated
+                            ? BuildInterpFactory(valueType)
+                            : BuildAuthorityRenderFactory(valueType);
+                        cache[valueType] = factory;
                     }
 
-                    return interpFactory(reactiveProperty, lerper);
+                    return factory(reactiveProperty, lerper);
                 }
 
                 if (WarnedUnsupportedTypes.Add(valueType))
@@ -136,13 +165,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 }
             }
 
-            if (!FieldFactories.TryGetValue(valueType, out var factory))
+            if (!FieldFactories.TryGetValue(valueType, out var plainFactory))
             {
-                factory = BuildFieldFactory(valueType);
-                FieldFactories[valueType] = factory;
+                plainFactory = BuildFieldFactory(valueType);
+                FieldFactories[valueType] = plainFactory;
             }
 
-            return factory(reactiveProperty);
+            return plainFactory(reactiveProperty);
         }
 
         private static Func<object, ReplicatedFieldBinding> BuildFieldFactory(Type valueType)
@@ -159,6 +188,17 @@ namespace Rubickanov.ACS.Runtime.Netcode
         private static Func<object, object, ReplicatedFieldBinding> BuildInterpFactory(Type valueType)
         {
             var bindingType = typeof(InterpolatedFieldBinding<>).MakeGenericType(valueType);
+            return BuildLerpCtorFactory(bindingType, valueType);
+        }
+
+        private static Func<object, object, ReplicatedFieldBinding> BuildAuthorityRenderFactory(Type valueType)
+        {
+            var bindingType = typeof(AuthorityRenderBinding<>).MakeGenericType(valueType);
+            return BuildLerpCtorFactory(bindingType, valueType);
+        }
+
+        private static Func<object, object, ReplicatedFieldBinding> BuildLerpCtorFactory(Type bindingType, Type valueType)
+        {
             var reactiveType = typeof(ReactiveProperty<>).MakeGenericType(valueType);
             var lerpType = typeof(Lerp<>).MakeGenericType(valueType);
             var ctor = bindingType.GetConstructor(new[] { reactiveType, lerpType })!;

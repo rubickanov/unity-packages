@@ -1,3 +1,4 @@
+using System.Reflection;
 using NUnit.Framework;
 using Rubickanov.ACS.Runtime;
 using UnityEngine;
@@ -113,6 +114,34 @@ namespace Rubickanov.ACS.Tests
 
             // Assert
             CollectionAssert.AreEquivalent(new object[] { a, b }, all);
+        }
+
+        [Test]
+        public void Require_WithWorldPresent_RegistersWithWorld()
+        {
+            var worldGo = new GameObject(nameof(World));
+            try
+            {
+                var world = worldGo.AddComponent<World>();
+                // Unity doesn't auto-fire Awake on AddComponent in EditMode tests; invoke it by
+                // reflection so the World singleton initializes exactly as it would at runtime.
+                typeof(World)
+                    .GetMethod("Awake", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy)!
+                    .Invoke(world, null);
+
+                _context.Require<TestAspectA>();
+
+                CollectionAssert.Contains(
+                    World.Instance!.Registry.GetAllWith(typeof(TestAspectA)),
+                    _context);
+            }
+            finally
+            {
+                Object.DestroyImmediate(worldGo);
+                typeof(SingletonEntityContext<World>)
+                    .GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)!
+                    .SetValue(null, null);
+            }
         }
 
         private class TestAspectA : IEntityAspect { }
