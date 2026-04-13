@@ -8,16 +8,11 @@ namespace Experiments
     /// Ticks <see cref="WorldStatsAspect"/>: advances elapsed time, aggregates live
     /// entity totals, and counts DamageDealt events across all <see cref="ExperimentAspect"/>s.
     /// </summary>
-    public class WorldStatsLogic : MonoBehaviour
+    public class WorldStatsLogic : EntityComponent
     {
-        private WorldStatsAspect _stats = default!;
+        [Aspect] private readonly WorldStatsAspect _stats = default!;
         private DisposableBag _damageSubs;
         private int _subscribedCount;
-
-        private void Awake()
-        {
-            _stats = World.Require<WorldStatsAspect>();
-        }
 
         private void Update()
         {
@@ -32,6 +27,7 @@ namespace Experiments
                 totalHealth += aspect.Health.Value;
                 count++;
             }
+
             _stats.EntitiesAlive.Value = count;
             _stats.TotalHealth.Value = totalHealth;
 
@@ -44,6 +40,7 @@ namespace Experiments
                         .Subscribe(_ => _stats.TotalDamageEvents.Value++)
                         .AddTo(ref _damageSubs);
                 }
+
                 _subscribedCount = count;
             }
         }

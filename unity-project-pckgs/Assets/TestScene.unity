@@ -129,9 +129,10 @@ GameObject:
   m_Component:
   - component: {fileID: 598159824}
   - component: {fileID: 598159823}
-  - component: {fileID: 598159826}
   - component: {fileID: 598159825}
   - component: {fileID: 598159827}
+  - component: {fileID: 598159828}
+  - component: {fileID: 598159829}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -192,18 +193,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: ACS.Runtime.Netcode::Rubickanov.ACS.Runtime.Netcode.AspectReplicator
   ShowTopMostFoldoutHeaderGroup: 1
---- !u!114 &598159826
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 598159822}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: accec4b5a74788b41886b7ca7d89f066, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: ACS.Runtime::Rubickanov.ACS.Runtime.World
 --- !u!114 &598159827
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -216,6 +205,30 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 42ad67f8a75641ffb3020dc1f7e5617f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Experiments.WorldStatsLogic
+--- !u!114 &598159828
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 598159822}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 111584c3816768979b03fcff36f3e210, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ACS.Runtime::Rubickanov.ACS.Runtime.MonoWorld
+--- !u!114 &598159829
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 598159822}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 58b39c59cf6f39ddf83aa2ff7ae3015f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Experiments.WorldStatsHUD
 --- !u!1 &762971947
 GameObject:
   m_ObjectHideFlags: 0
@@ -417,7 +430,6 @@ GameObject:
   - component: {fileID: 863425803}
   - component: {fileID: 863425805}
   - component: {fileID: 863425806}
-  - component: {fileID: 863425807}
   - component: {fileID: 863425808}
   m_Layer: 0
   m_Name: Netw
@@ -527,18 +539,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: be0013109cad8ba6a9178c0231fabf97, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Experiments.NetworkExperimentBootstrap
---- !u!114 &863425807
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 863425802}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 58b39c59cf6f39ddf83aa2ff7ae3015f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Experiments.WorldStatsHUD
 --- !u!114 &863425808
 MonoBehaviour:
   m_ObjectHideFlags: 0

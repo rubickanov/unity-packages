@@ -7,14 +7,9 @@ namespace Experiments
     /// Read-only overlay. Reads values from <see cref="WorldStatsAspect"/> and renders
     /// them in the top-right. Stats are ticked by <see cref="WorldStatsLogic"/>.
     /// </summary>
-    public class WorldStatsHUD : MonoBehaviour
+    public class WorldStatsHUD : EntityComponent
     {
-        private WorldStatsAspect _stats = default!;
-
-        private void Awake()
-        {
-            _stats = World.Require<WorldStatsAspect>();
-        }
+        [Aspect] private readonly WorldStatsAspect _stats = default!;
 
         private void OnGUI()
         {

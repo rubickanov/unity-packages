@@ -276,6 +276,21 @@ Revisit these if/when they become real problems. Do not implement pre-emptively.
 
 ---
 
+## Wire-format history
+
+- **2026-04-13:** `ACS_StateBatch` per-entity records now include a
+  `ushort payloadBytes` prefix between `networkObjectId` and `serverTick`.
+  Enables readers to seek past unknown / despawned entities and continue
+  processing the batch tail — previously a spawn-order race or late
+  despawn dropped every subsequent entity in the batch (ISSUES.md #1).
+  Other channels (`ACS_OwnerSubmit`, `ACS_SyncReply`, `ACS_EventBcast*`)
+  are unchanged — single-entity payloads, no per-entity framing.
+
+  This is a breaking wire change. Server and client must be rebuilt
+  together (see `ISSUES.md #C1`).
+
+---
+
 ## Open decisions locked in (from discussion 2026-04-12)
 
 | Question | Decision |

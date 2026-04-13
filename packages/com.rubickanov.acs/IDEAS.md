@@ -2,7 +2,7 @@
 
 Расширения поверх acs, которые переиспользуют существующую архитектуру (аспекты, ReactiveProperty, MonoEntity, сканеры).
 
-> Core-фичи `World` (синглтон + реестр + базовые queries) и Pure core (`IEntity` / `Entity` / `WorldCore` / `IEntityLogic` / `ITickable` / `EntityTickRunner` / `AttachLogic`) уже реализованы в пакете — см. `README.md`. Этот документ — про то, что ещё предстоит.
+> Core-фичи `MonoWorld` (синглтон-обёртка) и pure core (`IEntity` / `Entity` / `World` / `IEntityLogic` / `ITickable` / `EntityTickRunner` / `AttachLogic`) уже реализованы в пакете — см. `README.md`. Этот документ — про то, что ещё предстоит.
 
 ---
 
@@ -82,7 +82,7 @@ public class SaveService
     public async Task SaveSlot(string slot)
     {
         var manifest = new Manifest();
-        foreach (var entity in World.Instance.PersistedEntities())
+        foreach (var entity in MonoWorld.Instance.PersistedEntities())
             manifest.Add(_getId(entity), _getPrefabId(entity), entity.Snapshot());
         await _storage.Write(slot, manifest);
     }
@@ -964,179 +964,7 @@ CommandBus.Send(new DealDamageCommand { Target = enemy, Amount = 10f });
 
 ---
 
-## Фундаментальные проблемы
-
-Не отдельные пакеты, а вещи которые нужно решить в core ACS.
-
-### Reactive коллекции
-
-Инвентарь, список баффов, очередь умений — не выразить реактивно. `ReactiveProperty<int[]>` при изменении одного элемента пересоздаёт массив и перетриггеривает всё.
-
-```csharp
-// Сейчас — костыли
-public readonly ReactiveProperty<int> Slot0 = new();
-public readonly ReactiveProperty<int> Slot1 = new();
-// ... или ReactiveProperty<InventoryData> (struct, копируется целиком)
-
-// Нужно
-public readonly ReactiveList<ItemStack> Inventory = new();
-// → Subscribe на Add/Remove/Replace/Move/Clear
-// → UI обновляет только изменённый слот
-// → netcode реплицирует дельту, а не весь список
-```
-
-`ReactiveList<T>`, `ReactiveDictionary<TKey, TValue>`. Автор R3 (neuecc) сделал отдельный пакет `ObservableCollections` — возможно интеграция с ним. Для netcode — нужно научить реплицировать коллекции (дельта: add/remove/replace), не только одиночные значения. Большая задача.
-
-### Entity references — отношения между сущностями
-
-"Зомби таргетит игрока" — нет стандартного способа выразить safe ссылку на другую сущность. Голая ссылка ломается: `EntityContext` — `MonoBehaviour`, после Destroy даёт Unity fake-null, не сериализуется, не реплицируется.
-
-```csharp
-// Сейчас — голая ссылка, ломается при despawn
-public readonly ReactiveProperty<EntityContext> Target = new();
-
-// Нужно
-public readonly ReactiveProperty<EntityRef> Target = new();
-```
-
-#### Дизайн — value-type struct, pull-based резолв
-
-```csharp
-public readonly struct EntityRef : IEquatable<EntityRef>
-{
-    public readonly uint Id;
-    public readonly uint Generation; // для переиспользования id через pooling
-    public static readonly EntityRef None = default;
-
-    public bool TryResolve(out EntityContext entity);
-    public bool TryGet<T>(out T aspect) where T : class, IEntityAspect;
-    public bool Equals(EntityRef other) => Id == other.Id && Generation == other.Generation;
-}
-```
-
-Почему именно так, а не class с подпиской на OnDestroy:
-
-- **Value type** — нет дангляшей на Destroyed MonoBehaviour, fake-null не бьёт.
-- **`IEquatable<EntityRef>`** — R3 `ReactiveProperty<EntityRef>` из коробки корректно дедуплицирует через `EqualityComparer<T>.Default`. Никаких кастомных comparer'ов.
-- **Pull-based резолв** — при каждом обращении спрашиваем `EntityRegistry`. Если цель умерла, `TryResolve` возвращает false. Никаких слабых ссылок и инвалидаций.
-- **Сериализуется тривиально** — `uint Id + uint Generation = 8 байт` по проводу и в save.
-- **Generational id** — необходим если появится pooling (респавн AI). Без generation: поол переиспользует `EntityContext`, старый EntityRef резолвится на нового владельца. С generation — старый id считается мёртвым навсегда.
-
-#### Что нужно в core ACS для EntityRef
-
-Сейчас у `EntityContext` **нет стабильного id** вообще, `EntityRegistry._index` — это `Dictionary<Type, HashSet<EntityContext>>`, без lookup по id. Минимальный diff:
-
-```csharp
-// EntityContext
-public uint RuntimeId { get; internal set; }
-public uint Generation { get; internal set; }
-
-// EntityRegistry
-private readonly Dictionary<uint, EntityContext> _byId = new();
-public bool TryGet(uint id, out EntityContext entity);
-
-// World
-private uint _idCounter;
-// при Register — назначает id, при Unregister — bump'ит generation в своей таблице
-```
-
-#### Destroy-событие для реактивности
-
-"Зомби таргетит игрока, игрок умер, зомби должен среагировать" — `ReactiveProperty<EntityRef>` сам по себе **не среагирует**, потому что значение Target не меняется при смерти цели, меняется только результат резолва.
-
-Решение — отдельное событие `World.OnEntityDestroyed(EntityRef)`. Подписчик слушает либо смену `Target.Value`, либо destroy'й текущего Target'а.
-
-```csharp
-// Core ACS предоставляет хелпер
-public static Observable<EntityContext?> Resolve(this ReactiveProperty<EntityRef> prop)
-{
-    return prop.CombineLatest(World.OnEntityDestroyed, (@ref, destroyed) =>
-    {
-        if (destroyed.Equals(@ref)) return null;
-        return @ref.TryResolve(out var e) ? e : null;
-    });
-}
-```
-
-#### Chained subscription — подписаться на Health моего таргета
-
-Самый частый use case и место протечки boilerplate'а. Нужен хелпер в core:
-
-```csharp
-// Хочется
-Target.ObserveAspect<HealthAspect>(health => health?.Health)
-      .Subscribe(hp => ui.SetHealth(hp));
-// → при смене Target автоматически отписываемся от старого Health, подписываемся на новый
-// → при destroy таргета даём null
-// → при смене Health.Value — пропагируем
-```
-
-Реализация — композиция R3 combinator'ов (`SelectMany` / `Switch`) + событие destroy. Это не rocket science, но именно тут человек тупит, поэтому хелпер обязателен.
-
-### ID-архитектура — почему один id на всё не работает
-
-Возникает соблазн унифицировать runtime/netcode/persistence id в один тип. Нельзя — три домена требуют конфликтующих свойств:
-
-| Домен | Источник правды | Время жизни | Генератор | Размер |
-|---|---|---|---|---|
-| Runtime | локальный процесс | одна сессия | свой counter в World | uint + generation |
-| Netcode (NGO) | **сервер** | сетевая сессия | `NetworkManager` | 64 бит `NetworkObjectId` |
-| Persistence | save-файл | **между запусками** | при первом "рождении" | GUID или long |
-
-Почему невозможно унифицировать:
-
-1. **Netcode id раздаёт сервер.** Клиент до прихода spawn-сообщения не может выдумать себе id. Если `EntityRef.Id == NetworkObjectId`, клиент не может создать EntityRef до spawn'а → ломается "подписаться заранее".
-2. **Persistent id должен переживать перезапуск.** Runtime counter начинается с нуля каждую сессию. Если класть runtime id в save, нужно резервировать диапазоны при load → хрупко, ломается при переносе save между машинами/патчами.
-3. **Не все entity сетевые.** World-синглтоны, UI-сущности, offline — нет `NetworkObjectId`. Унификация "runtime id = NetworkObjectId" требует второй диапазон для не-сетевых → два пространства id в одном поле.
-4. **Не все entity persisted.** FX, projectile'ы — GUID не нужен, 16 байт на ref жалко.
-5. **NGO протекает в core.** Если `EntityRef` знает про `NetworkObjectId`, `com.rubickanov.acs` зависит от NGO → ломает принцип "core работает standalone".
-
-#### Правильный ответ — runtime id в core, маппинги на границах
-
-```
-┌──────────────────────────────────────────────┐
-│  CORE ACS                                    │
-│  struct EntityRef { uint Id; uint Gen; }     │
-│  EntityContext.RuntimeId ← World генерирует  │
-└───────────┬────────────────────┬─────────────┘
-            │                    │
-   ┌────────▼──────────┐  ┌──────▼──────────────┐
-   │ acs.netcode       │  │ acs.persistence     │
-   │ Dict<netId,       │  │ Dict<Guid,          │
-   │      runtimeId>   │  │      runtimeId>     │
-   │                   │  │                     │
-   │ При репликации    │  │ При save: пишет Guid│
-   │ EntityRef поля:   │  │ При load: резолвит  │
-   │ runtime → netId   │  │   Guid в runtime id │
-   │ на отправке,      │  │   по таблице        │
-   │ netId → runtime   │  │                     │
-   │ на приёме         │  │                     │
-   └───────────────────┘  └─────────────────────┘
-```
-
-**acs.netcode** держит две таблицы `ulong netId ↔ uint runtimeId`, обновляет на `OnNetworkSpawn`/`OnNetworkDespawn`. `ReplicatedFieldBinding<EntityRef>` конвертит на границе сериализации. Если entity на приёмнике ещё не пришёл (race) — `EntityRef.None` + буферизация, как NGO делает для `NetworkObjectReference`.
-
-**acs.persistence** (будущий) помечает сущности `[Persisted]`, они получают `Guid PersistentId` при первом рождении (хранится в save). При load создаём entity → назначаем runtime id → регистрируем `Guid→runtime` маппинг → восстанавливаем поля с конверсией EntityRef'ов.
-
-#### Soft вариант (не делать сейчас)
-
-GUID как source of truth для persisted, runtime id как кэш. Экономит одну таблицу в persistence слое ценой 16 байт в каждом `EntityContext`. Netcode всё равно отдельный. Сложность в core ради маленькой выгоды — отложить.
-
-#### Оценка сложности
-
-- Core: runtime id + generation + `EntityRef` + lookup в Registry + `None` — **1 день**, включая тесты.
-- Хелпер `ObserveAspect<T>` и событие `OnEntityDestroyed` — **1–2 дня**.
-- Netcode интеграция — **неделя**, в `acs.netcode`.
-- Generational id для pooling — **потом, когда появится pooling**.
-- Persistence интеграция — отдельный пакет, когда до него дойдёт.
-
----
-
 ## Приоритет
-
-**Core (часть com.rubickanov.acs):**
-- **Entity references** — `struct EntityRef` + runtime id в `IEntity` + `ObserveAspect` хелпер + `World.OnEntityDestroyed` событие. Блокирует netcode/persistence для relationship'ов.
-- **Reactive коллекции** — ReactiveList/ReactiveDictionary через интеграцию `ObservableCollections` (neuecc). Плюс netcode delta sync. Большая задача.
 
 **Пакеты-расширения:**
 1. **persistence** — минимальные примитивы Snapshot/Restore, переиспользует scanner + field bindings из netcode. Save-систему пишет игра сверху

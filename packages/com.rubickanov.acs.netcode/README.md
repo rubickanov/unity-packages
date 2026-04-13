@@ -7,6 +7,10 @@ Netcode for GameObjects extension for [ACS](../com.rubickanov.acs/). Provides **
 - `com.rubickanov.acs` — base ACS framework
 - `com.unity.netcode.gameobjects` — Netcode for GameObjects
 
+## Compatibility
+
+Server and client must be built from the same commit. The wire format has no version negotiation — running peers with different `[Replicated]` field sets against each other will silently corrupt state. If you need rolling upgrades or cross-version matchmaking, this package is not the right fit.
+
 ## Quick Start
 
 Inherit from **EntityNetworkComponent** instead of **EntityComponent** for components that need **NetworkBehaviour** capabilities (RPCs, NetworkVariables, ownership checks):
