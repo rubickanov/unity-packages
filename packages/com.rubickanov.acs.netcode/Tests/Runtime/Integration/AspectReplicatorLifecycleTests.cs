@@ -18,6 +18,22 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// </summary>
     public class AspectReplicatorLifecycleTests : AspectReplicatorIntegrationTestBase
     {
+        /// <summary>NetworkObject + MonoEntity + AspectReplicator + GiantStateAspectRegistrar (257 fields, one over the 256-field cap) — regression #3 fixture.</summary>
+        protected GameObject _giantPrefab = null!;
+
+        protected override void OnServerAndClientsCreated()
+        {
+            base.OnServerAndClientsCreated();
+
+            // 257-field aspect: drives the > 256 ExceedsFieldBindingCap abort path.
+            // Only lifecycle tests exercise it, so we don't pay the 257-field
+            // scan in every other integration suite.
+            _giantPrefab = CreateNetworkObjectPrefab("GiantEntity");
+            _giantPrefab.AddComponent<MonoEntity>();
+            _giantPrefab.AddComponent<AspectReplicator>();
+            _giantPrefab.AddComponent<GiantStateAspectRegistrar>();
+        }
+
         [UnityTest]
         public IEnumerator Spawn_WithValidContext_BindingsCreatedOnAllClients()
         {
@@ -148,6 +164,42 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             }
         }
 
+        [UnityTest]
+        public IEnumerator Spawn_WithTwoHundredFiftySevenFields_AbortsRegistration_RegressionThree()
+        {
+            // GiantStateAspect has 257 [Replicated] fields — exactly one over
+            // the 256 cap. OnNetworkSpawn must log an error and return WITHOUT
+            // registering with AspectReplicationSystem: silent truncation would
+            // let two peers drop different excess fields and drift their
+            // position-indexed bitmasks, writing network payloads to the wrong
+            // reactive properties (ISSUES.md #3).
+            //
+            // Error fires once per peer that runs OnNetworkSpawn (server + 2
+            // clients = 3). Use a regex because the entity name is the
+            // NGO-generated "GiantEntity(Clone)" suffix that varies per peer.
+            for (int i = 0; i < m_NetworkManagers.Length; i++)
+            {
+                LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(
+                    @"\[AspectReplicator\] Entity '.*' has 257 replicated fields, max is 256\. Aborting spawn"));
+            }
+
+            var serverInstance = SpawnObject(_giantPrefab, m_ServerNetworkManager);
+            var networkObjectId = serverInstance.GetComponent<NetworkObject>().NetworkObjectId;
+            yield return WaitForSpawnOnAllClients(networkObjectId);
+
+            // Registration aborted: _system stays null and the replicator holds
+            // no authority subscriptions / no prediction hooks. The bindings
+            // array is populated (scan ran before the cap check) but the
+            // replicator never joins any tick pipeline, so that state is
+            // inert — no wire traffic is ever sent for this entity.
+            for (int i = 0; i < m_NetworkManagers.Length; i++)
+            {
+                var replicator = GetReplicatorOnClient(m_NetworkManagers[i], networkObjectId);
+                Assert.IsNull(GetSystem(replicator),
+                    $"Client {m_NetworkManagers[i].LocalClientId}: abort path must leave _system null, not register with AspectReplicationSystem.");
+            }
+        }
+
         // ---- Reflection helpers --------------------------------------------
 
         private static int GetBindingCount(AspectReplicator replicator)
@@ -157,6 +209,14 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             Assert.IsNotNull(field, "_bindings field renamed?");
             var arr = (ReplicatedFieldBinding[])field!.GetValue(replicator)!;
             return arr.Length;
+        }
+
+        private static object GetSystem(AspectReplicator replicator)
+        {
+            var field = typeof(AspectReplicator).GetField("_system",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(field, "_system field renamed?");
+            return field!.GetValue(replicator);
         }
     }
 }

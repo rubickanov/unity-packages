@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using ObservableCollections;
 using R3;
 using Rubickanov.ACS.Runtime;
 using UnityEditor;
@@ -12,7 +13,7 @@ namespace Rubickanov.ACS.Editor
 {
     public sealed class RuntimeAspectDrawer
     {
-        private enum FieldKind { ReactiveProperty, Subject, Plain }
+        private enum FieldKind { ReactiveProperty, Subject, ObservableCollection, Plain }
 
         // Composite (aspect-instance, field-name) key for per-field tracking.
         // Replaces a 32-bit HashCode.Combine int — two aspect-instances with the
@@ -177,6 +178,9 @@ namespace Rubickanov.ACS.Editor
                 case FieldKind.Subject:
                     DrawSignalLabel(cached, aspectInstance);
                     break;
+                case FieldKind.ObservableCollection:
+                    DrawCollectionValue(cached, aspectInstance);
+                    break;
                 case FieldKind.Plain:
                     DrawPlainValue(cached, aspectInstance);
                     break;
@@ -234,6 +238,34 @@ namespace Rubickanov.ACS.Editor
                 : cached.TypeLabel;
 
             EditorGUILayout.LabelField(label, ValueStyle);
+        }
+
+        private void DrawCollectionValue(in CachedField cached, object aspectInstance)
+        {
+            string display;
+            try
+            {
+                object? fieldObj = cached.Field.GetValue(aspectInstance);
+                if (fieldObj == null || cached.ValueProp == null)
+                {
+                    display = "null";
+                }
+                else
+                {
+                    object? count = cached.ValueProp.GetValue(fieldObj);
+                    display = $"{cached.TypeLabel} [Count={count ?? 0}]";
+                }
+            }
+            catch
+            {
+                display = "<error>";
+            }
+
+            var key = new SignalKey(aspectInstance, cached.Field.Name);
+            Color color = GetFlashedColor(key, display, ValueColor);
+
+            ValueStyle.normal.textColor = color;
+            EditorGUILayout.LabelField(display, ValueStyle);
         }
 
         private void DrawPlainValue(in CachedField cached, object aspectInstance)
@@ -327,6 +359,14 @@ namespace Rubickanov.ACS.Editor
                         typeLabel = signalType != null ? $"Signal<{FormatTypeName(signalType)}>" : "Signal";
                         break;
 
+                    case FieldKind.ObservableCollection:
+                        // All ObservableCollections types expose Count via IReadOnlyCollection<T> —
+                        // look it up on the concrete field type so reflection hits the public slot
+                        // directly (avoids explicit-interface lookup through the interface map).
+                        valueProp = fieldType.GetProperty("Count", BindingFlags.Instance | BindingFlags.Public);
+                        typeLabel = FormatTypeName(fieldType);
+                        break;
+
                     default:
                         typeLabel = FormatTypeName(fieldType);
                         break;
@@ -346,7 +386,20 @@ namespace Rubickanov.ACS.Editor
             var def = fieldType.GetGenericTypeDefinition();
             if (def == typeof(ReactiveProperty<>)) return FieldKind.ReactiveProperty;
             if (def == typeof(Subject<>)) return FieldKind.Subject;
+            if (ImplementsObservableCollection(fieldType)) return FieldKind.ObservableCollection;
             return FieldKind.Plain;
+        }
+
+        private static bool ImplementsObservableCollection(Type fieldType)
+        {
+            var interfaces = fieldType.GetInterfaces();
+            for (int i = 0; i < interfaces.Length; i++)
+            {
+                var iface = interfaces[i];
+                if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IObservableCollection<>))
+                    return true;
+            }
+            return false;
         }
 
         private static string FormatTypeName(Type type)
@@ -361,6 +414,16 @@ namespace Rubickanov.ACS.Editor
             if (type == typeof(Vector4)) return "Vector4";
             if (type == typeof(Quaternion)) return "Quaternion";
             if (type == typeof(Color)) return "Color";
+            if (type.IsGenericType)
+            {
+                var name = type.Name;
+                int tick = name.IndexOf('`');
+                if (tick > 0) name = name.Substring(0, tick);
+                var args = type.GetGenericArguments();
+                var argNames = new string[args.Length];
+                for (int i = 0; i < args.Length; i++) argNames[i] = FormatTypeName(args[i]);
+                return $"{name}<{string.Join(", ", argNames)}>";
+            }
             return type.Name;
         }
 

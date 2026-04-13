@@ -72,12 +72,15 @@ the real game arrives. The *policy* parts cannot be pre-decided.
 
 The groundwork that can be reused when we do implement:
 
-- **`SnapshotBuffer`** (`Runtime/SnapshotBuffer.cs`) — 64-slot ring, preallocated
-  `byte[]`, zero-alloc after construction. Currently used owner-side for
-  reconciliation; trivially symmetrized to server-side.
-- **`AspectReplicator.CapturePredictedState / RestorePredictedState`** —
-  already serialize only `[Replicated(Predicted = true)]` fields. The same
-  primitives feed a rewind API.
+- **`SnapshotBuffer`** (`Runtime/SnapshotBuffer.cs`) — 64-slot ring backed by a
+  single `byte[Capacity * slotSize]`, `Span<byte>` slot views, zero-alloc
+  after construction. Currently used owner-side for reconciliation; trivially
+  symmetrized to server-side.
+- **`AspectReplicator.CapturePredictedState`** — already serializes only
+  `[Replicated(Predicted = true)]` fields into a caller-provided span. A
+  rewind API would reintroduce the symmetric `ReadFrom → ApplyFromNetwork`
+  restore path that was removed as dead code in the Batch 5 cleanup; see
+  `ISSUES.md` #22 for the shape.
 - **`PredictionScanner`** — produces the predicted-field list per aspect,
   including field-name map for deterministic layout.
 - **`NetworkTickSystem`** — monotonic `serverTick`, needed for rewind indexing.
