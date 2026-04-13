@@ -13,7 +13,7 @@ All at version `1.0.0` unless noted:
 | Package | Purpose |
 |---|---|
 | `acs` | Aspect/component entity framework. Aspects hold reactive data, components hold behavior. |
-| `acs.netcode` | NGO networking layer for ACS. Declarative via `[ReplicatedState]` / `[ReplicatedEvent]` attributes on aspect fields. |
+| `acs.netcode` | NGO networking layer for ACS. Declarative via `[Replicated]` / `[ReplicatedEvent]` attributes on aspect fields. |
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
 | `behaviortree` | Serializable BT with visual editor, blackboard, subtrees. |
 | `character-motor` | Modular character motor, pure C# simulation (Rigidbody + Kinematic). |

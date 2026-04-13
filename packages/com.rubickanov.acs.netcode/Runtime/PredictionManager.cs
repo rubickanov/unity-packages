@@ -53,7 +53,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // reconcile arrives, and the server can run the tick-aligned input
             // instead of whatever was last received.
             public InputBuffer<TInput> Inputs = InputBuffer<TInput>.Create();
-            // Step 7: owner-side snapshots of [Predicted] state captured after
+            // Step 7: owner-side snapshots of [Replicated(Predicted = true)] state captured after
             // local Simulate each tick. Null on the server side and on
             // observer-only clients — only allocated when the manager's
             // owner branch first sees this entity. Sized by

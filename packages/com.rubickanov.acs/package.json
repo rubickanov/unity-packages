@@ -2,7 +2,7 @@
   "name": "com.rubickanov.acs",
   "version": "1.0.0",
   "displayName": "ACS",
-  "description": "Lightweight entity composition framework for Unity. Aspects hold reactive data, components drive behavior, EntityContext ties them together.",
+  "description": "Lightweight entity composition framework for Unity. Aspects hold reactive data, components drive behavior, MonoEntity ties them together.",
   "unity": "2022.3",
   "author": {
     "name": "rubickanov"

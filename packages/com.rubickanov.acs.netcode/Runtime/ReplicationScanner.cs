@@ -13,13 +13,15 @@ namespace Rubickanov.ACS.Runtime.Netcode
         public readonly Type ValueType;
         public readonly AuthorityMode Authority;
         public readonly InterpolationMode Interpolation;
+        public readonly bool Predicted;
 
-        public ReplicatedFieldInfo(FieldInfo field, Type valueType, AuthorityMode authority, InterpolationMode interpolation)
+        public ReplicatedFieldInfo(FieldInfo field, Type valueType, AuthorityMode authority, InterpolationMode interpolation, bool predicted)
         {
             Field = field;
             ValueType = valueType;
             Authority = authority;
             Interpolation = interpolation;
+            Predicted = predicted;
         }
     }
 
@@ -97,26 +99,48 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
                 for (int i = 0; i < fields.Length; i++)
                 {
-                    var attr = fields[i].GetCustomAttribute<ReplicatedStateAttribute>();
+                    var attr = fields[i].GetCustomAttribute<ReplicatedAttribute>();
                     if (attr == null) continue;
 
                     var fieldType = fields[i].FieldType;
                     if (!fieldType.IsGenericType || fieldType.GetGenericTypeDefinition() != typeof(ReactiveProperty<>))
+                    {
+                        Debug.LogError($"[ReplicationScanner] Aspect '{aspectType.Name}' field '{fields[i].Name}' has [Replicated] but is not a ReactiveProperty<T>.");
                         continue;
+                    }
 
                     var valueType = fieldType.GetGenericArguments()[0];
 
                     if (!IsUnmanagedType(valueType))
                     {
-                        Debug.LogError($"[ReplicationScanner] Aspect '{aspectType.Name}' field '{fields[i].Name}' has [ReplicatedState] but ReactiveProperty<{valueType.Name}> is not unmanaged. Only unmanaged types (primitives, enums, unmanaged structs) are supported.");
+                        Debug.LogError($"[ReplicationScanner] Aspect '{aspectType.Name}' field '{fields[i].Name}' has [Replicated] but ReactiveProperty<{valueType.Name}> is not unmanaged. Only unmanaged types (primitives, enums, unmanaged structs) are supported.");
                         continue;
+                    }
+
+                    // Single point of truth for the "Owner + Predicted is invalid" rule.
+                    // The owner IS the authority for owner-auth fields, so there is no
+                    // authoritative state to reconcile against. Leaving Predicted=true
+                    // enabled triggers a real bug — the owner receives its own state
+                    // batch back via the server relay (with owner-auth writes suppressed
+                    // by SkipOwnerAuthIfLocallyWritten), which still dispatches to
+                    // PredictionManager.OnServerStateApplied → replay. The replay re-runs
+                    // Simulate for ticks that were already simulated in OnTick and never
+                    // rolled back, so the owner accelerates by one Simulate pass per
+                    // received batch. Clear the flag (field still replicates) so
+                    // downstream PredictionScanner never sees it.
+                    bool predicted = attr.Predicted;
+                    if (predicted && attr.Authority == AuthorityMode.Owner)
+                    {
+                        Debug.LogWarning($"[ReplicationScanner] Aspect '{aspectType.Name}' field '{fields[i].Name}' has [Replicated(Predicted = true)] but Authority is Owner. Prediction and reconciliation are no-ops for owner-authoritative fields — the owner is already the source of truth. Dropping Predicted on this field.");
+                        predicted = false;
                     }
 
                     result.Add(new ReplicatedFieldInfo(
                         fields[i],
                         valueType,
                         attr.Authority,
-                        attr.Interpolation));
+                        attr.Interpolation,
+                        predicted));
                 }
 
                 current = current.BaseType;

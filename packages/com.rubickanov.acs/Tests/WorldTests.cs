@@ -16,9 +16,9 @@ namespace Rubickanov.ACS.Tests
         // and produces log-assertion noise the test framework then reports as a failure.
         private static readonly MethodInfo WorldAwakeMethod = typeof(World).GetMethod(
             "Awake", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy)!;
-        private static readonly MethodInfo EntityOnDestroyMethod = typeof(EntityContext).GetMethod(
+        private static readonly MethodInfo EntityOnDestroyMethod = typeof(MonoEntity).GetMethod(
             "OnDestroy", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy)!;
-        private static readonly PropertyInfo WorldInstanceProp = typeof(SingletonEntityContext<World>)
+        private static readonly PropertyInfo WorldInstanceProp = typeof(SingletonMonoEntity<World>)
             .GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)!;
 
         private readonly List<GameObject> _spawned = new();
@@ -50,21 +50,21 @@ namespace Rubickanov.ACS.Tests
             return world;
         }
 
-        private EntityContext NewEntity(string name = "Entity")
+        private MonoEntity NewEntity(string name = "Entity")
         {
             var go = new GameObject(name);
             _spawned.Add(go);
-            return go.AddComponent<EntityContext>();
+            return go.AddComponent<MonoEntity>();
         }
 
         // Destroys the GameObject the way Unity would at runtime: invoke OnDestroy on every
-        // EntityContext on it (so World.Unregister and Instance-clear fire) before the actual
+        // MonoEntity on it (so World.Unregister and Instance-clear fire) before the actual
         // DestroyImmediate call. Safe to pass already-destroyed or null references.
         private static void DestroyWithLifecycle(GameObject go)
         {
             if (go == null)
                 return;
-            foreach (var ec in go.GetComponents<EntityContext>())
+            foreach (var ec in go.GetComponents<MonoEntity>())
                 EntityOnDestroyMethod.Invoke(ec, null);
             Object.DestroyImmediate(go);
         }
@@ -217,25 +217,11 @@ namespace Rubickanov.ACS.Tests
         }
 
         [Test]
-        public void Query_WithNoWorld_ReturnsEmpty()
+        public void Query_WithNoWorld_Throws()
         {
             Assert.IsNull(World.Instance, "precondition: no world exists");
 
-            var results = World.Query<TestAspectA>().ToList();
-
-            Assert.IsEmpty(results);
-        }
-
-        [Test]
-        public void WorldAwakeAfterEntities_StillIndexesExistingAspects()
-        {
-            // Entity exists first, World spawned later — exercises the Awake safety-net scan.
-            var entity = NewEntity();
-            entity.Require<TestAspectA>();
-
-            NewWorld();
-
-            CollectionAssert.Contains(World.Query<TestAspectA>().ToList(), entity.Require<TestAspectA>());
+            Assert.Throws<System.InvalidOperationException>(() => World.Query<TestAspectA>());
         }
 
         [Test]
@@ -243,7 +229,7 @@ namespace Rubickanov.ACS.Tests
         {
             var world = NewWorld();
 
-            var aspect = ((EntityContext)world).Require<TestAspectA>();
+            var aspect = ((MonoEntity)world).Require<TestAspectA>();
 
             Assert.IsNotNull(aspect);
             Assert.IsTrue(world.Has<TestAspectA>());
@@ -256,7 +242,7 @@ namespace Rubickanov.ACS.Tests
 
             var aspect = World.Require<TestAspectA>();
 
-            Assert.AreSame(((EntityContext)world).Require<TestAspectA>(), aspect);
+            Assert.AreSame(((MonoEntity)world).Require<TestAspectA>(), aspect);
         }
 
         [Test]

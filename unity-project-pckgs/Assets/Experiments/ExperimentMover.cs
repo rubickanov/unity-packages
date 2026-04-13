@@ -9,11 +9,11 @@ namespace Experiments
     /// <see cref="ExperimentAspect.Position"/> once per network tick. Runs on
     /// both the owner (local prediction) and the server (authority); which
     /// write counts as authoritative is decided by
-    /// <c>[ReplicatedState(Authority = ...)]</c> on the Position field:
+    /// <c>[Replicated(Authority = ...)]</c> on the Position field:
     /// <list type="bullet">
     /// <item><c>Authority = Server</c> — server's Simulate writes the
     /// authoritative value, owner's Simulate is prediction (reconciled against
-    /// server state if Position is also <c>[Predicted]</c>).</item>
+    /// server state if Position is also <c>Predicted = true</c>).</item>
     /// <item><c>Authority = Owner</c> — owner's Simulate is the authoritative
     /// write, relayed to other peers via the owner-auth path.</item>
     /// </list>

@@ -1,6 +1,4 @@
 using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using R3;
@@ -11,25 +9,30 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
     [TestFixture]
     public class PredictionScannerTests
     {
-        // See ReplicationScannerTests for the rationale: the scanner's static per-type
-        // cache outlives a single test run, so negative tests (which expect a LogError
-        // on the FIRST scan) would silently stop seeing the error on subsequent runs
-        // without a cache reset. Clear both the Cache and UnmanagedCache before each
-        // test.
+        // PredictionScanner is now a thin filter over ReplicationScanner — validation
+        // (ReactiveProperty shape, unmanaged value type, Owner + Predicted invariant)
+        // lives on ReplicationScanner and is exercised by ReplicationScannerTests.
+        // These tests lock in the filter's invariants: ordering, caching, inheritance
+        // and the Predicted-flag selection.
 
         [SetUp]
         public void ClearScannerStaticCaches()
         {
-            ClearStaticDictionary("Cache");
-            ClearStaticDictionary("UnmanagedCache");
+            // PredictionScanner delegates to ReplicationScanner on cold reads, so
+            // both caches must be cleared — otherwise a warmer ReplicationScanner
+            // cache would serve stale outputs into a freshly cleared Prediction one.
+            ClearStaticDictionary(typeof(PredictionScanner), "Cache");
+            ClearStaticDictionary(typeof(ReplicationScanner), "StateCache");
+            ClearStaticDictionary(typeof(ReplicationScanner), "EventCache");
+            ClearStaticDictionary(typeof(ReplicationScanner), "UnmanagedCache");
         }
 
-        private static void ClearStaticDictionary(string fieldName)
+        private static void ClearStaticDictionary(System.Type owner, string fieldName)
         {
-            var field = typeof(PredictionScanner).GetField(fieldName,
+            var field = owner.GetField(fieldName,
                 BindingFlags.Static | BindingFlags.NonPublic);
             Assert.IsNotNull(field,
-                $"PredictionScanner must have a private static field '{fieldName}' — rename detected?");
+                $"{owner.Name} must have a private static field '{fieldName}' — rename detected?");
             var dict = (IDictionary)field.GetValue(null);
             dict.Clear();
         }
@@ -77,67 +80,28 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             Assert.AreEqual(typeof(Vector3), fields[0].ValueType);
         }
 
-        // ---- Negative: unsupported value types ----------------------------------
+        // ---- Predicted-flag filter ---------------------------------------------
 
         [Test]
-        public void Scan_ReactivePropertyOfString_LogsErrorAndOmitsField()
+        public void Scan_ReplicatedFieldsWithoutPredictedFlag_AreOmitted()
         {
-            // Captures Debug.LogError via logHandler swap so the expected error
-            // does not surface in the Unity Console. Same technique as
-            // ReplicationScannerTests — see that file for the rationale.
-            var capture = new CapturingLogHandler();
-            var original = Debug.unityLogger.logHandler;
-            Debug.unityLogger.logHandler = capture;
-            PredictedFieldInfo[] fields;
-            try
-            {
-                fields = PredictionScanner.Scan(new InvalidStringPredictedAspect());
-            }
-            finally
-            {
-                Debug.unityLogger.logHandler = original;
-            }
+            // Only fields with Predicted = true should surface through
+            // PredictionScanner; plain [Replicated] fields on the same aspect
+            // must not leak into the prediction snapshot set.
+            var fields = PredictionScanner.Scan(new MixedAspect());
 
-            Assert.AreEqual(0, fields.Length);
-            Assert.IsTrue(
-                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("not unmanaged")),
-                "Scanner must emit a LogError when [Predicted] targets a ReactiveProperty of a managed type");
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual("Predicted", fields[0].Field.Name);
         }
 
         [Test]
-        public void Scan_PredictedOnNonReactiveProperty_LogsErrorAndOmitsField()
+        public void Scan_OwnerAuthPredictedField_IsFilteredOut()
         {
-            // A user attaching [Predicted] to a plain int is a programming error we
-            // want surfaced — the scanner must not silently ignore it.
-            var capture = new CapturingLogHandler();
-            var original = Debug.unityLogger.logHandler;
-            Debug.unityLogger.logHandler = capture;
-            PredictedFieldInfo[] fields;
-            try
-            {
-                fields = PredictionScanner.Scan(new InvalidPlainFieldAspect());
-            }
-            finally
-            {
-                Debug.unityLogger.logHandler = original;
-            }
-
-            Assert.AreEqual(0, fields.Length);
-            Assert.IsTrue(
-                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("ReactiveProperty")),
-                "Scanner must emit a LogError when [Predicted] is attached to a non-ReactiveProperty field");
-        }
-
-        // ---- Negative: [Predicted] on owner-auth field --------------------------
-
-        [Test]
-        public void Scan_PredictedOnOwnerAuthField_LogsWarningAndOmitsField()
-        {
-            // Owner is already the source of truth — reconcile would run replay
-            // on self-relayed batches and accelerate the owner by one Simulate
-            // pass per tick. The scanner drops the field with a warning so the
-            // prediction pipeline stays silent for owner-auth state.
-            var capture = new CapturingLogHandler();
+            // ReplicationScanner strips the Predicted flag with a warning when
+            // combined with Authority = Owner; the filter here must respect that
+            // and produce an empty result. We run the scan and only assert on the
+            // final shape — the warning is covered by ReplicationScannerTests.
+            var capture = new SwallowingLogHandler();
             var original = Debug.unityLogger.logHandler;
             Debug.unityLogger.logHandler = capture;
             PredictedFieldInfo[] fields;
@@ -151,20 +115,6 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             }
 
             Assert.AreEqual(0, fields.Length);
-            Assert.IsTrue(
-                capture.Captured.Any(e => e.type == LogType.Warning && e.message.Contains("Authority is Owner")),
-                "Scanner must emit a LogWarning when [Predicted] targets a [ReplicatedState(Authority = Owner)] field");
-        }
-
-        [Test]
-        public void Scan_PredictedOnServerAuthField_IsKept()
-        {
-            // Sanity: the warning path only fires for owner-auth. Explicit
-            // Authority = Server (and the default, which is Server) still scan.
-            var fields = PredictionScanner.Scan(new ServerAuthPredictedAspect());
-
-            Assert.AreEqual(1, fields.Length);
-            Assert.AreEqual("Position", fields[0].Field.Name);
         }
 
         // ---- HasPredictedFields shortcut ----------------------------------------
@@ -185,40 +135,34 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
         private class OrderingAspect
         {
-            [Predicted] public ReactiveProperty<int> Zebra = new ReactiveProperty<int>(0);
-            [Predicted] public ReactiveProperty<int> Alpha = new ReactiveProperty<int>(0);
+            [Replicated(Predicted = true)] public ReactiveProperty<int> Zebra = new ReactiveProperty<int>(0);
+            [Replicated(Predicted = true)] public ReactiveProperty<int> Alpha = new ReactiveProperty<int>(0);
         }
 
         private class CachingAspect
         {
-            [Predicted] public ReactiveProperty<int> Value = new ReactiveProperty<int>(0);
+            [Replicated(Predicted = true)] public ReactiveProperty<int> Value = new ReactiveProperty<int>(0);
         }
 
         private class BaseAspect
         {
-            [Predicted] public ReactiveProperty<int> BaseValue = new ReactiveProperty<int>(0);
+            [Replicated(Predicted = true)] public ReactiveProperty<int> BaseValue = new ReactiveProperty<int>(0);
         }
 
         private class DerivedAspect : BaseAspect
         {
-            [Predicted] public ReactiveProperty<float> DerivedValue = new ReactiveProperty<float>(0f);
+            [Replicated(Predicted = true)] public ReactiveProperty<float> DerivedValue = new ReactiveProperty<float>(0f);
         }
 
         private class ValueTypeAspect
         {
-            [Predicted] public ReactiveProperty<Vector3> Position = new ReactiveProperty<Vector3>(Vector3.zero);
+            [Replicated(Predicted = true)] public ReactiveProperty<Vector3> Position = new ReactiveProperty<Vector3>(Vector3.zero);
         }
 
-        private class InvalidStringPredictedAspect
+        private class MixedAspect
         {
-            [Predicted] public ReactiveProperty<string> Bad = new ReactiveProperty<string>(string.Empty);
-        }
-
-        private class InvalidPlainFieldAspect
-        {
-#pragma warning disable CS0649
-            [Predicted] public int Bad;
-#pragma warning restore CS0649
+            [Replicated(Predicted = true)] public ReactiveProperty<int> Predicted = new ReactiveProperty<int>(0);
+            [Replicated] public ReactiveProperty<int> PlainReplicated = new ReactiveProperty<int>(0);
         }
 
         private class NoMarkerAspect
@@ -228,33 +172,18 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
         private class OwnerAuthPredictedAspect
         {
-            [ReplicatedState(Authority = AuthorityMode.Owner)]
-            [Predicted]
-            public ReactiveProperty<Vector3> Position = new ReactiveProperty<Vector3>(Vector3.zero);
-        }
-
-        private class ServerAuthPredictedAspect
-        {
-            [ReplicatedState(Authority = AuthorityMode.Server)]
-            [Predicted]
+            [Replicated(Authority = AuthorityMode.Owner, Predicted = true)]
             public ReactiveProperty<Vector3> Position = new ReactiveProperty<Vector3>(Vector3.zero);
         }
 
         // ---- Log capture --------------------------------------------------------
-        private sealed class CapturingLogHandler : ILogHandler
+        // Swallows logs from the ReplicationScanner-sourced Owner+Predicted warning
+        // so it doesn't surface in the test runner Console. We don't assert on the
+        // captured content here — that's the job of ReplicationScannerTests.
+        private sealed class SwallowingLogHandler : ILogHandler
         {
-            private readonly List<(LogType type, string message)> _captured = new();
-            public IReadOnlyList<(LogType type, string message)> Captured => _captured;
-
-            public void LogFormat(LogType logType, Object context, string format, params object[] args)
-            {
-                _captured.Add((logType, string.Format(format, args)));
-            }
-
-            public void LogException(System.Exception exception, Object context)
-            {
-                _captured.Add((LogType.Exception, exception.Message));
-            }
+            public void LogFormat(LogType logType, Object context, string format, params object[] args) { }
+            public void LogException(System.Exception exception, Object context) { }
         }
     }
 }

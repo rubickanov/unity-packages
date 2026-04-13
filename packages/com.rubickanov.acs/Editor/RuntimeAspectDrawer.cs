@@ -40,52 +40,81 @@ namespace Rubickanov.ACS.Editor
 
         private const double FlashDuration = 0.4;
 
+        // Lazy-init styles: EditorStyles.* is not guaranteed to be valid at type-init time,
+        // so we defer construction to first access and reset on domain reload via ClearCache.
+        private static GUIStyle? _dimStyle;
+        private static GUIStyle? _headerStyle;
+        private static GUIStyle? _nameStyle;
+        private static GUIStyle? _valueStyle;
+
+        private static GUIStyle DimStyle => _dimStyle ??= new GUIStyle(EditorStyles.miniLabel)
+        {
+            normal = { textColor = HeaderColor }
+        };
+
+        private static GUIStyle HeaderStyle => _headerStyle ??= new GUIStyle(EditorStyles.boldLabel)
+        {
+            fontSize = 11,
+            normal = { textColor = HeaderColor }
+        };
+
+        private static GUIStyle NameStyle => _nameStyle ??= new GUIStyle(EditorStyles.miniLabel)
+        {
+            fontStyle = FontStyle.Bold,
+            normal = { textColor = FieldNameColor }
+        };
+
+        // Shared mutable style for reactive/signal/plain values — color is set per-call.
+        private static GUIStyle ValueStyle => _valueStyle ??= new GUIStyle(EditorStyles.miniLabel);
+
         private readonly Dictionary<string, bool> _foldouts = new();
 
         // Value change tracking: key -> (previous formatted value, last change time)
         private readonly Dictionary<int, (string prev, double changeTime)> _valueTracker = new();
 
+        // Reused across repaints to avoid per-frame allocations.
+        private readonly List<(Type type, object instance)> _aspectsBuffer = new();
+
+        // Per-instance subscription tracker: subscriptions live with this drawer and are
+        // disposed on Dispose() (OnDisable of MonoEntityEditor). On domain reload the drawer
+        // itself is discarded, so GC releases subscriptions without needing a static hook.
+        private readonly SignalTracker _signalTracker = new();
+
         [InitializeOnLoadMethod]
         private static void ClearCache()
         {
             TypeCache.Clear();
-            SignalTracker.ClearAll();
+            _dimStyle = null;
+            _headerStyle = null;
+            _nameStyle = null;
+            _valueStyle = null;
         }
 
-        public void Draw(EntityContext context)
+        public void Draw(MonoEntity context)
         {
             if (!Application.isPlaying) return;
 
-            var aspects = new List<(Type type, object instance)>();
+            _aspectsBuffer.Clear();
             foreach (object aspect in context.GetAllAspects())
-                aspects.Add((aspect.GetType(), aspect));
+                _aspectsBuffer.Add((aspect.GetType(), aspect));
 
-            if (aspects.Count == 0)
+            if (_aspectsBuffer.Count == 0)
             {
-                var dimStyle = new GUIStyle(EditorStyles.miniLabel)
-                {
-                    normal = { textColor = HeaderColor }
-                };
-                EditorGUILayout.LabelField("No aspects registered", dimStyle);
+                EditorGUILayout.LabelField("No aspects registered", DimStyle);
                 return;
             }
 
-            var headerStyle = new GUIStyle(EditorStyles.boldLabel)
-            {
-                fontSize = 11,
-                normal = { textColor = HeaderColor }
-            };
-            EditorGUILayout.LabelField("RUNTIME DATA", headerStyle);
+            EditorGUILayout.LabelField("RUNTIME DATA", HeaderStyle);
 
-            aspects.Sort((a, b) => string.Compare(a.type.Name, b.type.Name, StringComparison.Ordinal));
+            _aspectsBuffer.Sort((a, b) => string.Compare(a.type.Name, b.type.Name, StringComparison.Ordinal));
 
-            foreach (var (type, instance) in aspects)
+            foreach (var (type, instance) in _aspectsBuffer)
                 DrawAspect(type, instance);
         }
 
         public void Dispose()
         {
-            SignalTracker.ClearAll();
+            _signalTracker.DisposeAll();
             _valueTracker.Clear();
         }
 
@@ -113,12 +142,7 @@ namespace Rubickanov.ACS.Editor
         {
             EditorGUILayout.BeginHorizontal();
 
-            var nameStyle = new GUIStyle(EditorStyles.miniLabel)
-            {
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = FieldNameColor }
-            };
-            EditorGUILayout.LabelField(cached.Field.Name, nameStyle, GUILayout.Width(160));
+            EditorGUILayout.LabelField(cached.Field.Name, NameStyle, GUILayout.Width(160));
 
             switch (cached.Kind)
             {
@@ -160,8 +184,8 @@ namespace Rubickanov.ACS.Editor
             int key = MakeKey(aspectInstance, cached.Field.Name);
             Color color = GetFlashedColor(key, display, ValueColor);
 
-            var style = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = color } };
-            EditorGUILayout.LabelField(display, style);
+            ValueStyle.normal.textColor = color;
+            EditorGUILayout.LabelField(display, ValueStyle);
         }
 
         private void DrawSignalLabel(in CachedField cached, object aspectInstance)
@@ -173,18 +197,18 @@ namespace Rubickanov.ACS.Editor
             catch { /* ignore */ }
 
             if (subjectInstance != null)
-                SignalTracker.EnsureSubscribed(key, subjectInstance);
+                _signalTracker.EnsureSubscribed(key, subjectInstance);
 
-            double flash = SignalTracker.GetFlashAmount(key);
+            double flash = _signalTracker.GetFlashAmount(key);
             Color color = Color.Lerp(SignalColor, FlashColor, (float)flash);
 
-            var style = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = color } };
+            ValueStyle.normal.textColor = color;
 
             string label = flash > 0.01
                 ? $"{cached.TypeLabel}  \u25cf" // bullet indicator when recently fired
                 : cached.TypeLabel;
 
-            EditorGUILayout.LabelField(label, style);
+            EditorGUILayout.LabelField(label, ValueStyle);
         }
 
         private void DrawPlainValue(in CachedField cached, object aspectInstance)
@@ -203,8 +227,8 @@ namespace Rubickanov.ACS.Editor
             int key = MakeKey(aspectInstance, cached.Field.Name);
             Color color = GetFlashedColor(key, display, PlainColor);
 
-            var style = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = color } };
-            EditorGUILayout.LabelField(display, style);
+            ValueStyle.normal.textColor = color;
+            EditorGUILayout.LabelField(display, ValueStyle);
         }
 
         private Color GetFlashedColor(int key, string currentDisplay, Color baseColor)
@@ -322,38 +346,41 @@ namespace Rubickanov.ACS.Editor
 
         /// <summary>
         /// Subscribes to Subject fields via reflection and tracks when they fire.
+        /// One instance per <see cref="RuntimeAspectDrawer"/>: subscriptions are owned by the
+        /// drawer and released in <see cref="DisposeAll"/>. Previously static — that leaked
+        /// subscriptions across inspectors and made per-inspector cleanup clobber others.
         /// </summary>
-        private static class SignalTracker
+        private sealed class SignalTracker
         {
-            private static readonly Dictionary<int, double> FireTimes = new();
-            private static readonly HashSet<int> Subscribed = new();
-            private static readonly List<IDisposable> Subscriptions = new();
+            private readonly Dictionary<int, double> _fireTimes = new();
+            private readonly Dictionary<int, IDisposable> _subscriptions = new();
+
+            // Reflection discovery is process-level — Type/MethodInfo don't hold Subject instances,
+            // so caching statically doesn't leak. Reset on domain reload happens implicitly via
+            // AppDomain teardown.
             private static MethodInfo? _cachedSubscribeGeneric;
 
-            public static void ClearAll()
+            public void DisposeAll()
             {
-                foreach (var sub in Subscriptions)
+                foreach (var sub in _subscriptions.Values)
                 {
                     try { sub.Dispose(); }
                     catch { /* ignore */ }
                 }
-                Subscriptions.Clear();
-                Subscribed.Clear();
-                FireTimes.Clear();
-                _cachedSubscribeGeneric = null;
+                _subscriptions.Clear();
+                _fireTimes.Clear();
             }
 
-            public static void EnsureSubscribed(int key, object subjectInstance)
+            public void EnsureSubscribed(int key, object subjectInstance)
             {
-                if (Subscribed.Contains(key)) return;
-                Subscribed.Add(key);
+                if (_subscriptions.ContainsKey(key)) return;
 
                 try
                 {
                     var subjectType = subjectInstance.GetType();
                     Type? elementType = null;
 
-                    // Walk up to find Observable<T> and extract T
+                    // Walk up to find Subject<T> and extract T
                     var current = subjectType;
                     while (current != null)
                     {
@@ -370,20 +397,21 @@ namespace Rubickanov.ACS.Editor
                     var subscribeMethod = FindSubscribeMethod(subjectType, elementType);
                     if (subscribeMethod == null) return;
 
-                    // Create Action<T> that records fire time
+                    // Create Action<T> that records fire time on THIS tracker instance.
                     var actionType = typeof(Action<>).MakeGenericType(elementType);
                     var param = Expression.Parameter(elementType, "x");
                     var keyConst = Expression.Constant(key);
+                    var trackerConst = Expression.Constant(this);
                     var recordMethod = typeof(SignalTracker).GetMethod(
-                        nameof(RecordFire), BindingFlags.Static | BindingFlags.NonPublic)!;
-                    var call = Expression.Call(null, recordMethod, keyConst);
+                        nameof(RecordFire), BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var call = Expression.Call(trackerConst, recordMethod, keyConst);
                     var lambda = Expression.Lambda(actionType, call, param);
                     var action = lambda.Compile();
 
                     // Call Subscribe(subject, action)
                     var result = subscribeMethod.Invoke(null, new[] { subjectInstance, action });
                     if (result is IDisposable disposable)
-                        Subscriptions.Add(disposable);
+                        _subscriptions[key] = disposable;
                 }
                 catch
                 {
@@ -391,18 +419,18 @@ namespace Rubickanov.ACS.Editor
                 }
             }
 
-            public static double GetFlashAmount(int key)
+            public double GetFlashAmount(int key)
             {
-                if (!FireTimes.TryGetValue(key, out double fireTime)) return 0;
+                if (!_fireTimes.TryGetValue(key, out double fireTime)) return 0;
                 double elapsed = EditorApplication.timeSinceStartup - fireTime;
                 if (elapsed >= FlashDuration) return 0;
                 return 1.0 - elapsed / FlashDuration;
             }
 
             // ReSharper disable once MemberCanBePrivate.Local — called via Expression
-            internal static void RecordFire(int key)
+            private void RecordFire(int key)
             {
-                FireTimes[key] = EditorApplication.timeSinceStartup;
+                _fireTimes[key] = EditorApplication.timeSinceStartup;
             }
 
             private static MethodInfo? FindSubscribeMethod(Type subjectType, Type elementType)

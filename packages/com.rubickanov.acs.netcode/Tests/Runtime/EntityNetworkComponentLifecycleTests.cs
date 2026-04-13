@@ -115,7 +115,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             public int SubscribeCount { get; private set; }
             public int DisposeCount { get; private set; }
 
-            // Skip base Awake — AspectInjector requires an EntityContext that we do not
+            // Skip base Awake — AspectInjector requires an MonoEntity that we do not
             // wire up for lifecycle tests. Injection is covered by dedicated DI tests.
             protected override void Awake() { }
 

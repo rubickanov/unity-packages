@@ -38,9 +38,9 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         }
 
         [UnityTest]
-        public IEnumerator Spawn_WithoutEntityContext_LogsErrorAndDoesNotNRE_RegressionThirteenFifteen()
+        public IEnumerator Spawn_WithoutMonoEntity_LogsErrorAndDoesNotNRE_RegressionThirteenFifteen()
         {
-            // Regression #13/#15: a misconfigured prefab missing EntityContext
+            // Regression #13/#15: a misconfigured prefab missing MonoEntity
             // must produce ONE clear error and not crash with a NullReferenceException.
             // Before the fix, OnNetworkSpawn dereferenced the null context inside
             // the scan loop and tore down NGO with an unhandled exception, taking
@@ -53,7 +53,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             for (int i = 0; i < m_NetworkManagers.Length; i++)
             {
                 LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(
-                    @"\[AspectReplicator\] '.*' is missing EntityContext"));
+                    @"\[AspectReplicator\] '.*' is missing MonoEntity"));
             }
 
             var serverInstance = SpawnObject(_brokenContextPrefab, m_ServerNetworkManager);
@@ -67,7 +67,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             {
                 var replicator = GetReplicatorOnClient(m_NetworkManagers[i], networkObjectId);
                 Assert.AreEqual(0, GetBindingCount(replicator),
-                    "Replicator with no EntityContext must produce zero bindings, not crash mid-scan.");
+                    "Replicator with no MonoEntity must produce zero bindings, not crash mid-scan.");
             }
         }
 
@@ -132,7 +132,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         [UnityTest]
         public IEnumerator Spawn_WithSixtyFiveFields_AllBindingsCreated()
         {
-            // MonsterStateAspect has 65 [ReplicatedState] fields. With the
+            // MonsterStateAspect has 65 [Replicated] fields. With the
             // variable-length byte[] mask (replacing the old ulong), all 65
             // must be scanned and bound — no clamp, no error. The cap is now
             // 256 fields.

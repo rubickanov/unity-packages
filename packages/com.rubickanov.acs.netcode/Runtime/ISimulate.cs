@@ -10,7 +10,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// <remarks>
     /// <para>
     /// The <typeparamref name="TInput"/> constraint is <c>unmanaged</c> so the same unsafe
-    /// byte-copy serialization used by <see cref="ReplicatedStateAttribute"/> fields also
+    /// byte-copy serialization used by <see cref="ReplicatedAttribute"/> fields also
     /// carries inputs to the server.
     /// </para>
     /// <para>
@@ -23,7 +23,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         where TInput : unmanaged, IInputCommand
     {
         /// <summary>
-        /// Apply one tick of simulation. Writes to <c>[ReplicatedState, Predicted]</c> fields
+        /// Apply one tick of simulation. Writes to <c>[Replicated(Predicted = true)]</c> fields
         /// will propagate through the normal replication path.
         /// </summary>
         /// <param name="input">Input for this tick (owner-gathered on the client, last-known on the server).</param>

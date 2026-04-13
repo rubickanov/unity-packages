@@ -418,6 +418,7 @@ GameObject:
   - component: {fileID: 863425805}
   - component: {fileID: 863425806}
   - component: {fileID: 863425807}
+  - component: {fileID: 863425808}
   m_Layer: 0
   m_Name: Netw
   m_TagString: Untagged
@@ -463,6 +464,7 @@ MonoBehaviour:
     NetworkTopology: 0
     UseCMBService: 0
     AutoSpawnPlayerPrefabClientSide: 1
+    NetworkMessageMetrics: 1
     NetworkProfilingMetrics: 1
     OldPrefabList: []
   RunInBackground: 1
@@ -537,6 +539,30 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 58b39c59cf6f39ddf83aa2ff7ae3015f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Experiments.WorldStatsHUD
+--- !u!114 &863425808
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 863425802}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 98d9db9626104da59357651088226725, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.Multiplayer.Tools.NetworkSimulator.Runtime::Unity.Multiplayer.Tools.NetworkSimulator.Runtime.NetworkSimulator
+  m_PresetAsset: {fileID: 11400000, guid: 25c7046a7f388e6a8ad16138a4e3e87d, type: 2}
+  m_PresetReference:
+    rid: -2
+  m_Scenario:
+    rid: -2
+  m_IsScenarioSettingsFolded: 0
+  AutoRunScenario: 0
+  references:
+    version: 2
+    RefIds:
+    - rid: -2
+      type: {class: , ns: , asm: }
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

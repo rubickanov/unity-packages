@@ -12,12 +12,12 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// </summary>
     public abstract class EntityNetworkComponent : NetworkBehaviour, IEntityComponent
     {
-        private EntityContext? _context;
+        private MonoEntity? _context;
         private DisposableBag _disposables;
         private bool _subscribed;
         private bool _networkSpawned;
 
-        protected EntityContext Context => _context ??= GetComponentInParent<EntityContext>();
+        protected MonoEntity Context => _context ??= GetComponentInParent<MonoEntity>();
 
         protected virtual void Awake()
         {

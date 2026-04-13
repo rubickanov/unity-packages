@@ -12,7 +12,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// End-to-end coverage for steps 6 and 7 of the prediction pipeline:
     /// pure-client owner gathers input → <c>ACS_Input:&lt;TInput&gt;</c> named
     /// message → server-side <see cref="ISimulate{TInput}"/> writes to a
-    /// <c>[ReplicatedState, Predicted]</c> field → existing replication path
+    /// <c>[Replicated(Predicted = true)]</c> field → existing replication path
     /// delivers the result to a pure observer client → owner reconciles the
     /// arriving authoritative state against its snapshot buffer and replays
     /// locally-buffered inputs so the owner's local view never snaps backwards.
@@ -26,7 +26,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             base.OnServerAndClientsCreated();
 
             _predictionPrefab = CreateNetworkObjectPrefab("PredictionEntity");
-            _predictionPrefab.AddComponent<EntityContext>();
+            _predictionPrefab.AddComponent<MonoEntity>();
             _predictionPrefab.AddComponent<AspectReplicator>();
             _predictionPrefab.AddComponent<PredictionTestAspectRegistrar>();
             _predictionPrefab.AddComponent<TestInputProvider>();
@@ -156,7 +156,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         private static PredictionTestAspect GetPredictionAspectOnClient(NetworkManager client, ulong networkObjectId)
         {
             var go = client.SpawnManager.SpawnedObjects[networkObjectId].gameObject;
-            return go.GetComponent<EntityContext>().Require<PredictionTestAspect>();
+            return go.GetComponent<MonoEntity>().Require<PredictionTestAspect>();
         }
 
         private static TestInputProvider GetInputProviderOnClient(NetworkManager client, ulong networkObjectId)
@@ -180,14 +180,14 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
     /// <summary>
     /// Aspect whose <c>Position</c> is both replicated and marked for prediction.
-    /// <c>[Predicted]</c> drives the step-7 snapshot/reconcile path: the owner
+    /// <c>Predicted = true</c> drives the step-7 snapshot/reconcile path: the owner
     /// captures a post-Simulate snapshot each tick and, when the authoritative
     /// Position arrives via the replication broadcast, replays buffered inputs
     /// on top of it to avoid a visible snap-back.
     /// </summary>
     public sealed class PredictionTestAspect : IEntityAspect
     {
-        [ReplicatedState, Predicted]
+        [Replicated(Predicted = true)]
         public ReactiveProperty<Vector3> Position = new(Vector3.zero);
     }
 
@@ -199,7 +199,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
         private void Awake()
         {
-            var context = GetComponentInParent<EntityContext>();
+            var context = GetComponentInParent<MonoEntity>();
             Aspect = context.Require<PredictionTestAspect>();
         }
     }
@@ -231,7 +231,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
         private void Awake()
         {
-            var context = GetComponentInParent<EntityContext>();
+            var context = GetComponentInParent<MonoEntity>();
             _aspect = context.Require<PredictionTestAspect>();
         }
 
