@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using R3;
 using Rubickanov.ACS.Runtime;
 using UnityEditor;
 using UnityEngine;
@@ -12,6 +13,30 @@ namespace Rubickanov.ACS.Editor
     public sealed class RuntimeAspectDrawer
     {
         private enum FieldKind { ReactiveProperty, Subject, Plain }
+
+        // Composite (aspect-instance, field-name) key for per-field tracking.
+        // Replaces a 32-bit HashCode.Combine int — two aspect-instances with the
+        // same field name could theoretically collide, making EnsureSubscribed
+        // skip the second subscription.
+        private readonly struct SignalKey : IEquatable<SignalKey>
+        {
+            public readonly object Instance;
+            public readonly string Field;
+
+            public SignalKey(object instance, string field)
+            {
+                Instance = instance;
+                Field = field;
+            }
+
+            public bool Equals(SignalKey other)
+                => ReferenceEquals(Instance, other.Instance) && Field == other.Field;
+
+            public override bool Equals(object? obj) => obj is SignalKey k && Equals(k);
+
+            public override int GetHashCode()
+                => HashCode.Combine(RuntimeHelpers.GetHashCode(Instance), Field);
+        }
 
         private readonly struct CachedField
         {
@@ -70,7 +95,7 @@ namespace Rubickanov.ACS.Editor
         private readonly Dictionary<string, bool> _foldouts = new();
 
         // Value change tracking: key -> (previous formatted value, last change time)
-        private readonly Dictionary<int, (string prev, double changeTime)> _valueTracker = new();
+        private readonly Dictionary<SignalKey, (string prev, double changeTime)> _valueTracker = new();
 
         // Reused across repaints to avoid per-frame allocations.
         private readonly List<(Type type, object instance)> _aspectsBuffer = new();
@@ -181,7 +206,7 @@ namespace Rubickanov.ACS.Editor
                 display = "<error>";
             }
 
-            int key = MakeKey(aspectInstance, cached.Field.Name);
+            var key = new SignalKey(aspectInstance, cached.Field.Name);
             Color color = GetFlashedColor(key, display, ValueColor);
 
             ValueStyle.normal.textColor = color;
@@ -191,7 +216,7 @@ namespace Rubickanov.ACS.Editor
         private void DrawSignalLabel(in CachedField cached, object aspectInstance)
         {
             // Ensure subscription exists for this Subject field
-            int key = MakeKey(aspectInstance, cached.Field.Name);
+            var key = new SignalKey(aspectInstance, cached.Field.Name);
             object? subjectInstance = null;
             try { subjectInstance = cached.Field.GetValue(aspectInstance); }
             catch { /* ignore */ }
@@ -224,14 +249,14 @@ namespace Rubickanov.ACS.Editor
                 display = "<error>";
             }
 
-            int key = MakeKey(aspectInstance, cached.Field.Name);
+            var key = new SignalKey(aspectInstance, cached.Field.Name);
             Color color = GetFlashedColor(key, display, PlainColor);
 
             ValueStyle.normal.textColor = color;
             EditorGUILayout.LabelField(display, ValueStyle);
         }
 
-        private Color GetFlashedColor(int key, string currentDisplay, Color baseColor)
+        private Color GetFlashedColor(SignalKey key, string currentDisplay, Color baseColor)
         {
             double now = EditorApplication.timeSinceStartup;
 
@@ -251,11 +276,6 @@ namespace Rubickanov.ACS.Editor
 
             float t = (float)(elapsed / FlashDuration);
             return Color.Lerp(FlashColor, baseColor, t);
-        }
-
-        private static int MakeKey(object instance, string fieldName)
-        {
-            return HashCode.Combine(RuntimeHelpers.GetHashCode(instance), fieldName);
         }
 
         private static string FormatValue(object? value)
@@ -323,9 +343,9 @@ namespace Rubickanov.ACS.Editor
         private static FieldKind ClassifyField(Type fieldType)
         {
             if (!fieldType.IsGenericType) return FieldKind.Plain;
-            string name = fieldType.GetGenericTypeDefinition().Name;
-            if (name.StartsWith("ReactiveProperty")) return FieldKind.ReactiveProperty;
-            if (name.StartsWith("Subject")) return FieldKind.Subject;
+            var def = fieldType.GetGenericTypeDefinition();
+            if (def == typeof(ReactiveProperty<>)) return FieldKind.ReactiveProperty;
+            if (def == typeof(Subject<>)) return FieldKind.Subject;
             return FieldKind.Plain;
         }
 
@@ -352,8 +372,8 @@ namespace Rubickanov.ACS.Editor
         /// </summary>
         private sealed class SignalTracker
         {
-            private readonly Dictionary<int, double> _fireTimes = new();
-            private readonly Dictionary<int, IDisposable> _subscriptions = new();
+            private readonly Dictionary<SignalKey, double> _fireTimes = new();
+            private readonly Dictionary<SignalKey, IDisposable> _subscriptions = new();
 
             // Reflection discovery is process-level — Type/MethodInfo don't hold Subject instances,
             // so caching statically doesn't leak. Reset on domain reload happens implicitly via
@@ -371,7 +391,7 @@ namespace Rubickanov.ACS.Editor
                 _fireTimes.Clear();
             }
 
-            public void EnsureSubscribed(int key, object subjectInstance)
+            public void EnsureSubscribed(SignalKey key, object subjectInstance)
             {
                 if (_subscriptions.ContainsKey(key)) return;
 
@@ -384,7 +404,7 @@ namespace Rubickanov.ACS.Editor
                     var current = subjectType;
                     while (current != null)
                     {
-                        if (current.IsGenericType && current.GetGenericTypeDefinition().Name.StartsWith("Subject"))
+                        if (current.IsGenericType && current.GetGenericTypeDefinition() == typeof(Subject<>))
                         {
                             elementType = current.GetGenericArguments()[0];
                             break;
@@ -400,7 +420,8 @@ namespace Rubickanov.ACS.Editor
                     // Create Action<T> that records fire time on THIS tracker instance.
                     var actionType = typeof(Action<>).MakeGenericType(elementType);
                     var param = Expression.Parameter(elementType, "x");
-                    var keyConst = Expression.Constant(key);
+                    // One-time boxing of SignalKey at Expression build — no per-fire cost.
+                    var keyConst = Expression.Constant(key, typeof(SignalKey));
                     var trackerConst = Expression.Constant(this);
                     var recordMethod = typeof(SignalTracker).GetMethod(
                         nameof(RecordFire), BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -419,7 +440,7 @@ namespace Rubickanov.ACS.Editor
                 }
             }
 
-            public double GetFlashAmount(int key)
+            public double GetFlashAmount(SignalKey key)
             {
                 if (!_fireTimes.TryGetValue(key, out double fireTime)) return 0;
                 double elapsed = EditorApplication.timeSinceStartup - fireTime;
@@ -428,7 +449,7 @@ namespace Rubickanov.ACS.Editor
             }
 
             // ReSharper disable once MemberCanBePrivate.Local — called via Expression
-            private void RecordFire(int key)
+            private void RecordFire(SignalKey key)
             {
                 _fireTimes[key] = EditorApplication.timeSinceStartup;
             }

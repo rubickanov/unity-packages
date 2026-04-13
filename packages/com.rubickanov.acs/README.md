@@ -138,7 +138,28 @@ protected override void OnSubscribe(ref DisposableBag disposables)
 }
 ```
 
-If you override `Awake`, always call `base.Awake()` — that is what triggers aspect injection.
+If you override `Awake` in an `EntityComponent`, always call `base.Awake()` — that is what runs `[Aspect]` injection:
+
+```csharp
+protected override void Awake()
+{
+    base.Awake(); // injects [Aspect] fields
+    // your init
+}
+```
+
+The same rule applies to `SingletonMonoEntity<T>` subclasses (including `World`), but for a different reason: `base.Awake()` assigns the static `Instance`. Skip it and `World.Instance` / `YourSingleton.Instance` stay `null`:
+
+```csharp
+public class World : SingletonMonoEntity<World>
+{
+    protected override void Awake()
+    {
+        base.Awake(); // sets Instance = this
+        // your init
+    }
+}
+```
 
 ### Optional Aspects
 
@@ -221,15 +242,17 @@ Duplicate instances self-destruct their GameObject during `Awake`. `Instance` is
 
 ### Dependency Injection
 
-ACS does not depend on any DI framework. **EntityInjector** is a static delegate that components invoke before `[Aspect]` injection — wire it once from your container:
+ACS does not depend on any DI framework. **EntityInjector** is a static hook that components invoke before `[Aspect]` injection — wire it once from your container:
 
 ```csharp
-EntityInjector.Inject = go =>
+EntityInjector.SetInjector(go =>
 {
     var scope = LifetimeScope.Find<LifetimeScope>(go.scene);
     scope?.Container.InjectGameObject(go);
-};
+});
 ```
+
+Call `EntityInjector.ClearInjector()` to reset (tests, teardown). Replacing the injector with a different delegate logs a warning — usually a sign that two DI containers are competing.
 
 ### Pure Core — Entity, IEntityLogic, ITickable
 

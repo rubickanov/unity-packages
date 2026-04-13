@@ -578,7 +578,9 @@ Regex'ы создаются через статический `Regex.IsMatch(inp
 
 ## LOW
 
-### L1. `Entity.Dispose` обнуляет `Destroyed = null` — скрытая zombie-подписка
+### L1. `Entity.Dispose` обнуляет `Destroyed = null` — скрытая zombie-подписка ✅ resolved 2026-04-13
+
+> Резолюция: `Destroyed = null` убрано из `Entity.Dispose` — симметрия с `MonoEntity.OnDestroy` восстановлена. XML-doc `Entity.Dispose` больше не обещает «drops all Destroyed subscribers»; `IEntity.Destroyed` явно документирует, что подписка после destroy легальна, но молча инертна (`_disposed == true`). Добавлен тест `Dispose_ThenSubscribe_HandlerNeverFires`.
 
 **Файл:** `Runtime/Entity.cs:63-71`
 **Категория:** suspicious / docs gap
@@ -602,7 +604,9 @@ public void Dispose()
 
 ---
 
-### L2. `README.md:141` — «always call `base.Awake()`» двусмыслен
+### L2. `README.md:141` — «always call `base.Awake()`» двусмыслен ✅ resolved 2026-04-13
+
+> Резолюция: одностройчник в секции «Component Lifecycle» разбит на два абзаца с примерами. Первый — про `EntityComponent`: `base.Awake()` триггерит `[Aspect]`-инъекцию. Второй — про `SingletonMonoEntity<T>` (включая `World`): `base.Awake()` ставит статический `Instance`; пропуск оставит `Instance` равным `null`. `World : SingletonMonoEntity<World>` подтверждено H3-резолюцией.
 
 **Файл:** `README.md:141`
 **Категория:** dirty / docs
@@ -617,7 +621,9 @@ README не разделяет эти два случая.
 
 ---
 
-### L3. `MonoEntity.Awake` — пустой virtual, комментарий не про то
+### L3. `MonoEntity.Awake` — пустой virtual, комментарий не про то ✅ resolved 2026-04-13
+
+> Резолюция: из XML-doc убран некорректный causal claim про лень аспектов («keep the base class free of Awake behavior so aspects remain lazy») — лень обеспечивается кодом `Require<T>` (TryGetValue/new T()), а не пустотой `Awake`. Новый текст: «Empty by default — the base class has no Awake behavior of its own.»
 
 **Файл:** `Runtime/MonoEntity.cs:27-34`
 **Категория:** dirty / docs
@@ -637,7 +643,9 @@ protected virtual void Awake() { }
 
 ---
 
-### L4. `EntityTickRunner` — комментарий про scratch неточен
+### L4. `EntityTickRunner` — комментарий про scratch неточен ✅ resolved 2026-04-13
+
+> Резолюция: XML-doc'и `Register`/`Unregister` явно зафиксировали snapshot-семантику. `Unregister` во время `Tick` (self или sibling) не убирает tickable из текущего кадра — отписка вступает в силу со следующего. Симметрично обновлён `Register` — «from the next frame onward». Поведенческих изменений нет.
 
 **Файл:** `Runtime/EntityTickRunner.cs:16-19, 44-56`
 **Категория:** dirty / docs
@@ -655,7 +663,9 @@ protected virtual void Awake() { }
 
 ---
 
-### L5. `SingletonMonoEntity` — дубликат фирит `Destroyed` при уничтожении
+### L5. `SingletonMonoEntity` — дубликат фирит `Destroyed` при уничтожении ✅ resolved 2026-04-13
+
+> Резолюция: добавлен `private bool _destroyedAsDuplicate` в `SingletonMonoEntity<T>`. При обнаружении дубликата в `Awake` флаг выставляется перед `Destroy(gameObject)`; `OnDestroy` short-circuits до `base.OnDestroy()` когда флаг true — `Destroyed` не фирится, `World.Unregister` не вызывается. Флаг держится в `SingletonMonoEntity<T>` (singleton-specific concern); `MonoEntity` не трогается. Добавлен `Tests/SingletonMonoEntityTests.cs` с 3 тестами (дубликат не фирит, дубликат не чистит Instance, оригинал всё ещё фирит Destroyed). Тесты используют reflection для вызова `Awake`/`OnDestroy` в EditMode (паттерн из `MonoEntityTests`).
 
 **Файлы:** `Runtime/SingletonMonoEntity.cs:20-29`, `Runtime/MonoEntity.cs:82-88`
 **Категория:** suspicious
@@ -688,7 +698,9 @@ protected virtual void OnDestroy()
 
 ---
 
-### L6. `MonoEntity.GetAllAspects` отдаёт живой `Values` словаря
+### L6. `MonoEntity.GetAllAspects` отдаёт живой `Values` словаря ✅ resolved 2026-04-13
+
+> Резолюция: и `MonoEntity.GetAllAspects`, и `Entity.GetAllAspects` теперь возвращают snapshot (`object[]`, заполненный через `Dictionary.ValueCollection.CopyTo`). Подпись `IEnumerable<object>` сохранена — не breaking. Ручной copy вместо `.ToArray()` — LINQ в runtime пакете запрещён (feedback memory). Живые потребители (`RuntimeAspectDrawer`, `AspectReplicator`, тесты) уже копировали в свои буферы — дополнительный snapshot погоды не делает.
 
 **Файл:** `Runtime/MonoEntity.cs:75`
 **Категория:** suspicious
@@ -713,7 +725,9 @@ foreach (var aspect in entity.GetAllAspects())
 
 ---
 
-### L7. `EntityInjector` — публичный mutable static делегат
+### L7. `EntityInjector` — публичный mutable static делегат ✅ resolved 2026-04-13
+
+> Резолюция: публичное поле `Inject` заменено на пару `SetInjector(Action<GameObject>)` / `ClearInjector()` + `Invoke(GameObject)`. Политика — **log warning + overwrite** при повторной установке с другим делегатом; same-delegate двойная установка — silent no-op (для hot-reload workflows с отключённым domain reload). `SetInjector(null)` бросает `ArgumentNullException`. Call sites обновлены: `Runtime/EntityComponent.cs:32` и `com.rubickanov.acs.netcode/Runtime/EntityNetworkComponent.cs:24` теперь зовут `EntityInjector.Invoke(gameObject)`. Тесты (`Tests/EntityInjectorTests.cs`) переписаны на новый API. README пример обновлён. Breaking change (source-only) задокументирован. `Invoke` оставлен `public` — используется из соседнего пакета.
 
 **Файл:** `Runtime/EntityInjector.cs`
 **Категория:** API-smell
@@ -728,7 +742,9 @@ public static Action<GameObject>? Inject;
 
 ---
 
-### L8. `RuntimeAspectDrawer.ClassifyField` — `StartsWith("Subject")`
+### L8. `RuntimeAspectDrawer.ClassifyField` — `StartsWith("Subject")` ✅ resolved 2026-04-13
+
+> Резолюция: `ClassifyField` теперь сравнивает generic-definition точно — `def == typeof(ReactiveProperty<>)` / `def == typeof(Subject<>)`. Walk-up loop в `EnsureSubscribed` (проверка базовых типов на Subject) также переведён на строгое `typeof(Subject<>)`. Только эти два типа из R3 — строгая замена, без расширения охвата (`Observable`, `ReadOnlyReactiveProperty` намеренно не добавлены). `ACS.Editor.asmdef` получил `"overrideReferences": true` + `"precompiledReferences": ["R3.dll"]` — без этого `typeof(R3.*<>)` не резолвится в Editor assembly.
 
 **Файл:** `Editor/RuntimeAspectDrawer.cs:299-306`
 **Категория:** dirty
@@ -750,7 +766,9 @@ private static FieldKind ClassifyField(Type fieldType)
 
 ---
 
-### L9. `SignalTracker.MakeKey` — теоретические коллизии
+### L9. `SignalTracker.MakeKey` — теоретические коллизии ✅ resolved 2026-04-13
+
+> Резолюция: заведён `readonly struct SignalKey : IEquatable<SignalKey>` с полями `(object Instance, string Field)`. `Equals` — `ReferenceEquals(Instance, ...)` + ordinal-string `==`, `GetHashCode` — `HashCode.Combine(RuntimeHelpers.GetHashCode(Instance), Field)`. Словари `_valueTracker`, `_fireTimes`, `_subscriptions` мигрированы с `Dictionary<int, ...>` на `Dictionary<SignalKey, ...>`. Хелпер `MakeKey` удалён; callers делают `new SignalKey(instance, fieldName)` напрямую. Ключ в `Expression.Constant(key, typeof(SignalKey))` передаётся с явным типом — один boxing на build expression tree, не на горячем пути.
 
 **Файл:** `Editor/RuntimeAspectDrawer.cs:232-235`
 **Категория:** suspicious
@@ -766,7 +784,9 @@ private static int MakeKey(object instance, string fieldName)
 
 ---
 
-### L10. `AspectUsageAnalyzer.ParseRequiredAspects` — `.Distinct().ToList()`
+### L10. `AspectUsageAnalyzer.ParseRequiredAspects` — `.Distinct().ToList()` ✅ resolved 2026-04-13
+
+> Резолюция: убран `.Distinct().ToList()` — теперь один проход с `HashSet<string> seen` для дедупа и `List<string> result` для сохранения insertion order (детерминизм диагностик). Текущий обогащённый regex для receiver chain (`\w+(?:\.\w+)*\.Require<X>()`) сохранён. `using System.Linq;` остался — используется в `AnalyzeEntity` (`OrderBy`).
 
 **Файл:** `Editor/AspectUsageAnalyzer.cs:167`
 **Категория:** dirty
@@ -779,7 +799,9 @@ return result.Distinct().ToList();
 
 ---
 
-### L11. `IEntityComponent` — маркер без потребителей (почти)
+### L11. `IEntityComponent` — маркер без потребителей (почти) ❌ won't-fix 2026-04-13
+
+> Резолюция (won't-fix): посылка issue устарела. `com.rubickanov.acs.netcode` содержит `EntityNetworkComponent : NetworkBehaviour, IEntityComponent`, а `AspectReplicator` делает `GetComponentsInChildren<IEntityComponent>()` для обхода network-компонентов — т.е. маркер **активно** используется из соседнего пакета как shared contract между ACS и ACS.Netcode. Сделать `internal` нельзя — сломает acs.netcode. Оставляем публичным, статус-кво корректен.
 
 **Файлы:** `Runtime/IEntityComponent.cs`, `Editor/MonoEntityEditor.cs:41`
 **Категория:** API-smell
@@ -800,17 +822,19 @@ foreach (var c in context.GetComponentsInChildren<MonoBehaviour>(true))
 
 ---
 
-### L12. `AspectInjector` — кеши не thread-safe
+### L12. `AspectInjector` — кеши не thread-safe ✅ resolved 2026-04-13
+
+> Резолюция: оба кеша переведены на `ConcurrentDictionary<,>` с `GetOrAdd` (атомарный lookup-or-build). `FieldCache` — `ConcurrentDictionary<Type, FieldInfo[]>`, `RequireDelegateCache` — `ConcurrentDictionary<Type, Func<IEntity, object>>` (имя/тип в оригинальном блоке issue были устаревшими — `RequireCache`/`MethodInfo`; фактически там лежит делегат, построенный через Expression compile, c H4-резолюции). IDEAS.md ссылка тоже устарела: Simulate Level 2 живёт на 817-889, не 972-1045. Fix сделан сразу, не defer — цена минимальна, закрывает dormant race до начала L2-работ.
 
 **Файл:** `Runtime/AspectInjector.cs:13-14`
 **Категория:** suspicious (dormant)
 
 ```csharp
 private static readonly Dictionary<Type, FieldInfo[]> FieldCache = new();
-private static readonly Dictionary<Type, MethodInfo> RequireCache = new();
+private static readonly Dictionary<Type, Func<IEntity, object>> RequireDelegateCache = new();
 ```
 
-Unity однопоточен → проблемы нет сейчас. `IDEAS.md:972-1045` планирует Simulate Level 2 — headless .NET console app с Monte Carlo прогонами. Если симуляция пойдёт многопоточной — эти кеши без локов породят race.
+Unity однопоточен → проблемы нет сейчас. `IDEAS.md:817-889` планирует Simulate Level 2 — headless .NET console app с Monte Carlo прогонами. Если симуляция пойдёт многопоточной — эти кеши без локов породят race.
 
 **Фикс:** заменить на `ConcurrentDictionary` в момент, когда Simulate L2 станет реальностью.
 

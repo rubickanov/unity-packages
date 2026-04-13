@@ -17,10 +17,19 @@ namespace Rubickanov.ACS.Runtime
         /// </summary>
         public static T? Instance { get; private set; }
 
+        // A duplicate instance never becomes Instance, never registers aspects, and
+        // never gets observed by Destroyed subscribers — so when Unity finally invokes
+        // OnDestroy on its self-destroyed GameObject, we must skip the base lifecycle
+        // (Destroyed event, World.Unregister) entirely. Otherwise subscribers who
+        // happened to subscribe in the single frame between Awake and OnDestroy see
+        // a Destroyed fire for an entity that was never alive to them.
+        private bool _destroyedAsDuplicate;
+
         protected override void Awake()
         {
             if (Instance != null && Instance != this)
             {
+                _destroyedAsDuplicate = true;
                 Destroy(gameObject);
                 return;
             }
@@ -30,6 +39,7 @@ namespace Rubickanov.ACS.Runtime
 
         protected override void OnDestroy()
         {
+            if (_destroyedAsDuplicate) return;
             if (Instance == this)
                 Instance = null;
             base.OnDestroy();

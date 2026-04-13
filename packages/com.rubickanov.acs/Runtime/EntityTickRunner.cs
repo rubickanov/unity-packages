@@ -20,9 +20,11 @@ namespace Rubickanov.ACS.Runtime
 
         /// <summary>
         /// Registers <paramref name="tickable"/> so it receives <see cref="ITickable.Tick"/>
-        /// every frame until <see cref="Unregister"/> is called or the runner
-        /// is destroyed. Duplicate registrations are silently ignored so
-        /// callers don't need to track their own "already-added" flag.
+        /// from the next frame onward until <see cref="Unregister"/> is called
+        /// or the runner is destroyed. Tickables registered during a Tick are
+        /// not invoked in the current frame — the runner iterates a snapshot
+        /// taken at the start of Update. Duplicate registrations are silently
+        /// ignored so callers don't need to track their own "already-added" flag.
         /// </summary>
         public void Register(ITickable tickable)
         {
@@ -32,8 +34,12 @@ namespace Rubickanov.ACS.Runtime
         }
 
         /// <summary>
-        /// Removes <paramref name="tickable"/>. Safe to call for an item that
-        /// was never registered.
+        /// Removes <paramref name="tickable"/> so it no longer receives
+        /// <see cref="ITickable.Tick"/> from the next frame onward. Safe to
+        /// call for an item that was never registered. If invoked during a
+        /// <see cref="ITickable.Tick"/> (by the tickable itself or a sibling),
+        /// the removed tickable may still receive the current frame's Tick —
+        /// the runner iterates a snapshot taken at the start of Update.
         /// </summary>
         public void Unregister(ITickable tickable)
         {
