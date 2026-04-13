@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 using Rubickanov.ACS.Runtime;
@@ -6,22 +8,22 @@ using UnityEngine;
 namespace Rubickanov.ACS.Tests
 {
     [TestFixture]
-    public class EntityContextTests
+    public class MonoEntityTests
     {
         private GameObject _gameObject;
-        private EntityContext _context;
+        private MonoEntity _context;
 
         [SetUp]
         public void SetUp()
         {
-            _gameObject = new GameObject(nameof(EntityContextTests));
-            _context = _gameObject.AddComponent<EntityContext>();
+            _gameObject = new GameObject(nameof(MonoEntityTests));
+            _context = _gameObject.AddComponent<MonoEntity>();
         }
 
         [TearDown]
         public void TearDown()
         {
-            Object.DestroyImmediate(_gameObject);
+            UnityEngine.Object.DestroyImmediate(_gameObject);
         }
 
         [Test]
@@ -137,10 +139,73 @@ namespace Rubickanov.ACS.Tests
             }
             finally
             {
-                Object.DestroyImmediate(worldGo);
-                typeof(SingletonEntityContext<World>)
+                UnityEngine.Object.DestroyImmediate(worldGo);
+                typeof(SingletonMonoEntity<World>)
                     .GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)!
                     .SetValue(null, null);
+            }
+        }
+
+        [Test]
+        public void Require_CreatesNewAspect_FiresOnAspectCreated()
+        {
+            var events = new List<(IEntity entity, Type type)>();
+            Action<IEntity, Type> handler = (e, t) => events.Add((e, t));
+            MonoEntity.OnAspectCreated += handler;
+            try
+            {
+                var aspect = _context.Require<TestAspectA>();
+
+                Assert.AreEqual(1, events.Count);
+                Assert.AreSame(_context, events[0].entity);
+                Assert.AreEqual(typeof(TestAspectA), events[0].type);
+                Assert.IsNotNull(aspect);
+            }
+            finally
+            {
+                MonoEntity.OnAspectCreated -= handler;
+            }
+        }
+
+        [Test]
+        public void Require_ReturnsExistingAspect_DoesNotFireOnAspectCreated()
+        {
+            var fireCount = 0;
+            Action<IEntity, Type> handler = (_, _) => fireCount++;
+            MonoEntity.OnAspectCreated += handler;
+            try
+            {
+                _context.Require<TestAspectA>();
+                _context.Require<TestAspectA>();
+
+                Assert.AreEqual(1, fireCount);
+            }
+            finally
+            {
+                MonoEntity.OnAspectCreated -= handler;
+            }
+        }
+
+        [Test]
+        public void Start_AfterAwake_FiresOnAwakeCompleted()
+        {
+            var events = new List<MonoEntity>();
+            Action<MonoEntity> handler = events.Add;
+            MonoEntity.OnAwakeCompleted += handler;
+            try
+            {
+                // EditMode tests don't auto-fire MonoBehaviour lifecycle on AddComponent; invoke
+                // the private Start method the way Unity would at runtime.
+                typeof(MonoEntity)
+                    .GetMethod("Start", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .Invoke(_context, null);
+
+                Assert.AreEqual(1, events.Count);
+                Assert.AreSame(_context, events[0]);
+            }
+            finally
+            {
+                MonoEntity.OnAwakeCompleted -= handler;
             }
         }
 

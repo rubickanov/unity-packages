@@ -63,7 +63,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // fields exist on this entity.
         private PredictedFieldInfo[] _predictedFields = Array.Empty<PredictedFieldInfo>();
         private Type? _predictedInputType;
-        // Indices into _bindings that correspond to [Predicted] fields. Built in
+        // Indices into _bindings that correspond to [Replicated(Predicted = true)] fields. Built in
         // OnNetworkSpawn by joining PredictionScanner output with ReplicationScanner
         // output on field name. Drives step 7's snapshot capture/restore path.
         private int[] _predictedBindingIndices = Array.Empty<int>();
@@ -97,10 +97,10 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // also checks enabled. Regression #16.
             ApplyNetworkScopes();
 
-            var context = GetComponent<EntityContext>();
+            var context = GetComponent<MonoEntity>();
             if (context == null)
             {
-                Debug.LogError($"[AspectReplicator] '{gameObject.name}' is missing EntityContext on the root. Replication disabled.");
+                Debug.LogError($"[AspectReplicator] '{gameObject.name}' is missing MonoEntity on the root. Replication disabled.");
                 return;
             }
 
@@ -138,7 +138,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
                 // Track (fieldName -> bindingIndex) for this aspect so we can join
                 // PredictionScanner's output back to the exact binding that owns
-                // each [Predicted] field. Scanners both sort by name, but a field
+                // each Predicted field. Scanners both sort by name, but a field
                 // that was skipped (null reactive, type mismatch) does not become
                 // a binding — the dictionary only holds entries we actually added.
                 var aspectBindingByName = new Dictionary<string, int>();
@@ -152,7 +152,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                         continue;
                     }
                     bool isAuthority = info.Authority == AuthorityMode.Server ? IsServer : IsOwner;
-                    // Predicted-owner: owner-client of a server-auth [Predicted] field. They run
+                    // Predicted-owner: owner-client of a server-auth Predicted field. They run
                     // ISimulate locally each tick, so their render path needs AuthorityRender
                     // smoothing — but they are NOT the replication authority (server is), so we
                     // don't subscribe them via SubscribeAsAuthority. The !IsServer guard excludes
@@ -205,18 +205,18 @@ namespace Rubickanov.ACS.Runtime.Netcode
                         allInterpolatedBindings.Add(binding);
                 }
 
-                // Predicted fields are collected alongside replicated fields so step 7's
-                // snapshot buffer can address them without re-scanning. Each predicted
-                // field must also be [ReplicatedState] — the attribute contract — so we
-                // resolve it to a binding by name. Missing matches mean user error (or a
-                // skipped binding due to null reactive); we log and skip that predicted
-                // field rather than producing an index that writes garbage on capture.
+                // Predicted fields are a subset of replicated fields (same attribute,
+                // Predicted = true flag). PredictionScanner filters ReplicationScanner's
+                // output, so the only reason a predicted field would not match here is
+                // if the replicated binding was skipped (null reactive) — log and drop
+                // the predicted entry rather than producing an index that writes garbage
+                // on capture.
                 for (int pi = 0; pi < predictedInfos.Length; pi++)
                 {
                     var predictedInfo = predictedInfos[pi];
                     if (!aspectBindingByName.TryGetValue(predictedInfo.Field.Name, out var bindingIndex))
                     {
-                        Debug.LogError($"[AspectReplicator] Aspect '{aspect.GetType().Name}' field '{predictedInfo.Field.Name}' has [Predicted] but no matching [ReplicatedState] binding was registered. Prediction snapshot will exclude this field.");
+                        Debug.LogError($"[AspectReplicator] Aspect '{aspect.GetType().Name}' field '{predictedInfo.Field.Name}' has [Replicated(Predicted = true)] but no matching replicated binding was registered (null reactive?). Prediction snapshot will exclude this field.");
                         continue;
                     }
                     allPredictedFields.Add(predictedInfo);
@@ -578,7 +578,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // ------------------------------------------------------------------
 
         /// <summary>
-        /// Serialize current values of every <c>[Predicted]</c> field into
+        /// Serialize current values of every <c>[Replicated(Predicted = true)]</c> field into
         /// <paramref name="slotBuffer"/>. The buffer must be <see cref="PredictedPayloadSize"/>
         /// bytes long; the caller owns it (SnapshotBuffer reuses a pre-allocated
         /// byte[] per tick slot so this path is alloc-free after spawn, except
@@ -748,32 +748,33 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         private void BootstrapPrediction()
         {
-            // Gate on ISimulate, not on [Predicted]. The pipeline is needed
+            // Gate on ISimulate, not on Predicted = true. The pipeline is needed
             // whenever a component wants to run tick-driven authoritative logic
             // fed by owner input — that is independent of whether any field
-            // opts into the snapshot+reconcile path. [Predicted] purely controls
-            // the latter (capture + rewind on state arrival); without it the
-            // snapshot buffer stays empty-sized and the reconcile call no-ops,
-            // but owner/server Simulate still run and inputs still flow.
+            // opts into the snapshot+reconcile path. The Predicted flag purely
+            // controls the latter (capture + rewind on state arrival); without
+            // it the snapshot buffer stays empty-sized and the reconcile call
+            // no-ops, but owner/server Simulate still run and inputs still flow.
             //
             // Concretely this lets a prefab flip `Authority = Server` ↔ `Owner`
-            // on a replicated field without also having to toggle `[Predicted]`:
-            //   - Server-auth + [Predicted]: full prediction + reconcile
-            //   - Server-auth, no [Predicted]: owner sends input → server
+            // on a replicated field without also having to toggle `Predicted`:
+            //   - Server-auth + Predicted: full prediction + reconcile
+            //   - Server-auth, no Predicted: owner sends input → server
             //     Simulates → broadcasts; owner's local Simulate visibly
             //     snaps back each broadcast (textbook "no prediction" feel)
-            //   - Owner-auth (± [Predicted]): owner's Simulate writes are the
-            //     authoritative ones, relayed via the owner-auth path; the
-            //     server-side Simulate pass writes to a non-authoritative
-            //     local copy that gets overwritten by the owner relay
+            //   - Owner-auth (Predicted is a no-op, stripped by the scanner):
+            //     owner's Simulate writes are the authoritative ones, relayed
+            //     via the owner-auth path; the server-side Simulate pass
+            //     writes to a non-authoritative local copy that gets
+            //     overwritten by the owner relay
             _predictedInputType = ResolveInputType();
             if (_predictedInputType == null)
             {
-                // [Predicted] without an ISimulate consumer is a programmer
+                // Predicted flag without an ISimulate consumer is a programmer
                 // error — the field is dressed up for prediction but nothing
                 // will ever run against it. Call it out so it's easy to spot.
                 if (_predictedFields.Length > 0)
-                    Debug.LogError($"[AspectReplicator] '{gameObject.name}' has [Predicted] fields but no component implements ISimulate<TInput>. Prediction disabled for this entity.");
+                    Debug.LogError($"[AspectReplicator] '{gameObject.name}' has Predicted fields but no component implements ISimulate<TInput>. Prediction disabled for this entity.");
                 return;
             }
 

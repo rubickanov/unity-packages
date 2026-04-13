@@ -49,7 +49,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f9a07c9720dc46b13bfca90906e25712, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: ACS.Runtime::Rubickanov.ACS.Runtime.EntityContext
+  m_EditorClassIdentifier: ACS.Runtime::Rubickanov.ACS.Runtime.MonoEntity
 --- !u!114 &3431112501518646507
 MonoBehaviour:
   m_ObjectHideFlags: 0

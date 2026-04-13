@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Scripting.APIUpdating;
 
 namespace Rubickanov.ACS.Runtime
 {
@@ -7,7 +8,8 @@ namespace Rubickanov.ACS.Runtime
     /// The first instance wins; a duplicate GameObject is destroyed during Awake so
     /// downstream subscribers never observe two live instances.
     /// </summary>
-    public abstract class SingletonEntityContext<T> : EntityContext where T : SingletonEntityContext<T>
+    [MovedFrom(true, sourceNamespace: "Rubickanov.ACS.Runtime", sourceAssembly: "ACS.Runtime", sourceClassName: "SingletonEntityContext`1")]
+    public abstract class SingletonMonoEntity<T> : MonoEntity where T : SingletonMonoEntity<T>
     {
         /// <summary>
         /// The active singleton instance for this type, or <c>null</c> if none is alive in the scene.

@@ -15,7 +15,7 @@ No extra components to add manually -- everything is auto-detected from attribut
 
 ```
 Entity (root GameObject)
-|- EntityContext              -- aspects (existing), auto-creates network layer if [Replicated] fields found
+|- MonoEntity              -- aspects (existing), auto-creates network layer if [Replicated] fields found
 |- NetworkObject              -- required by NGO (already needed for any networked entity)
 |- MovementComponent          -- regular EntityComponent + ISimulate
 |- HealthComponent            -- regular EntityComponent (no ISimulate, no prediction)
@@ -23,7 +23,7 @@ Entity (root GameObject)
 
 Components remain regular `EntityComponent`. They don't know about networking.
 
-Under the hood, `EntityContext` detects `[Replicated]` fields on aspects and auto-adds
+Under the hood, `MonoEntity` detects `[Replicated]` fields on aspects and auto-adds
 an internal `AspectReplicator` (NetworkBehaviour) at runtime. The user never touches it.
 
 `PredictionManager` is a singleton pure C# class registered in DI.
@@ -48,7 +48,7 @@ Client Authoritative:
 Two kinds of data flow across the network:
 
 - **State** — `ReactiveProperty<T>` fields. Current value is synchronized via dirty-tick.
-  Marked with `[ReplicatedState]`.
+  Marked with `[Replicated]`.
 - **Events** — `Subject<T>` fields. Each `OnNext` call is broadcast as an instant RPC.
   Marked with `[ReplicatedEvent]`.
 
@@ -56,10 +56,11 @@ Two kinds of data flow across the network:
 
 ```csharp
 [AttributeUsage(AttributeTargets.Field)]
-public sealed class ReplicatedStateAttribute : Attribute
+public sealed class ReplicatedAttribute : Attribute
 {
     public AuthorityMode Authority { get; set; } = AuthorityMode.Server;
     public InterpolationMode Interpolation { get; set; } = InterpolationMode.None;
+    public bool Predicted { get; set; } = false;
 }
 
 [AttributeUsage(AttributeTargets.Field)]
@@ -95,10 +96,10 @@ public enum Reliability
 public class WeaponAspect : IEntityAspect
 {
     // State — current value synced via dirty-tick
-    [ReplicatedState]
+    [Replicated]
     public readonly ReactiveProperty<int> AmmoInMagazine = new(0);
 
-    [ReplicatedState(Interpolation = InterpolationMode.Linear)]
+    [Replicated(Interpolation = InterpolationMode.Linear)]
     public readonly ReactiveProperty<Vector3> Position = new();
 
     // Event — instant broadcast on each OnNext
@@ -156,8 +157,8 @@ NGO requires all `NetworkBehaviour` components to exist on the prefab before spa
 dynamic `AddComponent` does not work for network replication.
 
 Responsibilities:
-- On `OnNetworkSpawn`: scans all aspects in `EntityContext` via reflection, registers with `AspectReplicationSystem`
-- For each `[ReplicatedState]` field:
+- On `OnNetworkSpawn`: scans all aspects in `MonoEntity` via reflection, registers with `AspectReplicationSystem`
+- For each `[Replicated]` field:
   - Create a `ReplicatedFieldBinding<T>`
   - On authority side: subscribe to `ReactiveProperty<T>` → mark dirty
   - System collects dirty on tick → serializes → sends batched named message
@@ -229,14 +230,14 @@ from `sizeof(T)` of each binding at init time to avoid reallocation.
 
 ### Server Authoritative (default)
 
-- `[ReplicatedState(Authority = AuthorityMode.Server)]`
+- `[Replicated(Authority = AuthorityMode.Server)]`
 - Server writes to aspect -> syncs to clients
 - Client writes are ignored / blocked on non-authority side
 - Used for: health, game state, AI-controlled entities
 
 ### Owner Authoritative
 
-- `[ReplicatedState(Authority = AuthorityMode.Owner)]`
+- `[Replicated(Authority = AuthorityMode.Owner)]`
 - Owner writes to aspect -> syncs to server -> server relays to other clients
 - Used for: client-auth co-op games, cosmetic state
 - Server can optionally validate (anti-cheat hook)
@@ -247,10 +248,10 @@ Different fields can have different authority on the same entity:
 ```csharp
 public class PlayerAspect : IEntityAspect
 {
-    [ReplicatedState(Authority = AuthorityMode.Server)]
+    [Replicated(Authority = AuthorityMode.Server)]
     public readonly Reactive<float> Health = new(100);  // server controls
 
-    [ReplicatedState(Authority = AuthorityMode.Owner)]
+    [Replicated(Authority = AuthorityMode.Owner)]
     public readonly Reactive<int> SelectedSlot = new(0); // client controls
 }
 ```
@@ -325,7 +326,7 @@ Applied by `AspectReplicator.OnNetworkSpawn()` (or a sibling component):
 ### Relation to aspect authority
 
 Two levels of enforcement, orthogonal:
-- **Data-level** (`AuthorityMode` on `[ReplicatedState]`) — who is allowed to *write*
+- **Data-level** (`AuthorityMode` on `[Replicated]`) — who is allowed to *write*
   to a specific field. Enforced by the replication layer.
 - **Logic-level** (`NetworkScope` on component class) — where a component's
   `Update`/`Awake`/etc. runs at all. Enforced by disabling the component.
@@ -364,10 +365,10 @@ Server snapshots:   [T=1, pos=0] ---- [T=2, pos=5] ---- [T=3, pos=9]
 ### Configuration
 
 ```csharp
-[ReplicatedState(Interpolation = InterpolationMode.Linear)]
+[Replicated(Interpolation = InterpolationMode.Linear)]
 public readonly Reactive<Vector3> Position = new();
 
-[ReplicatedState(Interpolation = InterpolationMode.None)]
+[Replicated(Interpolation = InterpolationMode.None)]
 public readonly Reactive<int> AmmoCount = new();  // discrete, no interpolation
 ```
 
@@ -424,19 +425,20 @@ public class MovementComponent : EntityComponent, ISimulate
 }
 ```
 
-### [Predicted] Attribute
+### Predicted flag
 
-Marks fields that participate in prediction/reconciliation snapshot:
+`Predicted = true` on `[Replicated]` marks fields that participate in the
+prediction/reconciliation snapshot. Must be combined with `Authority = Server`
+— the scanner strips `Predicted` on owner-authoritative fields with a warning,
+since the owner is already the source of truth.
 
 ```csharp
 public class MovementAspect : IEntityAspect
 {
-    [ReplicatedState(Authority = AuthorityMode.Server)]
-    [Predicted]
+    [Replicated(Authority = AuthorityMode.Server, Predicted = true)]
     public readonly Reactive<Vector3> Position = new();
 
-    [ReplicatedState(Authority = AuthorityMode.Server)]
-    [Predicted]
+    [Replicated(Authority = AuthorityMode.Server, Predicted = true)]
     public readonly Reactive<Vector3> Velocity = new();
 }
 ```
@@ -506,7 +508,7 @@ Uses NGO's built-in `NetworkTickSystem`:
 
 ### Snapshot Buffer
 
-Ring buffer per entity storing [Predicted] field values per tick:
+Ring buffer per entity storing `[Replicated(Predicted = true)]` field values per tick:
 
 ```csharp
 public class SnapshotBuffer
@@ -525,7 +527,7 @@ public class SnapshotBuffer
 
 Server-side hitbox rollback for shooting/abilities.
 
-- Server stores history of [Predicted] positions per entity (last N ticks)
+- Server stores history of `[Replicated(Predicted = true)]` positions per entity (last N ticks)
 - When processing a hit: roll back to the tick the shooter saw (based on RTT)
 - Check collision against historical positions
 - Not an attribute on aspects -- separate server-side system
@@ -568,7 +570,7 @@ User only adds what they already know:
 
 ```
 Entity (root)
-|- EntityContext           -- existing
+|- MonoEntity           -- existing
 |- NetworkObject           -- required by NGO for any networked entity
 |- MovementComponent       -- EntityComponent + ISimulate
 |- WeaponComponent         -- EntityComponent + ISimulate
@@ -577,7 +579,7 @@ Entity (root)
 
 No extra networking components to add manually.
 AspectReplicator is auto-created internally when [Replicated] fields are detected.
-Prediction auto-activates when [Predicted] fields are detected.
+Prediction auto-activates when `[Replicated(Predicted = true)]` fields are detected.
 
 ---
 
@@ -600,7 +602,7 @@ public class NetworkInstaller : IInstaller
 Status legend: [x] done, [ ] not started, [~] in progress
 
 - [x] **1. [Replicated] state sync (Layer 0)** — server→client sync via `AspectReplicationSystem`
-  - `ReplicatedStateAttribute`, `AuthorityMode`, `InterpolationMode` enums
+  - `ReplicatedAttribute`, `AuthorityMode`, `InterpolationMode` enums
   - `ReplicationScanner` with reflection + caching + stable field sort
   - `ReplicatedFieldBinding<T>` with unsafe unmanaged serialization + feedback-loop guard
   - `AspectReplicator` (`NetworkBehaviour`) — binding scan + state application
@@ -610,7 +612,7 @@ Status legend: [x] done, [ ] not started, [~] in progress
   - >256 fields warning (variable-length byte[] mask)
 
 - [x] **2. [ReplicatedEvent] event broadcast (Layer 0.5)** — `Subject<T>` via instant RPC
-  - Hard-rename `[Replicated]` → `[ReplicatedState]` (single test consumer, no deprecated alias)
+  - Hard-rename `[Replicated]` → `[ReplicatedState]` (single test consumer, no deprecated alias) — later reverted to `[Replicated]` when prediction folded in (see cross-cutting TODO below)
   - `ReplicatedEventAttribute` with `Authority` + `Reliability` props
   - `Reliability` enum (`Reliable` / `Unreliable`)
   - `ReplicatedEventBinding<T>` + factory parallel to `ReplicatedFieldBinding<T>`
@@ -663,10 +665,10 @@ Status legend: [x] done, [ ] not started, [~] in progress
   - [x] `IInputProvider<TInput> { TInput Gather(); }` — component on the owner entity; falls back to `default(TInput)` + one-time warning if absent
   - [x] `PredictionManager<TInput>` as per-`NetworkManager` singleton (static `GetOrCreate` dictionary — mirrors `AspectReplicationSystem`, no VContainer dependency) subscribing to `NetworkTickSystem.Tick`
   - [x] Owner: gather input → `ACS_Input:<TInput.FullName>` named message (unreliable-sequenced, `[ulong netObjId][int clientTick][sizeof(TInput)]`) → run local `Simulate` pass
-  - [x] Server: apply last-known input per `NetworkObjectId` → run `Simulate` as authority (writes to `[ReplicatedState, Predicted]` fields go out via the existing replication tick)
+  - [x] Server: apply last-known input per `NetworkObjectId` → run `Simulate` as authority (writes to `[Replicated(Predicted = true)]` fields go out via the existing replication tick)
   - [x] Host-owner: server path only; no self-submit round-trip
   - [x] Defense-in-depth: server rejects `ACS_Input` from clients that do not own the target `NetworkObject`
-  - [x] `[Predicted]` attribute + `PredictionScanner` (parallel to `ReplicationScanner`, alphabetical stable sort, per-type cache, validates `ReactiveProperty<T>` with unmanaged `T`)
+  - [x] `[Predicted]` attribute + `PredictionScanner` (parallel to `ReplicationScanner`, alphabetical stable sort, per-type cache, validates `ReactiveProperty<T>` with unmanaged `T`) — later folded into `[Replicated(Predicted = true)]` and PredictionScanner slimmed to a filter over ReplicationScanner output (see cross-cutting TODO below)
   - [x] `AspectReplicator` hook: after the existing scan, resolve `TInput` from the first `ISimulate<T>` under the entity (stopping at nested `NetworkObject` boundaries) and register with the matching `PredictionManager<TInput>` via a reflection delegate cache
   - [x] Tick ordering: `PredictionManager` bootstraps BEFORE `AspectReplicationSystem.GetOrCreate` on spawn; if the replication system already exists, `RequeueTick()` pushes its handler to the tail so `Simulate` writes land as dirty bindings in the same tick they get batched
   - [x] `AotHints` entry for `ReactivePropertyExtensions.Smooth` specializations; users must add `link.xml` for their concrete `PredictionManager<MyInput>` / `ISimulate<MyInput>`
@@ -695,7 +697,7 @@ Status legend: [x] done, [ ] not started, [~] in progress
 - [x] Replace per-tick `byte[]` RPC allocation with `CustomMessagingManager` (batch 3.6, 2026-04-10)
 - [ ] Runtime ownership changes: rebuild owner-auth bindings and owner-tick subscription in `OnGainedOwnership` / `OnLostOwnership` so possession-style handoff works mid-session
 
-- [ ] **Unify replication attributes into a single `[Replicated]` with parameters.** Current design mixes two styles: `[ReplicatedState(Authority, Interpolation)]` is a single attribute with params, while `[Predicted]` is a separate attribute — and `[Predicted]` on an owner-auth field is invalid (runtime warning in `PredictionScanner`). The three concepts are not orthogonal: prediction and interpolation are modes of the same replication channel and do not exist without `[Replicated]`. Refactor:
+- [x] **Unify replication attributes into a single `[Replicated]` with parameters.** (done 2026-04-12) Current design mixes two styles: `[ReplicatedState(Authority, Interpolation)]` is a single attribute with params, while `[Predicted]` is a separate attribute — and `[Predicted]` on an owner-auth field is invalid (runtime warning in `PredictionScanner`). The three concepts are not orthogonal: prediction and interpolation are modes of the same replication channel and do not exist without `[Replicated]`. Refactor:
   - Rename `ReplicatedStateAttribute` → `ReplicatedAttribute` (drop `State` suffix — on a `ReactiveProperty<T>` it is implicit; symmetry with `ReplicatedEvent` stays via the `Event` suffix where the distinction matters).
   - Fold `Predicted` into `ReplicatedAttribute` as `bool Predicted { get; set; } = false;` alongside existing `Authority` / `Interpolation` props. Delete `PredictedAttribute`.
   - Named parameters stay optional: `[Replicated(Authority = Server, Predicted = true)]` leaves `Interpolation = None`, `[Replicated]` is all defaults (Server, None, false).

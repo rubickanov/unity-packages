@@ -335,7 +335,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 rep.ApplyStateBuffer(reader, mode, out int serverTick);
                 // Step 7: hand the just-applied server tick to the prediction pipeline
                 // so locally-owning entities can rewind+replay against authoritative
-                // state. No-op on entities without [Predicted] fields.
+                // state. No-op on entities without Predicted fields.
                 rep.NotifyServerStateApplied(serverTick);
             }
         }

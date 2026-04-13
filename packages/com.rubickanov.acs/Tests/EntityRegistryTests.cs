@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using Rubickanov.ACS.Runtime;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace Rubickanov.ACS.Tests
 {
@@ -25,11 +27,19 @@ namespace Rubickanov.ACS.Tests
             _spawned.Clear();
         }
 
-        private EntityContext NewEntity()
+        private MonoEntity NewEntity()
         {
             var go = new GameObject(nameof(EntityRegistryTests));
             _spawned.Add(go);
-            return go.AddComponent<EntityContext>();
+            return go.AddComponent<MonoEntity>();
+        }
+
+        private static Dictionary<Type, object>.KeyCollection TypeKeys(params Type[] types)
+        {
+            var dict = new Dictionary<Type, object>(types.Length);
+            foreach (var t in types)
+                dict[t] = null!;
+            return dict.Keys;
         }
 
         [Test]
@@ -75,13 +85,13 @@ namespace Rubickanov.ACS.Tests
         }
 
         [Test]
-        public void Unregister_RemovesEntityFromAllBuckets()
+        public void Unregister_RemovesEntityFromProvidedBuckets()
         {
             var entity = NewEntity();
             _registry.Register(entity, typeof(TestAspectA));
             _registry.Register(entity, typeof(TestAspectB));
 
-            _registry.Unregister(entity);
+            _registry.Unregister(entity, TypeKeys(typeof(TestAspectA), typeof(TestAspectB)));
 
             Assert.IsEmpty(_registry.GetAllWith(typeof(TestAspectA)));
             Assert.IsEmpty(_registry.GetAllWith(typeof(TestAspectB)));
@@ -95,7 +105,7 @@ namespace Rubickanov.ACS.Tests
             _registry.Register(first, typeof(TestAspectA));
             _registry.Register(second, typeof(TestAspectA));
 
-            _registry.Unregister(first);
+            _registry.Unregister(first, TypeKeys(typeof(TestAspectA)));
 
             CollectionAssert.AreEquivalent(new[] { second }, _registry.GetAllWith(typeof(TestAspectA)));
         }
@@ -105,7 +115,23 @@ namespace Rubickanov.ACS.Tests
         {
             var entity = NewEntity();
 
-            Assert.DoesNotThrow(() => _registry.Unregister(entity));
+            Assert.DoesNotThrow(() => _registry.Unregister(entity, TypeKeys(typeof(TestAspectA))));
+        }
+
+        [Test]
+        public void Unregister_OnlyTouchesBucketsForProvidedTypes_LeavesOthersIntact()
+        {
+            var entity = NewEntity();
+            var bystander = NewEntity();
+            _registry.Register(entity, typeof(TestAspectA));
+            _registry.Register(entity, typeof(TestAspectB));
+            _registry.Register(bystander, typeof(TestAspectC));
+
+            _registry.Unregister(entity, TypeKeys(typeof(TestAspectA)));
+
+            Assert.IsEmpty(_registry.GetAllWith(typeof(TestAspectA)));
+            CollectionAssert.AreEquivalent(new[] { entity }, _registry.GetAllWith(typeof(TestAspectB)));
+            CollectionAssert.AreEquivalent(new[] { bystander }, _registry.GetAllWith(typeof(TestAspectC)));
         }
 
         [Test]
@@ -123,5 +149,6 @@ namespace Rubickanov.ACS.Tests
 
         private class TestAspectA : IEntityAspect { }
         private class TestAspectB : IEntityAspect { }
+        private class TestAspectC : IEntityAspect { }
     }
 }

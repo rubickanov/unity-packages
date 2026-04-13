@@ -4,113 +4,98 @@ namespace Rubickanov.ACS.Runtime
 {
     /// <summary>
     /// Singleton entity context that doubles as the scene-wide entity registry.
-    /// World is an <see cref="EntityContext"/> itself — mark world-scoped aspects with
+    /// World is an <see cref="MonoEntity"/> itself — mark world-scoped aspects with
     /// <c>[Aspect]</c> as usual and access them via <see cref="Require{T}"/>. It also tracks
-    /// every other <see cref="EntityContext"/> so <see cref="Query{T}"/> can locate them by
+    /// every other <see cref="IEntity"/> so <see cref="Query{T}"/> can locate them by
     /// aspect type.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <see cref="DefaultExecutionOrder"/> is set so <c>World.Awake</c> runs before the typical
-    /// <see cref="EntityComponent.Awake"/> which triggers <see cref="EntityContext.Require{T}"/>
-    /// via aspect injection. A post-assignment scan in <see cref="Awake"/> also picks up any
-    /// entity that already created aspects before the World existed (additive scene loads, etc).
+    /// <see cref="EntityComponent.Awake"/> which triggers <see cref="MonoEntity.Require{T}"/>
+    /// via aspect injection. Registration is handled inline by <see cref="MonoEntity.Require{T}"/>,
+    /// which calls <see cref="Register"/> whenever a <see cref="World"/> instance is alive — so
+    /// <c>World</c> must exist before any entity requests its first aspect.
+    /// </para>
+    /// <para>
+    /// Composition note: the actual registry + query factories live on a pure-C#
+    /// <see cref="WorldCore"/>. The static <see cref="Query{T}"/> API here is a thin
+    /// proxy so headless simulations can use the same query logic without Unity.
+    /// </para>
     /// </remarks>
     [DefaultExecutionOrder(-1000)]
-    public class World : SingletonEntityContext<World>
+    public class World : SingletonMonoEntity<World>
     {
-        private readonly EntityRegistry _registry = new();
+        private readonly WorldCore _core = new();
 
         /// <summary>Exposed for tests and diagnostics. Do not mutate directly.</summary>
-        internal EntityRegistry Registry => _registry;
+        internal WorldCore Core => _core;
 
-        protected override void Awake()
-        {
-            base.Awake();
-            if (Instance != this)
-                return;
-
-            // Safety net: pick up entities that created aspects before this World existed.
-#if UNITY_2023_1_OR_NEWER
-            var contexts = Object.FindObjectsByType<EntityContext>(FindObjectsSortMode.None);
-#else
-            var contexts = Object.FindObjectsOfType<EntityContext>();
-#endif
-            for (int i = 0; i < contexts.Length; i++)
-            {
-                var context = contexts[i];
-                if (context == this)
-                    continue;
-                foreach (var aspect in context.GetAllAspects())
-                    _registry.Register(context, aspect.GetType());
-            }
-        }
+        /// <summary>Shorthand for the core's registry — preserved for pre-existing test call sites.</summary>
+        internal EntityRegistry Registry => _core.Registry;
 
         protected override void OnDestroy()
         {
-            _registry.Clear();
+            _core.Clear();
             base.OnDestroy();
         }
 
-        internal void Register(EntityContext entity, System.Type aspectType)
-            => _registry.Register(entity, aspectType);
+        internal void Register(IEntity entity, System.Type aspectType)
+            => _core.Register(entity, aspectType);
 
-        internal void Unregister(EntityContext entity)
-            => _registry.Unregister(entity);
+        internal void Unregister(IEntity entity, System.Collections.Generic.Dictionary<System.Type, object>.KeyCollection aspectTypes)
+            => _core.Unregister(entity, aspectTypes);
 
         /// <summary>
         /// Shorthand for <c>World.Instance.Require&lt;T&gt;()</c> — fetches or creates a world-scoped aspect.
-        /// Throws if no World is alive. Shadows <see cref="EntityContext.Require{T}"/> with a static
+        /// Throws if no World is alive. Shadows <see cref="MonoEntity.Require{T}"/> with a static
         /// overload so <c>World.Require&lt;T&gt;()</c> reads as a global accessor.
         /// </summary>
         public new static T Require<T>() where T : class, IEntityAspect, new()
-        {
-            if (Instance == null)
-                throw new System.InvalidOperationException(
-                    $"{nameof(World)}.{nameof(Require)}<{typeof(T).Name}>() called but no {nameof(World)} instance exists in the scene.");
-            return ((EntityContext)Instance).Require<T>();
-        }
+            => ((MonoEntity)GetInstanceOrThrow(nameof(Require))).Require<T>();
 
         /// <summary>
         /// Enumerates every aspect of type <typeparamref name="T"/> currently present in the scene.
-        /// Returns an empty query if no <see cref="World"/> is alive.
+        /// Throws <see cref="System.InvalidOperationException"/> if no <see cref="World"/> is alive —
+        /// matches <see cref="Require{T}"/> so callers can't silently iterate an empty set when setup is missing.
         /// </summary>
         public static EntityQuery<T> Query<T>() where T : class, IEntityAspect
-            => new(Instance != null ? Instance._registry : null);
+            => GetInstanceOrThrow(nameof(Query))._core.Query<T>();
 
         /// <summary>
         /// Enumerates every entity that carries both <typeparamref name="T1"/> and <typeparamref name="T2"/>.
-        /// Returns an empty query if no <see cref="World"/> is alive.
+        /// Throws <see cref="System.InvalidOperationException"/> if no <see cref="World"/> is alive.
         /// </summary>
         public static EntityQuery<T1, T2> Query<T1, T2>()
             where T1 : class, IEntityAspect
             where T2 : class, IEntityAspect
-            => new(Instance != null ? Instance._registry : null);
+            => GetInstanceOrThrow(nameof(Query))._core.Query<T1, T2>();
 
-        /// <summary>Enumerates every entity that carries all three aspect types.</summary>
+        /// <summary>Enumerates every entity that carries all three aspect types. Throws if no World is alive.</summary>
         public static EntityQuery<T1, T2, T3> Query<T1, T2, T3>()
             where T1 : class, IEntityAspect
             where T2 : class, IEntityAspect
             where T3 : class, IEntityAspect
-            => new(Instance != null ? Instance._registry : null);
+            => GetInstanceOrThrow(nameof(Query))._core.Query<T1, T2, T3>();
 
-        /// <summary>Enumerates every entity that carries all four aspect types.</summary>
+        /// <summary>Enumerates every entity that carries all four aspect types. Throws if no World is alive.</summary>
         public static EntityQuery<T1, T2, T3, T4> Query<T1, T2, T3, T4>()
             where T1 : class, IEntityAspect
             where T2 : class, IEntityAspect
             where T3 : class, IEntityAspect
             where T4 : class, IEntityAspect
-            => new(Instance != null ? Instance._registry : null);
+            => GetInstanceOrThrow(nameof(Query))._core.Query<T1, T2, T3, T4>();
 
-        /// <summary>Enumerates every entity that carries all five aspect types.</summary>
+        /// <summary>Enumerates every entity that carries all five aspect types. Throws if no World is alive.</summary>
         public static EntityQuery<T1, T2, T3, T4, T5> Query<T1, T2, T3, T4, T5>()
             where T1 : class, IEntityAspect
             where T2 : class, IEntityAspect
             where T3 : class, IEntityAspect
             where T4 : class, IEntityAspect
             where T5 : class, IEntityAspect
-            => new(Instance != null ? Instance._registry : null);
+            => GetInstanceOrThrow(nameof(Query))._core.Query<T1, T2, T3, T4, T5>();
 
-        /// <summary>Enumerates every entity that carries all six aspect types.</summary>
+        /// <summary>Enumerates every entity that carries all six aspect types. Throws if no World is alive.</summary>
         public static EntityQuery<T1, T2, T3, T4, T5, T6> Query<T1, T2, T3, T4, T5, T6>()
             where T1 : class, IEntityAspect
             where T2 : class, IEntityAspect
@@ -118,9 +103,9 @@ namespace Rubickanov.ACS.Runtime
             where T4 : class, IEntityAspect
             where T5 : class, IEntityAspect
             where T6 : class, IEntityAspect
-            => new(Instance != null ? Instance._registry : null);
+            => GetInstanceOrThrow(nameof(Query))._core.Query<T1, T2, T3, T4, T5, T6>();
 
-        /// <summary>Enumerates every entity that carries all seven aspect types.</summary>
+        /// <summary>Enumerates every entity that carries all seven aspect types. Throws if no World is alive.</summary>
         public static EntityQuery<T1, T2, T3, T4, T5, T6, T7> Query<T1, T2, T3, T4, T5, T6, T7>()
             where T1 : class, IEntityAspect
             where T2 : class, IEntityAspect
@@ -129,11 +114,12 @@ namespace Rubickanov.ACS.Runtime
             where T5 : class, IEntityAspect
             where T6 : class, IEntityAspect
             where T7 : class, IEntityAspect
-            => new(Instance != null ? Instance._registry : null);
+            => GetInstanceOrThrow(nameof(Query))._core.Query<T1, T2, T3, T4, T5, T6, T7>();
 
         /// <summary>
         /// Enumerates every entity that carries all eight aspect types. Eight is the maximum
         /// overload — if you need more, define a composite aspect that aggregates the data.
+        /// Throws if no World is alive.
         /// </summary>
         public static EntityQuery<T1, T2, T3, T4, T5, T6, T7, T8> Query<T1, T2, T3, T4, T5, T6, T7, T8>()
             where T1 : class, IEntityAspect
@@ -144,6 +130,15 @@ namespace Rubickanov.ACS.Runtime
             where T6 : class, IEntityAspect
             where T7 : class, IEntityAspect
             where T8 : class, IEntityAspect
-            => new(Instance != null ? Instance._registry : null);
+            => GetInstanceOrThrow(nameof(Query))._core.Query<T1, T2, T3, T4, T5, T6, T7, T8>();
+
+        private static World GetInstanceOrThrow(string member)
+        {
+            var instance = Instance;
+            if (instance == null)
+                throw new System.InvalidOperationException(
+                    $"{nameof(World)}.{member}() called but no {nameof(World)} instance exists in the scene.");
+            return instance;
+        }
     }
 }

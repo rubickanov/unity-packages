@@ -1,3 +1,4 @@
+using System;
 using R3;
 using UnityEngine;
 
@@ -10,10 +11,21 @@ namespace Rubickanov.ACS.Runtime
     /// </summary>
     public abstract class EntityComponent : MonoBehaviour, IEntityComponent
     {
-        private EntityContext? _context;
+        private MonoEntity? _context;
         private DisposableBag _disposables;
 
-        protected EntityContext Context => _context ??= GetComponentInParent<EntityContext>();
+        protected MonoEntity Context
+        {
+            get
+            {
+                if (_context != null) return _context;
+                _context = GetComponentInParent<MonoEntity>();
+                if (_context == null)
+                    throw new InvalidOperationException(
+                        $"EntityComponent '{GetType().Name}' on GameObject '{gameObject.name}' requires a MonoEntity in its parent hierarchy.");
+                return _context;
+            }
+        }
 
         protected virtual void Awake()
         {

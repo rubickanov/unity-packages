@@ -3,7 +3,7 @@ ACS Netcode Experiment — Setup
 
 1. PREFAB: "ExperimentEntity"
    Create a new prefab with these components on the root:
-   - EntityContext
+   - MonoEntity
    - NetworkObject
    - AspectReplicator
    - ServerLogic
@@ -14,16 +14,16 @@ ACS Netcode Experiment — Setup
 
    The provider/mover split means one prefab covers every mode. Edit
    `ExperimentAspect.Position` attributes to flip between:
-     - `Authority = Server` + `[Predicted]`
+     - `[Replicated(Authority = Server, Predicted = true)]`
          → prediction + reconcile (clean local view)
-     - `Authority = Server` (no `[Predicted]`)
+     - `[Replicated(Authority = Server)]`
          → owner sends input, server Simulates, broadcast; owner's local
            Simulate still runs and snaps back each broadcast
-     - `Authority = Owner` (± `[Predicted]`)
+     - `[Replicated(Authority = Owner)]`
          → owner's Simulate is the authoritative write, relayed to peers;
-           `[Predicted]` is a no-op here
-   The pipeline bootstraps whenever `ISimulate<T>` is present — `[Predicted]`
-   only controls whether snapshot capture + reconcile run on top of it.
+           `Predicted = true` is a no-op here (scanner strips it with a warning)
+   The pipeline bootstraps whenever `ISimulate<T>` is present — the Predicted
+   flag only controls whether snapshot capture + reconcile run on top of it.
 
 2. SCENE: "ExperimentScene"
    - NetworkManager (UnityTransport, tick rate ~30)

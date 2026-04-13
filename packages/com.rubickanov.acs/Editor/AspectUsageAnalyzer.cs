@@ -2,8 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using Rubickanov.ACS.Runtime;
 using UnityEditor;
+
+[assembly: InternalsVisibleTo("ACS.Tests")]
 
 namespace Rubickanov.ACS.Editor
 {
@@ -76,8 +81,7 @@ namespace Rubickanov.ACS.Editor
 
                     foreach (string field in aspectFields)
                     {
-                        bool isWrite = IsFieldWritten(source, fieldVar, field);
-                        bool isRead = IsFieldRead(source, fieldVar, field);
+                        AnalyzeFieldUsage(source, fieldVar, field, out bool isRead, out bool isWrite);
                         if (!isRead && !isWrite) continue;
 
                         if (!map[aspectName].ContainsKey(field))
@@ -115,27 +119,17 @@ namespace Rubickanov.ACS.Editor
             if (_aspectFieldsLoaded) return;
             _aspectFieldsLoaded = true;
 
-            string[] guids = AssetDatabase.FindAssets("t:MonoScript");
-            foreach (string guid in guids)
+            var aspectTypes = TypeCache.GetTypesDerivedFrom<IEntityAspect>();
+            foreach (var type in aspectTypes)
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (!path.Contains("Aspect")) continue;
-
-                string source = File.ReadAllText(path);
-                if (!source.Contains("IEntityAspect")) continue;
-
-                var classMatch = Regex.Match(source, @"class\s+(\w+Aspect)\s*:");
-                if (!classMatch.Success) continue;
-
-                string aspectName = classMatch.Groups[1].Value;
-                var fieldMatches = Regex.Matches(source,
-                    @"public\s+(?:readonly\s+)?(?:ReactiveProperty<[^>]+>|Subject(?:<[^>]+>)?|\w+(?:<[^>]+>)?)\s+(\w+)\s*[;=]");
+                if (type.IsAbstract || type.IsInterface || type.IsGenericTypeDefinition)
+                    continue;
 
                 var fields = new List<string>();
-                foreach (Match m in fieldMatches)
-                    fields.Add(m.Groups[1].Value);
+                foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
+                    fields.Add(field.Name);
 
-                _aspectFieldsCache[aspectName] = fields;
+                _aspectFieldsCache[type.Name] = fields;
             }
         }
 
@@ -151,11 +145,13 @@ namespace Rubickanov.ACS.Editor
             return null;
         }
 
-        private static List<string> ParseRequiredAspects(string source)
+        internal static List<string> ParseRequiredAspects(string source)
         {
             var result = new List<string>();
 
-            var requireMatches = Regex.Matches(source, @"Context\.Require<(\w+)>\(\)");
+            // Any receiver chain: `Context.Require<X>()`, `World.Require<X>()`, `entity.Require<X>()`,
+            // `_ctx.foo.Require<X>()`. Static-import `Require<X>()` is out of scope.
+            var requireMatches = Regex.Matches(source, @"\w+(?:\.\w+)*\.Require<(\w+)>\(\)");
             foreach (Match m in requireMatches)
                 result.Add(m.Groups[1].Value);
 
@@ -167,9 +163,10 @@ namespace Rubickanov.ACS.Editor
             return result.Distinct().ToList();
         }
 
-        private static string? FindFieldVariable(string source, string aspectName)
+        internal static string? FindFieldVariable(string source, string aspectName)
         {
-            var requireMatch = Regex.Match(source, $@"(\w+)\s*=\s*Context\.Require<{Regex.Escape(aspectName)}>");
+            var requireMatch = Regex.Match(source,
+                $@"(\w+)\s*=\s*\w+(?:\.\w+)*\.Require<{Regex.Escape(aspectName)}>");
             if (requireMatch.Success) return requireMatch.Groups[1].Value;
 
             var attrMatch = Regex.Match(source,
@@ -177,20 +174,73 @@ namespace Rubickanov.ACS.Editor
             return attrMatch.Success ? attrMatch.Groups[1].Value : null;
         }
 
-        private static bool IsFieldWritten(string source, string fieldVar, string fieldName)
+        // Scans `source` for uses of `fieldVar.fieldName` and decides read/write in one pass.
+        // Replaces the prior regex-per-field approach that thrashed the static Regex cache.
+        internal static void AnalyzeFieldUsage(
+            string source, string fieldVar, string fieldName,
+            out bool isRead, out bool isWrite)
         {
-            string escaped = Regex.Escape(fieldVar) + @"\." + Regex.Escape(fieldName);
-            return Regex.IsMatch(source, escaped + @"\.Value\s*[\+\-\*\/]?=")
-                   || Regex.IsMatch(source, escaped + @"\.OnNext\(")
-                   || Regex.IsMatch(source, escaped + @"\b\s*[\+\-\*\/]?=[^=]");
+            isRead = false;
+            isWrite = false;
+
+            string needle = fieldVar + "." + fieldName;
+            int i = 0;
+            while ((i = source.IndexOf(needle, i, StringComparison.Ordinal)) >= 0)
+            {
+                int end = i + needle.Length;
+
+                // leading word boundary — `fieldVar` must not be a suffix of a longer identifier
+                if (i > 0 && IsWordChar(source[i - 1])) { i = end; continue; }
+
+                if (StartsWith(source, end, ".Value"))
+                {
+                    int afterValue = end + ".Value".Length;
+                    if (afterValue < source.Length && IsWordChar(source[afterValue]))
+                        isRead = true; // e.g. `.ValueType` — generic member access
+                    else if (IsAssignmentAt(source, afterValue))
+                        isWrite = true;
+                    else
+                        isRead = true;
+                }
+                else if (StartsWith(source, end, ".OnNext("))
+                    isWrite = true;
+                else if (StartsWith(source, end, ".Subscribe("))
+                    isRead = true;
+                else
+                {
+                    // trailing word boundary — fieldName must not be a prefix of a longer identifier
+                    if (end < source.Length && IsWordChar(source[end])) { i = end; continue; }
+
+                    if (IsAssignmentAt(source, end))
+                        isWrite = true;
+                    else
+                        isRead = true;
+                }
+
+                if (isRead && isWrite) return;
+                i = end;
+            }
         }
 
-        private static bool IsFieldRead(string source, string fieldVar, string fieldName)
+        // True if `source[pos..]` is an assignment: optional whitespace, optional
+        // compound operator (+ - * /), then `=` not followed by another `=` (i.e. not `==`).
+        private static bool IsAssignmentAt(string source, int pos)
         {
-            string escaped = Regex.Escape(fieldVar) + @"\." + Regex.Escape(fieldName);
-            return Regex.IsMatch(source, escaped + @"\.Subscribe\(")
-                   || Regex.IsMatch(source, escaped + @"\.Value(?!\s*=)")
-                   || Regex.IsMatch(source, escaped + @"\b(?!\.Value)(?!\.OnNext)(?!\.Subscribe)(?!\s*=[^=])");
+            int p = pos;
+            while (p < source.Length && (source[p] == ' ' || source[p] == '\t')) p++;
+            if (p < source.Length && (source[p] == '+' || source[p] == '-'
+                                      || source[p] == '*' || source[p] == '/'))
+                p++;
+            if (p >= source.Length || source[p] != '=') return false;
+            return p + 1 >= source.Length || source[p + 1] != '=';
         }
+
+        private static bool StartsWith(string source, int pos, string s)
+            => pos + s.Length <= source.Length
+               && string.CompareOrdinal(source, pos, s, 0, s.Length) == 0;
+
+        private static bool IsWordChar(char c)
+            => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+               || (c >= '0' && c <= '9') || c == '_';
     }
 }

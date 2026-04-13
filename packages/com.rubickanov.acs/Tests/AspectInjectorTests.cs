@@ -8,13 +8,13 @@ namespace Rubickanov.ACS.Tests
     public class AspectInjectorTests
     {
         private GameObject _gameObject;
-        private EntityContext _context;
+        private MonoEntity _context;
 
         [SetUp]
         public void SetUp()
         {
             _gameObject = new GameObject(nameof(AspectInjectorTests));
-            _context = _gameObject.AddComponent<EntityContext>();
+            _context = _gameObject.AddComponent<MonoEntity>();
         }
 
         [TearDown]
@@ -106,6 +106,38 @@ namespace Rubickanov.ACS.Tests
             // Assert
             Assert.AreSame(expectedBase, host.Inherited);
             Assert.AreSame(expectedOwn, host.Own);
+        }
+
+        [Test]
+        public void Inject_IntoPureEntity_InjectsInstancesFromEntity()
+        {
+            // Proof that the reflection path now lives on IEntity, not MonoEntity:
+            // the same injector must work against a pure POCO Entity with no
+            // GameObject in sight. If this regresses, pure-core simulations lose
+            // the ability to wire up aspect consumers.
+            var entity = new Entity();
+            var expected = entity.Require<TestAspectA>();
+            var host = new SingleFieldHost();
+
+            AspectInjector.Inject(entity, host);
+
+            Assert.AreSame(expected, host.A);
+        }
+
+        [Test]
+        public void Inject_ReadonlyField_AssignsThroughReflectionSet()
+        {
+            // Regression guard: AspectInjector must keep using FieldInfo.SetValue for the
+            // write, because every [Aspect] field is declared `readonly` and Expression.Assign
+            // on a Field node throws ArgumentException for initonly fields at Compile() time.
+            // If this test starts failing with an ArgumentException from Expression.Lambda.Compile,
+            // the injector has been "optimized" into a path that can't set readonly fields.
+            var expected = _context.Require<TestAspectA>();
+            var host = new SingleFieldHost();
+
+            AspectInjector.Inject(_context, host);
+
+            Assert.AreSame(expected, host.A);
         }
 
         [Test]

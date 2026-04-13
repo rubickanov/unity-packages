@@ -90,6 +90,53 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             Assert.AreEqual(InterpolationMode.Linear, fields[0].Interpolation);
         }
 
+        // ---- Predicted flag propagation ----------------------------------------
+
+        [Test]
+        public void Scan_PredictedFlag_CarriedOnFieldInfo()
+        {
+            // Default Predicted=false; explicit Predicted=true on a server-auth field
+            // survives the scan. Mirrors the previous [Predicted] marker behavior now
+            // folded into the unified [Replicated] attribute.
+            var fields = ReplicationScanner.Scan(new PredictedFlagAspect());
+
+            // Alphabetical: NonPredicted, Predicted.
+            Assert.AreEqual(2, fields.Length);
+            Assert.AreEqual("NonPredicted", fields[0].Field.Name);
+            Assert.IsFalse(fields[0].Predicted);
+            Assert.AreEqual("Predicted", fields[1].Field.Name);
+            Assert.IsTrue(fields[1].Predicted);
+        }
+
+        [Test]
+        public void Scan_PredictedOnOwnerAuthField_LogsWarningAndStripsPredictedFlag()
+        {
+            // Owner is already the source of truth — reconcile would run replay on
+            // self-relayed batches and accelerate the owner by one Simulate pass per
+            // tick. The scanner clears Predicted on the field (it still replicates)
+            // with a warning so downstream PredictionScanner never sees it.
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new OwnerAuthPredictedAspect());
+            }
+            finally
+            {
+                Debug.unityLogger.logHandler = original;
+            }
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual("Position", fields[0].Field.Name);
+            Assert.IsFalse(fields[0].Predicted,
+                "Predicted flag must be cleared on an owner-authoritative field");
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Warning && e.message.Contains("Authority is Owner")),
+                "Scanner must emit a LogWarning when Predicted = true is combined with Authority = Owner");
+        }
+
         // ---- Negative: unsupported value types ---------------------------------
 
         [Test]
@@ -117,6 +164,31 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             Assert.IsTrue(
                 capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("not unmanaged")),
                 "Scanner must emit a LogError explaining that the ReactiveProperty<string> type is not unmanaged");
+        }
+
+        [Test]
+        public void Scan_ReplicatedOnNonReactiveProperty_LogsErrorAndOmitsField()
+        {
+            // [Replicated] on a plain int is a programming error we want surfaced —
+            // previously caught by PredictionScanner for [Predicted] markers, now
+            // caught here since the unified attribute is the only validation site.
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new InvalidPlainFieldAspect());
+            }
+            finally
+            {
+                Debug.unityLogger.logHandler = original;
+            }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("ReactiveProperty")),
+                "Scanner must emit a LogError when [Replicated] is attached to a non-ReactiveProperty field");
         }
 
         [Test]
@@ -181,35 +253,57 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
         private class OrderingAspect
         {
-            [ReplicatedState] public ReactiveProperty<int> Zebra = new ReactiveProperty<int>(0);
-            [ReplicatedState] public ReactiveProperty<int> Alpha = new ReactiveProperty<int>(0);
+            [Replicated] public ReactiveProperty<int> Zebra = new ReactiveProperty<int>(0);
+            [Replicated] public ReactiveProperty<int> Alpha = new ReactiveProperty<int>(0);
         }
 
         private class CachingAspect
         {
-            [ReplicatedState] public ReactiveProperty<int> Value = new ReactiveProperty<int>(0);
+            [Replicated] public ReactiveProperty<int> Value = new ReactiveProperty<int>(0);
         }
 
         private class BaseAspect
         {
-            [ReplicatedState] public ReactiveProperty<int> BaseValue = new ReactiveProperty<int>(0);
+            [Replicated] public ReactiveProperty<int> BaseValue = new ReactiveProperty<int>(0);
         }
 
         private class DerivedAspect : BaseAspect
         {
-            [ReplicatedState] public ReactiveProperty<float> DerivedValue = new ReactiveProperty<float>(0f);
+            [Replicated] public ReactiveProperty<float> DerivedValue = new ReactiveProperty<float>(0f);
         }
 
         private class AttributedAspect
         {
-            [ReplicatedState(Authority = AuthorityMode.Owner, Interpolation = InterpolationMode.Linear)]
+            [Replicated(Authority = AuthorityMode.Owner, Interpolation = InterpolationMode.Linear)]
+            public ReactiveProperty<Vector3> Position = new ReactiveProperty<Vector3>(Vector3.zero);
+        }
+
+        private class PredictedFlagAspect
+        {
+            [Replicated(Predicted = true)]
+            public ReactiveProperty<Vector3> Predicted = new ReactiveProperty<Vector3>(Vector3.zero);
+
+            [Replicated]
+            public ReactiveProperty<Vector3> NonPredicted = new ReactiveProperty<Vector3>(Vector3.zero);
+        }
+
+        private class OwnerAuthPredictedAspect
+        {
+            [Replicated(Authority = AuthorityMode.Owner, Predicted = true)]
             public ReactiveProperty<Vector3> Position = new ReactiveProperty<Vector3>(Vector3.zero);
         }
 
         private class InvalidStringStateAspect
         {
             // string is a managed reference type — must be rejected.
-            [ReplicatedState] public ReactiveProperty<string> Bad = new ReactiveProperty<string>(string.Empty);
+            [Replicated] public ReactiveProperty<string> Bad = new ReactiveProperty<string>(string.Empty);
+        }
+
+        private class InvalidPlainFieldAspect
+        {
+#pragma warning disable CS0649
+            [Replicated] public int Bad;
+#pragma warning restore CS0649
         }
 
         private class InvalidListEventAspect
@@ -226,9 +320,9 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
         private class StabilityAspect
         {
-            [ReplicatedState] public ReactiveProperty<int> Cherry = new ReactiveProperty<int>(0);
-            [ReplicatedState] public ReactiveProperty<int> Apple = new ReactiveProperty<int>(0);
-            [ReplicatedState] public ReactiveProperty<int> Banana = new ReactiveProperty<int>(0);
+            [Replicated] public ReactiveProperty<int> Cherry = new ReactiveProperty<int>(0);
+            [Replicated] public ReactiveProperty<int> Apple = new ReactiveProperty<int>(0);
+            [Replicated] public ReactiveProperty<int> Banana = new ReactiveProperty<int>(0);
         }
 
         // ---- Log capture --------------------------------------------------------

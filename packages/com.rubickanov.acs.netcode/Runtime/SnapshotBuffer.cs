@@ -3,7 +3,7 @@ using UnityEngine.Scripting;
 namespace Rubickanov.ACS.Runtime.Netcode
 {
     /// <summary>
-    /// Per-entity ring buffer of <c>[Predicted]</c> field snapshots keyed by tick.
+    /// Per-entity ring buffer of <c>[Replicated(Predicted = true)]</c> field snapshots keyed by tick.
     /// Feeds step-7 reconciliation on the owner client: after local <c>Simulate</c>
     /// runs at tick <c>T</c>, the owner captures the resulting predicted-field
     /// values into slot <c>T</c>; when authoritative state for <c>T</c> arrives

@@ -18,18 +18,20 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         // Each T used in the fixture needs its own override. Tests route wall-clock reads
         // through _fakeNow so sample times and TickRender computation are deterministic.
         //
-        // Timing model: sample logic is driven through ApplyFromNetwork / PushSnapshot in
+        // Timing model: sample logic is driven through ApplyFromNetwork / PushSample in
         // most tests, which routes directly into RecordSample(value) using _fakeNow as the
         // sample timestamp. SubscribeAsAuthority/SubscribeForLocalSampling pathways are
         // tested in dedicated cases because R3's Subscribe replays the current value
         // synchronously (bootstrap sample) and `Value = x; Value = x` is suppressed, both
         // of which would complicate generic two-sample tests.
         //
-        // Sample-gap ranges that matter:
+        // Sample-gap ranges that matter (see AuthorityRenderBinding constants):
         //   < 10ms   → coalesce into _curr (intra-frame reconcile writes).
         //   10..66ms → slide pair (normal tick-to-tick motion @ 30–100 Hz).
         //   > 66ms   → stale bootstrap (idle gap; drop _prev, hold _curr).
         // Tests that want slide behavior use a 30ms step (mid of range).
+
+        private const double TickStep = 0.030;
 
         private double _fakeNow;
         private readonly List<Action> _clockRestorers = new();
@@ -129,19 +131,19 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             Assert.AreEqual(new Vector3(7f, 8f, 9f), binding.InterpolatedValue);
         }
 
-        // ---- Lerp between samples ----------------------------------------------
+        // ---- Lerp between samples (slide window: 30ms gap) --------------------
 
         [Test]
         public void TwoSamples_NowAtCurrTime_AlphaZero_RendersPrev()
         {
             var (binding, _) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 0f);
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 10f);
 
-            // now == _currTime → (2-2)/1 = 0 → lerp(prev, curr, 0) = prev.
+            // now == _currTime → (1.030 - 1.030) / 0.030 = 0 → lerp(prev, curr, 0) = prev.
             binding.TickRender(0.0);
 
             Assert.AreEqual(0f, binding.InterpolatedValue, 1e-5f);
@@ -152,13 +154,13 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, _) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 0f);
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 10f);
 
-            // span = 1, now = 2.5 → (2.5-2)/1 = 0.5 → lerp(0,10,0.5) = 5.
-            _fakeNow = 2.5;
+            // span = 0.030, now = 1.045 → (1.045 - 1.030) / 0.030 = 0.5 → lerp(0,10,0.5) = 5.
+            _fakeNow = 1.045;
             binding.TickRender(0.0);
 
             Assert.AreEqual(5f, binding.InterpolatedValue, 1e-5f);
@@ -169,9 +171,9 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, _) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 0f);
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 10f);
 
             // No extrapolation: clock stalled far past curr → raw >> 1 → clamp to curr.
@@ -186,14 +188,14 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, _) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 0f);
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 10f);
 
             // now < currTime can only happen if TickRender runs before wall-clock advances past
             // the write — raw < 0 → clamp to 0 → prev.
-            _fakeNow = 1.5;
+            _fakeNow = 1.015;
             binding.TickRender(0.0);
 
             Assert.AreEqual(0f, binding.InterpolatedValue, 1e-5f);
@@ -206,14 +208,14 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, _) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 100f);
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 200f);
-            _fakeNow = 3.0;
-            PushSample(binding, 300f);   // pair is now (_prev=200@t=2, _curr=300@t=3).
+            _fakeNow = 1.060;
+            PushSample(binding, 300f);  // pair is now (_prev=200@1.030, _curr=300@1.060).
 
-            _fakeNow = 3.5;
+            _fakeNow = 1.075;
             binding.TickRender(0.0);
 
             // Midpoint between 200 and 300 = 250. If stale pair (100,200) was used we'd get 150.
@@ -227,12 +229,12 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
             _fakeNow = 1.0;
             PushSample(binding, 5f);
-            PushSample(binding, 7f);   // second write at identical _fakeNow → span collapses to 0.
+            PushSample(binding, 7f);   // second write at identical _fakeNow → coalesce into _curr.
 
             _fakeNow = 1.5;
             binding.TickRender(0.0);
 
-            // span <= 1e-9 → implementation holds _curr instead of dividing by ~zero.
+            // Coalesce kept _hasPrev=false → TickRender holds _curr=7f.
             Assert.AreEqual(7f, binding.InterpolatedValue, 1e-5f);
         }
 
@@ -243,12 +245,12 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, _) = CreateBinding<Vector3>();
 
-            _fakeNow = 0.0;
+            _fakeNow = 0.000;
             PushSample(binding, Vector3.zero);
-            _fakeNow = 1.0;
+            _fakeNow = 0.030;
             PushSample(binding, new Vector3(10f, 20f, 30f));
 
-            _fakeNow = 1.5;
+            _fakeNow = 0.045;
             binding.TickRender(0.0);
 
             Assert.AreEqual(5f, binding.InterpolatedValue.x, 1e-5f);
@@ -261,12 +263,12 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, _) = CreateBinding(Quaternion.identity);
 
-            _fakeNow = 0.0;
+            _fakeNow = 0.000;
             PushSample(binding, Quaternion.identity);
-            _fakeNow = 1.0;
+            _fakeNow = 0.030;
             PushSample(binding, Quaternion.Euler(0f, 90f, 0f));
 
-            _fakeNow = 1.5;
+            _fakeNow = 0.045;
             binding.TickRender(0.0);
 
             var q = binding.InterpolatedValue;
@@ -296,19 +298,19 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         [Test]
         public void SubscribeAsAuthority_WriteAfterReplay_RecordsSecondSample_AndMarksDirty()
         {
-            _fakeNow = 0.0;
+            _fakeNow = 0.000;
             var (binding, reactive) = CreateBinding<float>(initial: 0f);
             var bag = new DisposableBag();
             binding.SubscribeAsAuthority(ref bag);
             binding.ClearDirty();
 
-            _fakeNow = 1.0;
-            reactive.Value = 10f;   // replay gave sample(0,0); this is sample(10,1).
+            _fakeNow = 0.030;
+            reactive.Value = 10f;   // replay gave sample(0, 0.000); this is sample(10, 0.030).
 
-            _fakeNow = 1.5;
+            _fakeNow = 0.045;
             binding.TickRender(0.0);
 
-            // Midpoint between sample(0,0) and sample(10,1) at now=1.5 → span=1, raw=(1.5-1)/1=0.5.
+            // Midpoint between sample(0, 0.000) and sample(10, 0.030) at now=0.045.
             Assert.AreEqual(5f, binding.InterpolatedValue, 1e-5f);
             Assert.IsTrue(binding.IsDirty, "Authority write must mark the binding dirty for relay.");
         }
@@ -316,18 +318,18 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         [Test]
         public void SubscribeForLocalSampling_RecordsSample_WithoutMarkingDirty()
         {
-            _fakeNow = 0.0;
+            _fakeNow = 0.000;
             var (binding, reactive) = CreateBinding<float>(initial: 0f);
 
             var bag = new DisposableBag();
             binding.SubscribeForLocalSampling(ref bag);
-            // Replay at _fakeNow=0 gave sample(0,0); subscribing must NOT mark dirty.
+            // Replay at _fakeNow=0 gave sample(0, 0.000); subscribing must NOT mark dirty.
             Assert.IsFalse(binding.IsDirty, "Local-sampling subscribe must not mark dirty on replay.");
 
-            _fakeNow = 1.0;
+            _fakeNow = 0.030;
             reactive.Value = 10f;
 
-            _fakeNow = 1.5;
+            _fakeNow = 0.045;
             binding.TickRender(0.0);
 
             // Smoothing still works...
@@ -374,12 +376,12 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, reactive) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 0f);
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 10f);
 
-            _fakeNow = 2.5;
+            _fakeNow = 1.045;
             binding.TickRender(0.0);
 
             Assert.AreEqual(5f, reactive.Smooth(), 1e-5f);
@@ -392,11 +394,11 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, reactive) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 0f);
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 10f);
-            _fakeNow = 2.5;
+            _fakeNow = 1.045;
             binding.TickRender(0.0);
             Assert.AreEqual(5f, reactive.Smooth(), 1e-5f);
 
@@ -407,7 +409,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             Assert.AreEqual(10f, reactive.Smooth(), 1e-5f);
         }
 
-        // ---- ApplyFromNetwork writes raw value ---------------------------------
+        // ---- ApplyFromNetwork paths --------------------------------------------
 
         [Test]
         public void ApplyFromNetwork_WritesRawValueToReactive_ForOwnershipTransferCase()
@@ -417,15 +419,15 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             // the only sampling path — it must both write .Value and feed the render pair.
             var (binding, reactive) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 100f);
             Assert.AreEqual(100f, reactive.Value, 1e-5f);
 
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 200f);
             Assert.AreEqual(200f, reactive.Value, 1e-5f);
 
-            _fakeNow = 2.5;
+            _fakeNow = 1.045;
             binding.TickRender(0.0);
             Assert.AreEqual(150f, binding.InterpolatedValue, 1e-5f);
         }
@@ -446,7 +448,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
             // Simulate reconcile: server snapshot arrives carrying a stale value (say, 999),
             // which would be visibly wrong if it became a render sample.
-            _fakeNow = 1.0;
+            _fakeNow = 0.030;
             PushSample(binding, 999f);
 
             // Raw .Value IS updated (reconcile needs this as baseline for replay) ...
@@ -456,41 +458,78 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             Assert.AreEqual(0f, binding.InterpolatedValue, 1e-5f);
         }
 
+        // ---- Coalesce window (reconcile replay) --------------------------------
+
         [Test]
         public void RecordSample_WritesWithinCoalesceWindow_CollapseIntoSingleCurr_PrevUnchanged()
         {
             // Reconcile replay writes many times in a single frame (<<10ms apart). With
             // coalescing, these collapse into one _curr at the final value, keeping _prev
-            // pointing at the previous sample — so the next render frame lerps between the
-            // old _prev and the reconciled-current, NOT between two same-instant samples
-            // (span=0 → clamp to _curr = no smoothing between tick events).
+            // pointing at the previous tick's sample — so the next render frame lerps between
+            // the old _prev and the reconciled-current, NOT between two same-instant samples
+            // (span→0 → clamp to _curr = no smoothing between tick events).
             var (binding, _) = CreateBinding<float>();
 
-            _fakeNow = 0.0;
-            PushSample(binding, 0f);       // first sample: _curr=0@0.0
+            _fakeNow = 0.000;
+            PushSample(binding, 0f);        // first sample: _curr=0@0.000
+            _fakeNow = 0.030;
+            PushSample(binding, 10f);       // slide: _prev=0@0.000, _curr=10@0.030
 
-            // Burst of replay writes, all within the 10ms coalesce window. Each should
-            // overwrite _curr without touching _prev/_prevTime/_hasPrev.
-            _fakeNow = 1.000;
-            PushSample(binding, 10f);      // slide: _prev=0@0.0, _curr=10@1.000
-            _fakeNow = 1.001;
-            PushSample(binding, 100f);     // coalesce: _curr=100@1.001
-            _fakeNow = 1.003;
-            PushSample(binding, 200f);     // coalesce: _curr=200@1.003
-            _fakeNow = 1.005;
-            PushSample(binding, 300f);     // coalesce: _curr=300@1.005
+            // Burst of replay writes within ~1ms of each other (coalesce window = 10ms).
+            _fakeNow = 0.031;
+            PushSample(binding, 100f);
+            _fakeNow = 0.033;
+            PushSample(binding, 200f);
+            _fakeNow = 0.035;
+            PushSample(binding, 300f);
 
-            // After the burst: _prev=0@0.0, _curr=300@1.005, span ≈ 1.005s.
-            // At midpoint of span → alpha ≈ 0.5 → value around 150.
-            _fakeNow = 1.005 + 0.5 * 1.005; // = 1.5075
+            // _prev must still point at the 0.000 sample (0f), not at any replay intermediate.
+            // _curr is the final replay value (300f), span = 0.035s (0.000 → 0.035).
+            // TickRender alpha formula: (now - currTime) / span → alpha=0.5 at now=currTime+span/2.
+            _fakeNow = 0.0525; // 0.035 + 0.035/2 → alpha = 0.5 → lerp(0, 300, 0.5) = 150.
             binding.TickRender(0.0);
 
-            // Without coalescing, _prev would have been updated to 200@1.003 and span would
-            // collapse to ~0.002s → TickRender would clamp to _curr (300). With coalescing,
-            // rendered value is strictly between _prev (0) and _curr (300).
+            // Without coalescing, _prev would be 200@0.033 and span would collapse to ~2ms,
+            // clamping render to 300. With coalescing, value is between 0 and 300 at the midpoint.
             Assert.Greater(binding.InterpolatedValue, 100f,
                 "Coalesce must preserve the old _prev, giving non-trivial alpha at midpoint.");
             Assert.Less(binding.InterpolatedValue, 200f);
+        }
+
+        // ---- Stale bootstrap (idle gap) ----------------------------------------
+
+        [Test]
+        public void RecordSample_GapLongerThanStaleThreshold_BootstrapsAsSingleSample_DropsPrev()
+        {
+            // R3 ReactiveProperty suppresses identical writes — idle ticks produce no samples.
+            // When motion resumes after a long idle, the stale _prev from before the idle
+            // must NOT drive the render lerp: using it would make render crawl from old_pos
+            // to new_pos over the huge wall-clock span (visible lag), then snap on the next
+            // tick when slide re-establishes a short span. Bootstrap-as-single-sample avoids it.
+            var (binding, _) = CreateBinding<float>();
+
+            _fakeNow = 0.000;
+            PushSample(binding, 0f);
+            _fakeNow = 0.030;
+            PushSample(binding, 10f);    // slide: _prev=0@0.000, _curr=10@0.030
+
+            // 500ms idle, then motion resumes.
+            _fakeNow = 0.530;
+            PushSample(binding, 100f);   // gap 500ms > 66ms → stale bootstrap
+
+            // Immediately after resume write: render holds _curr — no lagging _prev.
+            binding.TickRender(0.0);
+            Assert.AreEqual(100f, binding.InterpolatedValue, 1e-5f,
+                "Stale bootstrap must drop _prev; render holds _curr until next tick.");
+
+            // Next tick (30ms later): normal slide re-establishes the pair.
+            _fakeNow = 0.560;
+            PushSample(binding, 200f);
+            _fakeNow = 0.575;            // currTime + span/2 = 0.560 + 0.015 → alpha = 0.5
+            binding.TickRender(0.0);
+
+            Assert.AreEqual(150f, binding.InterpolatedValue, 1e-5f,
+                "After bootstrap, the next slide pairs fresh _prev/_curr for smooth lerp.");
         }
 
         // ---- Reset -------------------------------------------------------------
@@ -500,11 +539,11 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             var (binding, reactive) = CreateBinding<float>();
 
-            _fakeNow = 1.0;
+            _fakeNow = 1.000;
             PushSample(binding, 5f);
-            _fakeNow = 2.0;
+            _fakeNow = 1.030;
             PushSample(binding, 15f);
-            _fakeNow = 2.5;
+            _fakeNow = 1.045;
             binding.TickRender(0.0);
             Assert.AreEqual(10f, binding.InterpolatedValue, 1e-5f);
 

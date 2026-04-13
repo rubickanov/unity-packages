@@ -12,7 +12,7 @@ namespace Experiments
     public class WorldStatsAspect : IEntityAspect
     {
         public readonly ReactiveProperty<float> ElapsedSeconds = new(0f);
-        [ReplicatedState(Authority = AuthorityMode.Server)]
+        [Replicated(Authority = AuthorityMode.Server)]
         public readonly ReactiveProperty<int> TotalDamageEvents = new(0);
         public readonly ReactiveProperty<int> EntitiesAlive = new(0);
         public readonly ReactiveProperty<float> TotalHealth = new(0f);

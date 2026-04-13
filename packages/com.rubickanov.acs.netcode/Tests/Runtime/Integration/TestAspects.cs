@@ -16,10 +16,10 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// </summary>
     public sealed class StateTestAspect : IEntityAspect
     {
-        [ReplicatedState]
+        [Replicated]
         public ReactiveProperty<int> ServerValue = new(0);
 
-        [ReplicatedState(Authority = AuthorityMode.Owner)]
+        [Replicated(Authority = AuthorityMode.Owner)]
         public ReactiveProperty<float> OwnerValue = new(0f);
     }
 
@@ -38,7 +38,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
     // ---- Aspect registrars ---------------------------------------------------
     //
-    // EntityContext creates aspects lazily on Require<T>(). AspectReplicator's
+    // MonoEntity creates aspects lazily on Require<T>(). AspectReplicator's
     // OnNetworkSpawn iterates context.GetAllAspects() — so unless something has
     // already touched the aspect via Require<T>() before then, the replicator
     // sees an empty bag and binds zero fields. The registrars below run in
@@ -55,7 +55,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
         private void Awake()
         {
-            var context = GetComponentInParent<EntityContext>();
+            var context = GetComponentInParent<MonoEntity>();
             Aspect = context.Require<StateTestAspect>();
         }
     }
@@ -70,7 +70,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
         private void Awake()
         {
-            var context = GetComponentInParent<EntityContext>();
+            var context = GetComponentInParent<MonoEntity>();
             Aspect = context.Require<EventTestAspect>();
         }
     }
@@ -93,7 +93,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
         // Skip AspectInjector — these markers do not consume aspects, and the
         // base Awake would otherwise force the test prefab to also carry an
-        // EntityContext just for injection bookkeeping.
+        // MonoEntity just for injection bookkeeping.
         protected override void Awake() { }
 
         protected override void OnSubscribe(ref DisposableBag disposables)
