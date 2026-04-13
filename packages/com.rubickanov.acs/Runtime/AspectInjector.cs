@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -8,11 +9,16 @@ namespace Rubickanov.ACS.Runtime
     /// <summary>
     /// Injects aspect instances into fields marked with <see cref="AspectAttribute"/>.
     /// Caches reflection data per component type for performance.
+    /// <para/>
+    /// Caches are <see cref="ConcurrentDictionary{TKey,TValue}"/> so future headless
+    /// simulations (Simulate L2 Monte Carlo, per <c>IDEAS.md §14</c>) can run injection
+    /// across threads without racing on cache population. Under Unity's single-threaded
+    /// player loop the overhead is negligible.
     /// </summary>
     public static class AspectInjector
     {
-        private static readonly Dictionary<Type, FieldInfo[]> FieldCache = new();
-        private static readonly Dictionary<Type, Func<IEntity, object>> RequireDelegateCache = new();
+        private static readonly ConcurrentDictionary<Type, FieldInfo[]> FieldCache = new();
+        private static readonly ConcurrentDictionary<Type, Func<IEntity, object>> RequireDelegateCache = new();
 
         // Target IEntity rather than MonoEntity so the injector works for both the
         // Unity-bound context and pure POCO Entity — same reflection path, no
@@ -23,12 +29,7 @@ namespace Rubickanov.ACS.Runtime
         public static void Inject(IEntity context, object component)
         {
             var componentType = component.GetType();
-
-            if (!FieldCache.TryGetValue(componentType, out var fields))
-            {
-                fields = CollectAspectFields(componentType);
-                FieldCache[componentType] = fields;
-            }
+            var fields = FieldCache.GetOrAdd(componentType, CollectAspectFields);
 
             for (int i = 0; i < fields.Length; i++)
             {
@@ -44,17 +45,15 @@ namespace Rubickanov.ACS.Runtime
         }
 
         private static Func<IEntity, object> GetOrBuildRequireDelegate(Type aspectType)
-        {
-            if (RequireDelegateCache.TryGetValue(aspectType, out var del))
-                return del;
+            => RequireDelegateCache.GetOrAdd(aspectType, BuildRequireDelegate);
 
+        private static Func<IEntity, object> BuildRequireDelegate(Type aspectType)
+        {
             var closed = RequireMethod.MakeGenericMethod(aspectType);
             var ctxParam = Expression.Parameter(typeof(IEntity), "ctx");
             // Require<T>() returns T (reference type); Convert to object is a no-op reference cast.
             var body = Expression.Convert(Expression.Call(ctxParam, closed), typeof(object));
-            del = Expression.Lambda<Func<IEntity, object>>(body, ctxParam).Compile();
-            RequireDelegateCache[aspectType] = del;
-            return del;
+            return Expression.Lambda<Func<IEntity, object>>(body, ctxParam).Compile();
         }
 
         private static FieldInfo[] CollectAspectFields(Type type)

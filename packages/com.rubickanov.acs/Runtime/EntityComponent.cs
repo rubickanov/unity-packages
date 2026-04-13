@@ -29,7 +29,7 @@ namespace Rubickanov.ACS.Runtime
 
         protected virtual void Awake()
         {
-            EntityInjector.Inject?.Invoke(gameObject);
+            EntityInjector.Invoke(gameObject);
             AspectInjector.Inject(Context, this);
         }
 

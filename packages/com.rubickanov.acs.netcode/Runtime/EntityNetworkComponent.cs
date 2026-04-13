@@ -21,7 +21,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         protected virtual void Awake()
         {
-            EntityInjector.Inject?.Invoke(gameObject);
+            EntityInjector.Invoke(gameObject);
             AspectInjector.Inject(Context, this);
         }
 

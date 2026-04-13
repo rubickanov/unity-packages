@@ -82,15 +82,23 @@ namespace Rubickanov.ACS.Runtime
         }
 
         /// <inheritdoc/>
-        public IEnumerable<object> GetAllAspects() => _aspects.Values;
+        public IEnumerable<object> GetAllAspects()
+        {
+            // Snapshot so callers can safely mutate _aspects (e.g. Require another
+            // aspect) while iterating. Cost: one object[] per call.
+            var snapshot = new object[_aspects.Count];
+            _aspects.Values.CopyTo(snapshot, 0);
+            return snapshot;
+        }
 
         /// <inheritdoc/>
         public Dictionary<Type, object>.KeyCollection AspectTypes => _aspects.Keys;
 
         /// <summary>
-        /// Releases the entity: fires <see cref="Destroyed"/> (once), clears the
-        /// aspect dictionary, and drops all <see cref="Destroyed"/> subscribers.
-        /// Safe to call twice — second call is a no-op.
+        /// Releases the entity: fires <see cref="Destroyed"/> (once) and clears
+        /// the aspect dictionary. Safe to call twice — second call is a no-op.
+        /// Subscribing to <see cref="Destroyed"/> after Dispose is legal but
+        /// silently inert — the event will never fire again.
         /// </summary>
         public void Dispose()
         {
@@ -101,7 +109,6 @@ namespace Rubickanov.ACS.Runtime
             // the registry while unwinding — matches MonoEntity.OnDestroy ordering.
             Destroyed?.Invoke(this);
             _core?.Unregister(this, _aspects.Keys);
-            Destroyed = null;
             _aspects.Clear();
         }
     }

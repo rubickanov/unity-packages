@@ -147,20 +147,27 @@ namespace Rubickanov.ACS.Editor
 
         internal static List<string> ParseRequiredAspects(string source)
         {
+            var seen = new HashSet<string>();
             var result = new List<string>();
 
             // Any receiver chain: `Context.Require<X>()`, `World.Require<X>()`, `entity.Require<X>()`,
             // `_ctx.foo.Require<X>()`. Static-import `Require<X>()` is out of scope.
             var requireMatches = Regex.Matches(source, @"\w+(?:\.\w+)*\.Require<(\w+)>\(\)");
             foreach (Match m in requireMatches)
-                result.Add(m.Groups[1].Value);
+            {
+                var name = m.Groups[1].Value;
+                if (seen.Add(name)) result.Add(name);
+            }
 
             var attrMatches = Regex.Matches(source,
                 @"\[Aspect\]\s+(?:(?:private|protected|public|internal|readonly|static)\s+)*(\w+)\s+\w+");
             foreach (Match m in attrMatches)
-                result.Add(m.Groups[1].Value);
+            {
+                var name = m.Groups[1].Value;
+                if (seen.Add(name)) result.Add(name);
+            }
 
-            return result.Distinct().ToList();
+            return result;
         }
 
         internal static string? FindFieldVariable(string source, string aspectName)

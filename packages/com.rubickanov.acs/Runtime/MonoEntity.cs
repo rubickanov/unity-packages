@@ -50,8 +50,7 @@ namespace Rubickanov.ACS.Runtime
 
         /// <summary>
         /// Hook for derived classes (e.g. <see cref="SingletonMonoEntity{T}"/>) to run
-        /// initialization before Start. Keep the base class free of Awake behavior so aspects
-        /// remain lazy — callers only pay for what they use.
+        /// initialization before Start. Empty by default — the base class has no Awake behavior of its own.
         /// </summary>
         protected virtual void Awake()
         {
@@ -97,7 +96,14 @@ namespace Rubickanov.ACS.Runtime
         /// <summary>
         /// Returns all aspect instances currently registered on this entity.
         /// </summary>
-        public IEnumerable<object> GetAllAspects() => _aspects.Values;
+        public IEnumerable<object> GetAllAspects()
+        {
+            // Snapshot so callers can safely mutate _aspects (e.g. Require another
+            // aspect) while iterating. Cost: one object[] per call.
+            var snapshot = new object[_aspects.Count];
+            _aspects.Values.CopyTo(snapshot, 0);
+            return snapshot;
+        }
 
         /// <inheritdoc/>
         public Dictionary<Type, object>.KeyCollection AspectTypes => _aspects.Keys;

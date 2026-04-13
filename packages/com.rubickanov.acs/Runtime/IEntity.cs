@@ -20,7 +20,9 @@ namespace Rubickanov.ACS.Runtime
         /// Raised exactly once when the entity is destroyed:
         /// - <see cref="MonoEntity"/> fires it from <c>OnDestroy</c>
         /// - <see cref="Entity"/> fires it from <see cref="IDisposable.Dispose"/>
-        /// Subscribers receive the entity instance for convenience.
+        /// Subscribers receive the entity instance for convenience. Subscribing
+        /// after the entity is destroyed is legal but silently inert — the event
+        /// will not fire again.
         /// </summary>
         event Action<IEntity>? Destroyed;
 

@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using Rubickanov.ACS.Runtime;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace Rubickanov.ACS.Tests
 {
@@ -10,30 +11,74 @@ namespace Rubickanov.ACS.Tests
         [TearDown]
         public void TearDown()
         {
-            // EntityInjector.Inject is static global state — reset so tests don't leak into each other.
-            EntityInjector.Inject = null;
+            // EntityInjector holds a static delegate — reset so tests don't leak into each other.
+            EntityInjector.ClearInjector();
         }
 
         [Test]
-        public void Inject_WhenSet_DelegateReceivesGameObject()
+        public void Invoke_AfterSetInjector_DelegateReceivesGameObject()
         {
-            // Arrange
             GameObject received = null;
-            EntityInjector.Inject = go => received = go;
+            EntityInjector.SetInjector(go => received = go);
             var expected = new GameObject(nameof(EntityInjectorTests));
 
             try
             {
-                // Act
-                EntityInjector.Inject.Invoke(expected);
+                EntityInjector.Invoke(expected);
 
-                // Assert
                 Assert.AreSame(expected, received);
             }
             finally
             {
                 Object.DestroyImmediate(expected);
             }
+        }
+
+        [Test]
+        public void Invoke_WithoutSetInjector_IsNoOp()
+        {
+            var go = new GameObject(nameof(EntityInjectorTests));
+
+            try
+            {
+                Assert.DoesNotThrow(() => EntityInjector.Invoke(go));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void ClearInjector_AfterSetInjector_StopsDelegateInvocation()
+        {
+            int callCount = 0;
+            EntityInjector.SetInjector(_ => callCount++);
+            EntityInjector.ClearInjector();
+            var go = new GameObject(nameof(EntityInjectorTests));
+
+            try
+            {
+                EntityInjector.Invoke(go);
+
+                Assert.AreEqual(0, callCount);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void SetInjector_SameDelegateTwice_DoesNotWarn()
+        {
+            System.Action<GameObject> same = _ => { };
+            EntityInjector.SetInjector(same);
+
+            // Second set with the same reference must be a silent no-op — hot-reload
+            // workflows with domain reload disabled re-enter SetInjector repeatedly.
+            LogAssert.NoUnexpectedReceived();
+            Assert.DoesNotThrow(() => EntityInjector.SetInjector(same));
         }
     }
 }

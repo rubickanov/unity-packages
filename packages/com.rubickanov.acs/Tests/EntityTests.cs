@@ -118,6 +118,20 @@ namespace Rubickanov.ACS.Tests
         }
 
         [Test]
+        public void Dispose_ThenSubscribe_HandlerNeverFires()
+        {
+            var entity = new Entity();
+            entity.Dispose();
+
+            int fireCount = 0;
+            Assert.DoesNotThrow(() => entity.Destroyed += _ => fireCount++,
+                "Subscribing after Dispose must be legal — null += handler is valid C# and callers should not crash.");
+
+            Assert.AreEqual(0, fireCount,
+                "Post-Dispose subscribers must be silently inert — Destroyed will never fire again.");
+        }
+
+        [Test]
         public void Destroyed_SubscriberCanObserveEntityDuringFire()
         {
             var entity = new Entity();
