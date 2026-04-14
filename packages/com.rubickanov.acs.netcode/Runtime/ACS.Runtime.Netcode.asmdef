@@ -12,7 +12,8 @@
     "overrideReferences": true,
     "precompiledReferences": [
         "R3.dll",
-        "ObservableCollections.dll"
+        "ObservableCollections.dll",
+        "ObservableCollections.R3.dll"
     ],
     "autoReferenced": true,
     "defineConstraints": [],

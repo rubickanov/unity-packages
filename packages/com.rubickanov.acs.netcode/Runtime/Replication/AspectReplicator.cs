@@ -84,15 +84,28 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // The companion bool replaces the int sentinel that the old int-typed field used.
         private double _ownerSubmitTickOffset;
         private bool _hasOwnerSubmitTickOffset;
-        // Pre-size hint for the initial-sync FastBufferWriter (the only consumer is
-        // AspectReplicationSystem.OnSyncRequestReceived). Worst-case size of one full
-        // snapshot: sizeof(int serverTick) + _maskByteCount + sum of every binding's
-        // payload size. Not a runtime cap — ServerTick computes the actual dirty-only
-        // payload size per tick from the live mask.
-        private int _initialSyncPayloadHint;
+        // Pre-size floor for the initial-sync FastBufferWriter. The writer does NOT
+        // auto-grow past its initial capacity unless maxSize > size is specified
+        // (see FastBufferWriter.Grow), and collection bindings' SnapshotSize depends
+        // on their live element count — so we compute the snapshot size at spawn as
+        // a starting lower bound but recompute in InitialSyncPayloadHint on access
+        // so growth after spawn is captured. Not a runtime cap on the tick path.
+        private int _initialSyncPayloadFloorAtSpawn;
         private int _maskByteCount;
         private byte[] _dirtyMaskBuffer = Array.Empty<byte>();
         private AspectReplicationSystem? _system;
+        // Cached at spawn so the EntityId accessor does not re-walk GetComponent<MonoEntity>()
+        // on every call. Null after OnNetworkDespawn; consumers must guard via EntityId.IsNone.
+        private MonoEntity? _monoEntity;
+
+        /// <summary>
+        /// Domain <see cref="EntityId"/> of the entity this replicator belongs to. Read from
+        /// the sibling <see cref="MonoEntity"/> captured at spawn. Returns <see cref="EntityId.None"/>
+        /// before <see cref="OnNetworkSpawn"/> and after <see cref="OnNetworkDespawn"/>.
+        /// Exposed so <see cref="AspectReplicationSystem"/> can index replicators by EntityId
+        /// for the EntityRef codec translation path.
+        /// </summary>
+        internal EntityId EntityId => _monoEntity != null ? _monoEntity.Id : EntityId.None;
 
         // Prediction bookkeeping. Captured at spawn so OnNetworkDespawn can route
         // the unregister call to the right PredictionManager<TInput> instance even
@@ -117,7 +130,22 @@ namespace Rubickanov.ACS.Runtime.Netcode
         internal ReplicatedFieldBinding[] Bindings => _bindings;
         internal AuthorityMode[] BindingAuthorities => _bindingAuthorities;
         internal ReplicatedEventBinding[] EventBindings => _eventBindings;
-        internal int InitialSyncPayloadHint => _initialSyncPayloadHint;
+        internal int InitialSyncPayloadHint
+        {
+            get
+            {
+                // Recompute at request time so ObservableList bindings that grew since
+                // spawn size the FastBufferWriter correctly. For scalar-only entities
+                // this is O(bindings) with all constant-time SnapshotSize — negligible,
+                // and only hit on initial-sync requests (not per tick).
+                int payloadHint = sizeof(int) + _maskByteCount;
+                for (int i = 0; i < _bindings.Length; i++)
+                    payloadHint += _bindings[i].SnapshotSize;
+                // Floor guards against shrinking below the spawn-time estimate — defensive
+                // only; SnapshotSize should already be monotonic across scalar bindings.
+                return payloadHint > _initialSyncPayloadFloorAtSpawn ? payloadHint : _initialSyncPayloadFloorAtSpawn;
+            }
+        }
         internal int MaskByteCount => _maskByteCount;
         internal byte[] DirtyMaskBuffer => _dirtyMaskBuffer;
 
@@ -139,12 +167,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // also checks enabled. Regression #16.
             ApplyNetworkScopes();
 
-            var context = GetComponent<MonoEntity>();
-            if (context == null)
+            _monoEntity = GetComponent<MonoEntity>();
+            if (_monoEntity == null)
             {
                 Debug.LogError($"[AspectReplicator] '{gameObject.name}' is missing MonoEntity on the root. Replication disabled.");
                 return;
             }
+            var context = _monoEntity;
 
             // Resolve tick interval up front — AuthorityRenderBinding's coalesce / stale
             // windows are sized relative to it (see ISSUES.md #23). tickRate == 0 is the
@@ -154,6 +183,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
             uint tickRate = NetworkManager.NetworkTickSystem.TickRate;
             _tickInterval = tickRate > 0 ? 1.0 / tickRate : 0;
             _interpolationDelaySeconds = _interpolationDelayTicks * _tickInterval;
+
+            // Resolve the replication system up-front so the binding loop can inject it
+            // into the factory for EntityRef-typed fields (EntityRefCodec needs an
+            // IEntityRefResolver reference at construction time). GetOrCreate is
+            // idempotent per NetworkManager; Register further down still does the
+            // per-replicator hookup.
+            _system = AspectReplicationSystem.GetOrCreate(NetworkManager);
 
             _bindingsScratch.Clear();
             _bindingAuthoritiesScratch.Clear();
@@ -203,27 +239,46 @@ namespace Rubickanov.ACS.Runtime.Netcode
                         continue;
                     }
                     bool isAuthority = info.Authority == AuthorityMode.Server ? IsServer : IsOwner;
-                    // Predicted-owner: owner-client of a server-auth Predicted field. They run
-                    // ISimulate locally each tick, so their render path needs AuthorityRender
-                    // smoothing — but they are NOT the replication authority (server is), so we
-                    // don't subscribe them via SubscribeAsAuthority. The !IsServer guard excludes
-                    // host-owner (already covered by isAuthority via IsServer=true).
-                    bool isPredictedOwner =
-                        info.Authority == AuthorityMode.Server
-                        && IsOwner && !IsServer
-                        && _predictedFieldNamesScratch.Contains(info.Field.Name);
-
-                    // "Writes locally each tick" is what AuthorityRenderBinding exists for.
-                    bool writesLocally = isAuthority || isPredictedOwner;
-
-                    FieldBindingKind kind = info.Interpolation switch
+                    // Collections don't participate in prediction (scanner enforces this),
+                    // so predicted-owner evaluation only matters for scalar fields.
+                    bool isPredictedOwner = false;
+                    FieldBindingKind kind = FieldBindingKind.Plain;
+                    if (info.Kind == ReplicatedFieldKind.Scalar)
                     {
-                        InterpolationMode.Linear when writesLocally => FieldBindingKind.AuthorityRendered,
-                        InterpolationMode.Linear                    => FieldBindingKind.PassiveInterpolated,
-                        _                                           => FieldBindingKind.Plain,
-                    };
+                        // Predicted-owner: owner-client of a server-auth Predicted field. They run
+                        // ISimulate locally each tick, so their render path needs AuthorityRender
+                        // smoothing — but they are NOT the replication authority (server is), so we
+                        // don't subscribe them via SubscribeAsAuthority. The !IsServer guard excludes
+                        // host-owner (already covered by isAuthority via IsServer=true).
+                        isPredictedOwner =
+                            info.Authority == AuthorityMode.Server
+                            && IsOwner && !IsServer
+                            && _predictedFieldNamesScratch.Contains(info.Field.Name);
 
-                    var binding = ReplicatedFieldBindingFactory.Create(reactive, info.ValueType, kind, _tickInterval, info.Quantization);
+                        // "Writes locally each tick" is what AuthorityRenderBinding exists for.
+                        bool writesLocally = isAuthority || isPredictedOwner;
+
+                        kind = info.Interpolation switch
+                        {
+                            InterpolationMode.Linear when writesLocally => FieldBindingKind.AuthorityRendered,
+                            InterpolationMode.Linear                    => FieldBindingKind.PassiveInterpolated,
+                            _                                           => FieldBindingKind.Plain,
+                        };
+                    }
+
+                    ReplicatedFieldBinding binding = info.Kind switch
+                    {
+                        ReplicatedFieldKind.ObservableList =>
+                            ReplicatedFieldBindingFactory.CreateObservableList(reactive, info.ValueType, info.Quantization, _system),
+                        ReplicatedFieldKind.ObservableDictionary =>
+                            ReplicatedFieldBindingFactory.CreateObservableDictionary(reactive, info.KeyType!, info.ValueType, info.Quantization, _system),
+                        ReplicatedFieldKind.ObservableHashSet =>
+                            ReplicatedFieldBindingFactory.CreateObservableHashSet(reactive, info.ValueType, info.Quantization, _system),
+                        ReplicatedFieldKind.ObservableRingBuffer =>
+                            ReplicatedFieldBindingFactory.CreateObservableRingBuffer(reactive, info.ValueType, info.Quantization, _system),
+                        _ =>
+                            ReplicatedFieldBindingFactory.Create(reactive, info.ValueType, kind, _tickInterval, info.Quantization, _system),
+                    };
 
                     if (isAuthority)
                     {
@@ -299,7 +354,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // payloads would land on the wrong fields — silent state corruption with no log.
             // Aborting spawn is strictly safer than proceeding with a truncated binding list.
             if (ExceedsFieldBindingCap(_bindings.Length, gameObject.name))
+            {
+                // Null the early-resolved _system so the abort path is observably
+                // identical to the pre-change behaviour: a caller that inspects
+                // _system to verify "did this replicator register?" must still see null.
+                _system = null;
                 return;
+            }
 
             // Compute initial-sync payload hint AFTER the cap check so it reflects
             // exactly the bindings that will actually be written.
@@ -307,8 +368,8 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _dirtyMaskBuffer = new byte[_maskByteCount];
             int payloadHint = sizeof(int) + _maskByteCount;
             for (int i = 0; i < _bindings.Length; i++)
-                payloadHint += _bindings[i].Size;
-            _initialSyncPayloadHint = payloadHint;
+                payloadHint += _bindings[i].SnapshotSize;
+            _initialSyncPayloadFloorAtSpawn = payloadHint;
 
             // Interpolation timing was resolved up-front (before the binding loop) so
             // AuthorityRenderBinding could receive tickDelta at construction. On a
@@ -318,7 +379,10 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 _interpolatedBindings = Array.Empty<ReplicatedFieldBinding>();
 
             if (ExceedsEventBindingCap(_eventBindings.Length, gameObject.name))
+            {
+                _system = null;
                 return;
+            }
 
             _predictedFields = _predictedFieldsScratch.ToArray();
             _predictedBindingIndices = _predictedBindingIndicesScratch.ToArray();
@@ -335,8 +399,9 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // entity without predicted fields.
             BootstrapPrediction();
 
-            // Register with the centralized replication system.
-            _system = AspectReplicationSystem.GetOrCreate(NetworkManager);
+            // Register with the centralized replication system. _system was resolved
+            // earlier (before the binding loop) so EntityRefCodec could be injected;
+            // here we complete the per-replicator hookup.
             _system.Register(this);
 
             // Subscribe event bindings that this peer is authority for.
@@ -438,6 +503,10 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _interpolatedBindings = Array.Empty<ReplicatedFieldBinding>();
             _ownerDisposables.Dispose();
             _disposables.Dispose();
+
+            // Null the cached MonoEntity AFTER Unregister so EntityId is still readable
+            // while the system tears down its _byEntityId index.
+            _monoEntity = null;
         }
 
         private void Update()
@@ -657,7 +726,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 writer.WriteBytesSafe(maskPtr, _maskByteCount);
 
             for (int i = 0; i < _bindings.Length; i++)
-                _bindings[i].WriteTo(writer);
+                _bindings[i].WriteSnapshotTo(writer);
         }
 
         // ------------------------------------------------------------------

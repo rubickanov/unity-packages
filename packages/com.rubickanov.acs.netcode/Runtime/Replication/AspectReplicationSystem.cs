@@ -13,7 +13,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// per-event byte[] allocations (#7), managed→native copies (#8), and per-entity
     /// broadcaster delegates (#11).
     /// </summary>
-    internal sealed class AspectReplicationSystem : IDisposable, IEventBroadcaster
+    internal sealed class AspectReplicationSystem : IDisposable, IEventBroadcaster, IEntityRefResolver
     {
         private const string StateBatchChannel = "ACS_StateBatch";
         private const string OwnerSubmitChannel = "ACS_OwnerSubmit";
@@ -37,6 +37,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         private readonly NetworkManager _networkManager;
         private readonly Dictionary<ulong, AspectReplicator> _byNetworkObjectId = new();
+        // Secondary index keyed by EntityId.Value. Populated alongside _byNetworkObjectId so
+        // EntityRefCodec can translate local EntityId → NetworkObjectId in O(1) on the write
+        // path without reaching into World/MonoEntity from a hot serialization loop. Also
+        // primes the system for future EntityId-addressed APIs (RPCs, snapshot replay,
+        // relevancy debug tools). EntityId.None (value 0) is never inserted — an entity with
+        // no id would collide with the sentinel the codec uses for "no reference".
+        private readonly Dictionary<ulong, AspectReplicator> _byEntityId = new();
         private readonly List<AspectReplicator> _replicators = new();
         private AspectReplicator[] _iterationSnapshot = Array.Empty<AspectReplicator>();
         private bool _snapshotDirty;
@@ -49,6 +56,14 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // lambda captures _byNetworkObjectId; a null return signals "unknown or despawned",
         // which tells ApplyStateBatch to Seek past the record and continue the batch tail.
         private readonly Func<ulong, AspectReplicator?> _resolveSpawned;
+
+        // One codec instance per system — EntityRefCodec holds a resolver reference, so it
+        // cannot be a CodecRegistry singleton (resolver is per-NetworkManager). Built
+        // lazily because most aspects have no EntityRef-typed [Replicated] fields.
+        private EntityRefCodec? _entityRefCodec;
+
+        internal EntityRefCodec GetOrCreateEntityRefCodec()
+            => _entityRefCodec ??= new EntityRefCodec(this);
 
         private AspectReplicationSystem(NetworkManager networkManager)
         {
@@ -110,6 +125,9 @@ namespace Rubickanov.ACS.Runtime.Netcode
             if (_byNetworkObjectId.ContainsKey(id)) return;
 
             _byNetworkObjectId[id] = replicator;
+            var entityIdValue = replicator.EntityId.Value;
+            if (entityIdValue != 0)
+                _byEntityId[entityIdValue] = replicator;
             _replicators.Add(replicator);
             _snapshotDirty = true;
         }
@@ -119,11 +137,43 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var id = replicator.NetworkObjectId;
             if (!_byNetworkObjectId.Remove(id)) return;
 
+            var entityIdValue = replicator.EntityId.Value;
+            if (entityIdValue != 0)
+                _byEntityId.Remove(entityIdValue);
             _replicators.Remove(replicator);
             _snapshotDirty = true;
 
             if (_replicators.Count == 0)
                 Dispose();
+        }
+
+        // Accessors for EntityRefCodec. Explicit interface implementation keeps the
+        // resolver surface invisible on the concrete class — the codec depends on the
+        // interface, not the system directly. Spawn status is checked here so the codec
+        // treats "registered but despawning" the same as "unknown" — callers get a
+        // single boolean to branch on.
+        bool IEntityRefResolver.TryResolveToNetworkObjectId(EntityId id, out ulong networkObjectId)
+        {
+            if (id.Value != 0
+                && _byEntityId.TryGetValue(id.Value, out var rep)
+                && rep.IsSpawned)
+            {
+                networkObjectId = rep.NetworkObjectId;
+                return true;
+            }
+            networkObjectId = 0;
+            return false;
+        }
+
+        bool IEntityRefResolver.TryResolveToEntityId(ulong networkObjectId, out EntityId id)
+        {
+            if (_byNetworkObjectId.TryGetValue(networkObjectId, out var rep) && rep.IsSpawned)
+            {
+                id = rep.EntityId;
+                return true;
+            }
+            id = EntityId.None;
+            return false;
         }
 
         public void Dispose()
@@ -149,6 +199,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             }
 
             _byNetworkObjectId.Clear();
+            _byEntityId.Clear();
             _replicators.Clear();
             _iterationSnapshot = Array.Empty<AspectReplicator>();
             s_Systems.Remove(_networkManager);

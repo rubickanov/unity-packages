@@ -1,0 +1,26 @@
+{
+    "name": "ACS.Tests.Persistence",
+    "rootNamespace": "Rubickanov.ACS.Tests.Persistence",
+    "references": [
+        "ACS.Runtime",
+        "ACS.Runtime.Persistence"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "R3.dll",
+        "ObservableCollections.dll",
+        "ObservableCollections.R3.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

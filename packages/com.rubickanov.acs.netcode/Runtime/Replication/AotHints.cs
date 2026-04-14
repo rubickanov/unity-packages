@@ -1,3 +1,4 @@
+using ObservableCollections;
 using R3;
 using UnityEngine;
 using UnityEngine.Scripting;
@@ -32,6 +33,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             new ReplicatedFieldBinding<Vector4>(default!, default!);
             new ReplicatedFieldBinding<Quaternion>(default!, default!);
             new ReplicatedFieldBinding<Color>(default!, default!);
+            new ReplicatedFieldBinding<EntityRef>(default!, default!);
 
             // InterpolatedFieldBinding<T> — types with registered lerpers
             new InterpolatedFieldBinding<float>(default!, default!, default!);
@@ -77,6 +79,44 @@ namespace Rubickanov.ACS.Runtime.Netcode
             new ReplicatedEventBinding<int>(default!, default, default);
             new ReplicatedEventBinding<float>(default!, default, default);
             new ReplicatedEventBinding<bool>(default!, default, default);
+
+            // ObservableListBinding<T> — Phase 1 collection replication. Same IL2CPP
+            // concern as ReplicatedFieldBinding<T>: closed generic ctors are produced
+            // reflectively by ReplicatedFieldBindingFactory.BuildObservableListFactory,
+            // so the common specialisations must be preserved here for IL2CPP builds.
+            new ObservableListBinding<int>(default!, default!);
+            new ObservableListBinding<float>(default!, default!);
+            new ObservableListBinding<bool>(default!, default!);
+            new ObservableListBinding<Vector2>(default!, default!);
+            new ObservableListBinding<Vector3>(default!, default!);
+            new ObservableListBinding<EntityRef>(default!, default!);
+
+            // ObservableDictionaryBinding<K,V> — Phase 2. Primary use case is
+            // <string, float> (CooldownsAspect-style cooldown maps). <string, int> kept
+            // as the common int-valued counterpart. Other closed generics need a
+            // user-supplied link.xml entry — the factory builds them reflectively.
+            new ObservableDictionaryBinding<string, float>(default!, default!, default!);
+            new ObservableDictionaryBinding<string, int>(default!, default!, default!);
+
+            // Preserve closed generics of the dictionary key codec family for IL2CPP:
+            // StringKeyCodec is a singleton used directly by the factory; UnmanagedKeyCodec<K>
+            // is built reflectively for unmanaged-keyed dictionaries. <int> covers the
+            // common case; other unmanaged keys need user link.xml entries.
+            _ = new StringKeyCodec();
+            _ = new UnmanagedKeyCodec<int>(default!);
+
+            // ObservableHashSetBinding<T> — Phase 3. Element rules match ObservableList<T>
+            // (unmanaged OR EntityRef). Preserved defaults cover common discrete-value use
+            // cases (tag-enum ids, EntityRef sets); other closed generics need a user
+            // link.xml entry.
+            new ObservableHashSetBinding<int>(default!, default!);
+            new ObservableHashSetBinding<EntityRef>(default!, default!);
+
+            // ObservableRingBufferBinding<T> — Phase 3. Primary use cases are damage
+            // logs / event histories (int / float) and positional trails (Vector3).
+            new ObservableRingBufferBinding<int>(default!, default!);
+            new ObservableRingBufferBinding<float>(default!, default!);
+            new ObservableRingBufferBinding<Vector3>(default!, default!);
 
             // ReactivePropertyExtensions.Smooth<T> — ensure IL2CPP generates the
             // InterpolationRegistry.TryGetInterpolatedValue<T> specialization.
