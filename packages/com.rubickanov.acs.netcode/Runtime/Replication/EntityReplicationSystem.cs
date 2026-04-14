@@ -8,12 +8,12 @@ namespace Rubickanov.ACS.Runtime.Netcode
 {
     /// <summary>
     /// Centralized replication system that collects dirty state from all registered
-    /// AspectReplicators and sends one batched message per tick via CustomMessagingManager.
+    /// EntityReplicators and sends one batched message per tick via CustomMessagingManager.
     /// Eliminates per-entity tick subscriptions (#10), per-tick byte[] allocations (#6),
     /// per-event byte[] allocations (#7), managed→native copies (#8), and per-entity
     /// broadcaster delegates (#11).
     /// </summary>
-    internal sealed class AspectReplicationSystem : IDisposable, IEventBroadcaster, IEntityRefResolver
+    internal sealed class EntityReplicationSystem : IDisposable, IEventBroadcaster, IEntityRefResolver
     {
         private const string StateBatchChannel = "ACS_StateBatch";
         private const string OwnerSubmitChannel = "ACS_OwnerSubmit";
@@ -24,11 +24,10 @@ namespace Rubickanov.ACS.Runtime.Netcode
         private const string SyncRequestChannel = "ACS_SyncReq";
         private const string SyncReplyChannel = "ACS_SyncReply";
 
-        private static readonly Dictionary<NetworkManager, AspectReplicationSystem> s_Systems = new();
+        private static readonly Dictionary<NetworkManager, EntityReplicationSystem> s_Systems = new();
 
         // Play-Mode-without-Domain-Reload safety: static dictionaries otherwise survive
         // stop→play cycles with stale NetworkManager keys from the previous session.
-        // See ISSUES.md #17 / TODO.md Batch 8.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
         {
@@ -36,26 +35,26 @@ namespace Rubickanov.ACS.Runtime.Netcode
         }
 
         private readonly NetworkManager _networkManager;
-        private readonly Dictionary<ulong, AspectReplicator> _byNetworkObjectId = new();
+        private readonly Dictionary<ulong, EntityReplicator> _byNetworkObjectId = new();
         // Secondary index keyed by EntityId.Value. Populated alongside _byNetworkObjectId so
         // EntityRefCodec can translate local EntityId → NetworkObjectId in O(1) on the write
         // path without reaching into World/MonoEntity from a hot serialization loop. Also
         // primes the system for future EntityId-addressed APIs (RPCs, snapshot replay,
         // relevancy debug tools). EntityId.None (value 0) is never inserted — an entity with
         // no id would collide with the sentinel the codec uses for "no reference".
-        private readonly Dictionary<ulong, AspectReplicator> _byEntityId = new();
-        private readonly List<AspectReplicator> _replicators = new();
-        private AspectReplicator[] _iterationSnapshot = Array.Empty<AspectReplicator>();
+        private readonly Dictionary<ulong, EntityReplicator> _byEntityId = new();
+        private readonly List<EntityReplicator> _replicators = new();
+        private EntityReplicator[] _iterationSnapshot = Array.Empty<EntityReplicator>();
         private bool _snapshotDirty;
         private readonly List<ulong> _broadcastTargetIds = new();
-        private readonly List<AspectReplicator> _dirtyReplicatorsBuffer = new();
+        private readonly List<EntityReplicator> _dirtyReplicatorsBuffer = new();
         private bool _broadcastTargetsDirty = true;
         private bool _disposed;
 
         // Cached once so OnStateBatchReceived does not allocate a closure per tick. The
         // lambda captures _byNetworkObjectId; a null return signals "unknown or despawned",
         // which tells ApplyStateBatch to Seek past the record and continue the batch tail.
-        private readonly Func<ulong, AspectReplicator?> _resolveSpawned;
+        private readonly Func<ulong, EntityReplicator?> _resolveSpawned;
 
         // One codec instance per system — EntityRefCodec holds a resolver reference, so it
         // cannot be a CodecRegistry singleton (resolver is per-NetworkManager). Built
@@ -65,7 +64,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         internal EntityRefCodec GetOrCreateEntityRefCodec()
             => _entityRefCodec ??= new EntityRefCodec(this);
 
-        private AspectReplicationSystem(NetworkManager networkManager)
+        private EntityReplicationSystem(NetworkManager networkManager)
         {
             _networkManager = networkManager;
             _resolveSpawned = id =>
@@ -86,18 +85,18 @@ namespace Rubickanov.ACS.Runtime.Netcode
             messaging.RegisterNamedMessageHandler(SyncReplyChannel, OnSyncReplyReceived);
         }
 
-        internal static AspectReplicationSystem GetOrCreate(NetworkManager networkManager)
+        internal static EntityReplicationSystem GetOrCreate(NetworkManager networkManager)
         {
             if (!s_Systems.TryGetValue(networkManager, out var system))
             {
-                system = new AspectReplicationSystem(networkManager);
+                system = new EntityReplicationSystem(networkManager);
                 s_Systems[networkManager] = system;
             }
             return system;
         }
 
         // Exposed for tests that need to verify cleanup.
-        internal static bool TryGet(NetworkManager networkManager, out AspectReplicationSystem system)
+        internal static bool TryGet(NetworkManager networkManager, out EntityReplicationSystem system)
         {
             return s_Systems.TryGetValue(networkManager, out system);
         }
@@ -119,7 +118,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _networkManager.NetworkTickSystem.Tick += OnTick;
         }
 
-        internal void Register(AspectReplicator replicator)
+        internal void Register(EntityReplicator replicator)
         {
             var id = replicator.NetworkObjectId;
             if (_byNetworkObjectId.ContainsKey(id)) return;
@@ -132,7 +131,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _snapshotDirty = true;
         }
 
-        internal void Unregister(AspectReplicator replicator)
+        internal void Unregister(EntityReplicator replicator)
         {
             var id = replicator.NetworkObjectId;
             if (!_byNetworkObjectId.Remove(id)) return;
@@ -201,7 +200,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _byNetworkObjectId.Clear();
             _byEntityId.Clear();
             _replicators.Clear();
-            _iterationSnapshot = Array.Empty<AspectReplicator>();
+            _iterationSnapshot = Array.Empty<EntityReplicator>();
             s_Systems.Remove(_networkManager);
         }
 
@@ -323,7 +322,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
                     int payloadBytes = writer.Position - bodyStart;
                     Debug.Assert(payloadBytes <= ushort.MaxValue,
-                        $"[AspectReplicationSystem] Per-entity payload {payloadBytes} exceeds ushort prefix width.");
+                        $"[EntityReplicationSystem] Per-entity payload {payloadBytes} exceeds ushort prefix width.");
                     int endPos = writer.Position;
                     writer.Seek(lenPos);
                     writer.WriteValueSafe((ushort)payloadBytes);
@@ -422,7 +421,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         /// still parsed. See <see cref="ServerTick"/> for the matching wire-format
         /// comment.
         /// </summary>
-        internal static void ApplyStateBatch(FastBufferReader reader, Func<ulong, AspectReplicator?> resolve)
+        internal static void ApplyStateBatch(FastBufferReader reader, Func<ulong, EntityReplicator?> resolve)
         {
             reader.ReadValueSafe(out ushort entityCount);
 
@@ -440,7 +439,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                     // batch tail is not lost. Late spawn on sender / early despawn on
                     // receiver / spawn-order races all land here.
                     Debug.LogWarning(
-                        $"[AspectReplicationSystem] Unknown/despawned entity {networkObjectId} " +
+                        $"[EntityReplicationSystem] Unknown/despawned entity {networkObjectId} " +
                         $"— skipping {payloadBytes} bytes, continuing batch.");
                     reader.Seek(nextEntityPos);
                     continue;
@@ -461,7 +460,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 if (reader.Position != nextEntityPos)
                 {
                     Debug.LogError(
-                        $"[AspectReplicationSystem] ApplyStateBuffer read {reader.Position - recordStart} bytes, " +
+                        $"[EntityReplicationSystem] ApplyStateBuffer read {reader.Position - recordStart} bytes, " +
                         $"expected {payloadBytes} for entity {networkObjectId}. Realigning.");
                     reader.Seek(nextEntityPos);
                 }
@@ -475,7 +474,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
             if (!_byNetworkObjectId.TryGetValue(networkObjectId, out var rep) || !rep.IsSpawned)
             {
-                Debug.LogWarning($"[AspectReplicationSystem] Received owner submit for unknown/despawned entity {networkObjectId}.");
+                Debug.LogWarning($"[EntityReplicationSystem] Received owner submit for unknown/despawned entity {networkObjectId}.");
                 return;
             }
 
@@ -569,7 +568,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // Initial sync
         // ------------------------------------------------------------------
 
-        internal void RequestInitialSync(AspectReplicator replicator)
+        internal void RequestInitialSync(EntityReplicator replicator)
         {
             var writer = new FastBufferWriter(sizeof(ulong), Allocator.Temp);
             try

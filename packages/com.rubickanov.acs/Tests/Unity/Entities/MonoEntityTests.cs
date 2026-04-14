@@ -152,11 +152,21 @@ namespace Rubickanov.ACS.Tests
         [Test]
         public void Require_CreatesNewAspect_FiresOnAspectCreated()
         {
+            // OnAspectCreated is now raised via World.AspectCreated → MonoWorld forwarder,
+            // so the event only fires when a World is Current. A bare MonoEntity with no world
+            // would silently register nothing and produce no notification — matches the event's
+            // "new aspect reachable via world queries" semantics.
+            var worldGo = new GameObject(nameof(MonoWorld));
             var events = new List<(IEntity entity, Type type)>();
             Action<IEntity, Type> handler = (e, t) => events.Add((e, t));
             MonoEntity.OnAspectCreated += handler;
             try
             {
+                var world = worldGo.AddComponent<MonoWorld>();
+                typeof(MonoWorld)
+                    .GetMethod("Awake", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy)!
+                    .Invoke(world, null);
+
                 var aspect = _context.Require<TestAspectA>();
 
                 Assert.AreEqual(1, events.Count);
@@ -167,17 +177,30 @@ namespace Rubickanov.ACS.Tests
             finally
             {
                 MonoEntity.OnAspectCreated -= handler;
+                UnityEngine.Object.DestroyImmediate(worldGo);
+                typeof(SingletonMonoEntity<MonoWorld>)
+                    .GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)!
+                    .SetValue(null, null);
+                typeof(World)
+                    .GetMethod("ForceResetCurrent", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .Invoke(null, null);
             }
         }
 
         [Test]
         public void Require_ReturnsExistingAspect_DoesNotFireOnAspectCreated()
         {
+            var worldGo = new GameObject(nameof(MonoWorld));
             var fireCount = 0;
             Action<IEntity, Type> handler = (_, _) => fireCount++;
             MonoEntity.OnAspectCreated += handler;
             try
             {
+                var world = worldGo.AddComponent<MonoWorld>();
+                typeof(MonoWorld)
+                    .GetMethod("Awake", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy)!
+                    .Invoke(world, null);
+
                 _context.Require<TestAspectA>();
                 _context.Require<TestAspectA>();
 
@@ -186,6 +209,13 @@ namespace Rubickanov.ACS.Tests
             finally
             {
                 MonoEntity.OnAspectCreated -= handler;
+                UnityEngine.Object.DestroyImmediate(worldGo);
+                typeof(SingletonMonoEntity<MonoWorld>)
+                    .GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)!
+                    .SetValue(null, null);
+                typeof(World)
+                    .GetMethod("ForceResetCurrent", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .Invoke(null, null);
             }
         }
 

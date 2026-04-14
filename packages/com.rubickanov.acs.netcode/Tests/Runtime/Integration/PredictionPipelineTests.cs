@@ -17,7 +17,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// arriving authoritative state against its snapshot buffer and replays
     /// locally-buffered inputs so the owner's local view never snaps backwards.
     /// </summary>
-    public class PredictionPipelineTests : AspectReplicatorIntegrationTestBase
+    public class PredictionPipelineTests : EntityReplicatorIntegrationTestBase
     {
         protected GameObject _predictionPrefab = null!;
 
@@ -27,7 +27,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
             _predictionPrefab = CreateNetworkObjectPrefab("PredictionEntity");
             _predictionPrefab.AddComponent<MonoEntity>();
-            _predictionPrefab.AddComponent<AspectReplicator>();
+            _predictionPrefab.AddComponent<EntityReplicator>();
             _predictionPrefab.AddComponent<PredictionTestAspectRegistrar>();
             _predictionPrefab.AddComponent<TestInputProvider>();
             _predictionPrefab.AddComponent<TestMovementSimulator>();

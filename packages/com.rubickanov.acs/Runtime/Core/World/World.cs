@@ -196,12 +196,10 @@ namespace Rubickanov.ACS.Runtime
         private T RequireAspectInternal<T>() where T : class, IEntityAspect, new()
         {
             var instance = _store.GetOrAdd<T>(out var created);
-            if (created)
-            {
-                var type = typeof(T);
-                _registry.Register(this, type);
-                AspectCreated?.Invoke(this, type);
-            }
+            // Route through the public Register(IEntity, Type) entry point so world-scoped
+            // aspect creation flows through the same AspectCreated fire as entity-scoped —
+            // single source of truth, no duplicated raise path.
+            if (created) Register(this, typeof(T));
             return instance;
         }
 
@@ -222,10 +220,17 @@ namespace Rubickanov.ACS.Runtime
         /// Records that <paramref name="entity"/> carries an aspect of type
         /// <paramref name="aspectType"/>. Called by <see cref="MonoEntity.Require{T}"/>
         /// and by pure-C# <see cref="Entity.Require{T}"/> when an <c>Entity(World)</c>
-        /// was constructed.
+        /// was constructed. Fires <see cref="AspectCreated"/> after registration so a
+        /// single raise site covers both MonoEntity and pure-Entity aspect creation —
+        /// subscribers (including <c>MonoWorld</c>'s forwarder into
+        /// <see cref="MonoEntity.OnAspectCreated"/>) see every new aspect regardless of
+        /// which entity flavor produced it.
         /// </summary>
         public void Register(IEntity entity, Type aspectType)
-            => _registry.Register(entity, aspectType);
+        {
+            _registry.Register(entity, aspectType);
+            AspectCreated?.Invoke(entity, aspectType);
+        }
 
         /// <summary>
         /// Drops <paramref name="entity"/> from each bucket listed in <paramref name="aspectTypes"/>.

@@ -4,7 +4,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 {
     /// <summary>
     /// Declares where an <see cref="IEntityComponent"/> class is allowed to run.
-    /// Applied by <see cref="AspectReplicator"/> on <c>OnNetworkSpawn</c>: components whose
+    /// Applied by <see cref="EntityReplicator"/> on <c>OnNetworkSpawn</c>: components whose
     /// scope does not match the current peer are disabled (<c>Behaviour.enabled = false</c>).
     /// For <see cref="NetworkScope.OwnerOnly"/>, the check is re-evaluated on ownership change.
     /// </summary>

@@ -87,7 +87,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         {
             _lerp = lerp;
             // Track tick rate so the coalesce / stale thresholds scale with it instead of
-            // assuming 30 Hz. See ISSUES.md #23.
+            // assuming 30 Hz.
             _coalesceWindowSeconds = 0.3 * tickDelta;
             _staleSampleThresholdSeconds = 2.5 * tickDelta;
             InterpolationRegistry<T>.Register(reactive, this);

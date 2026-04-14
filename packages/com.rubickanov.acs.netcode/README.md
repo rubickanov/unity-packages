@@ -17,10 +17,10 @@ Aspect field
 ReplicationScanner ──► ReplicatedFieldBinding<T>         ReplicatedEventBinding<T>
                               │                                  │
                               ▼                                  ▼
-                        AspectReplicator  ◄── [NetworkScope] ──► component enable/disable
+                        EntityReplicator  ◄── [NetworkScope] ──► component enable/disable
                               │                                  │
                               ▼                                  ▼
-                       AspectReplicationSystem (singleton per NetworkManager)
+                       EntityReplicationSystem (singleton per NetworkManager)
                               │        │        │
                   ACS_StateBatch   ACS_EventBcast   ACS_OwnerSubmit / ACS_OwnerEvt
                               │
@@ -28,7 +28,7 @@ ReplicationScanner ──► ReplicatedFieldBinding<T>         ReplicatedEventBi
                       PredictionManager<TInput>    (ISimulate / IInputProvider)
 ```
 
-`AspectReplicator` sits on the networked prefab root next to `MonoEntity`. On `OnNetworkSpawn` it scans every aspect, builds per-field bindings (raw memcpy or quantizing codec, plain / interpolated / authority-smoothed) and per-event bindings, registers with the `NetworkManager`-wide `AspectReplicationSystem`, and applies `[NetworkScope]` to sibling components. `AspectReplicationSystem` runs one `OnTick` per frame: it batches every dirty field across every replicator into a single `ACS_StateBatch` message; owner-auth fields go out through `ACS_OwnerSubmit`; events flow through broadcast / owner-submit channels with per-event reliability. Prediction adds a second manager (`PredictionManager<TInput>`) that submits inputs, runs `ISimulate` on both owner and server, and rewinds-and-replays on the pure-client owner when an authoritative batch arrives.
+`EntityReplicator` sits on the networked prefab root next to `MonoEntity`. On `OnNetworkSpawn` it scans every aspect, builds per-field bindings (raw memcpy or quantizing codec, plain / interpolated / authority-smoothed) and per-event bindings, registers with the `NetworkManager`-wide `EntityReplicationSystem`, and applies `[NetworkScope]` to sibling components. `EntityReplicationSystem` runs one `OnTick` per frame: it batches every dirty field across every replicator into a single `ACS_StateBatch` message; owner-auth fields go out through `ACS_OwnerSubmit`; events flow through broadcast / owner-submit channels with per-event reliability. Prediction adds a second manager (`PredictionManager<TInput>`) that submits inputs, runs `ISimulate` on both owner and server, and rewinds-and-replays on the pure-client owner when an authoritative batch arrives.
 
 ## Core Concepts
 
@@ -49,7 +49,7 @@ ReplicationScanner ──► ReplicatedFieldBinding<T>         ReplicatedEventBi
 ## Quick Start
 
 1. Make sure `NetworkManager` has a non-zero `NetworkTickSystem.TickRate` in its `NetworkConfig`. A tick rate of `0` disables replication with an error log.
-2. Add `NetworkObject` + `MonoEntity` + `AspectReplicator` to the prefab root. Set `Interpolation Delay Ticks` on the replicator (default `2` — lower is snappier, higher masks packet jitter).
+2. Add `NetworkObject` + `MonoEntity` + `EntityReplicator` to the prefab root. Set `Interpolation Delay Ticks` on the replicator (default `2` — lower is snappier, higher masks packet jitter).
 3. Mark aspect fields with `[Replicated]` / `[ReplicatedEvent]`:
 
 ```csharp
@@ -152,7 +152,7 @@ public class AiDecisionMaker : EntityNetworkComponent { /* ... */ }
 public class HealthHudBinder : EntityNetworkComponent { /* ... */ }
 ```
 
-`AspectReplicator` flips `enabled = false` on mismatched components during `OnNetworkSpawn`. `OwnerOnly` is re-evaluated on `OnGainedOwnership` / `OnLostOwnership` so local HUDs and input readers follow the current owner.
+`EntityReplicator` flips `enabled = false` on mismatched components during `OnNetworkSpawn`. `OwnerOnly` is re-evaluated on `OnGainedOwnership` / `OnLostOwnership` so local HUDs and input readers follow the current owner.
 
 ### Networked Components
 
@@ -250,7 +250,7 @@ public class CharacterMover : EntityNetworkComponent, ISimulate<MoveInput>
 
 Server and client must be built from the same commit. The wire format has no version negotiation — running peers with different `[Replicated]` field sets against each other silently corrupts state because field indices shift. If you need rolling upgrades or cross-version matchmaking, this package is not the right fit.
 
-Field count cap per `AspectReplicator` is 256 (one dirty-mask byte per 8 fields, hard-limited); event count cap is 256 (one-byte event index). The replicator aborts spawn with an error if either is exceeded.
+Field count cap per `EntityReplicator` is 256 (one dirty-mask byte per 8 fields, hard-limited); event count cap is 256 (one-byte event index). The replicator aborts spawn with an error if either is exceeded.
 
 ### IL2CPP
 
@@ -341,7 +341,7 @@ Owner writes the reactive; the state batch goes to the server through `ACS_Owner
 ## Design Decisions
 
 - **Attributes on aspects, not on components** — replication describes *data shape*, not *behaviour*. Placing the attribute on the aspect keeps components stateless and lets the same aspect be consumed by networked and non-networked components interchangeably.
-- **Single `AspectReplicationSystem` per `NetworkManager`** — one tick subscription, one batched message per frame instead of one RPC per dirty field per entity. Named messages over `CustomMessagingManager` bypass the generator-based RPC path so there are no per-entity managed allocations on the hot path.
+- **Single `EntityReplicationSystem` per `NetworkManager`** — one tick subscription, one batched message per frame instead of one RPC per dirty field per entity. Named messages over `CustomMessagingManager` bypass the generator-based RPC path so there are no per-entity managed allocations on the hot path.
 - **Dirty-mask bit is positional, not named** — wire bytes are `(serverTick + mask + payloads in binding-index order)`. Cheap and compact, but couples both peers to the same field set. This is the "same commit on both sides" constraint.
 - **`AuthorityRenderBinding` smooths authority writes against wall-clock** — without it, `.Smooth()` on the authority (or the predicted owner) falls back to `.Value`, which updates only at tick rate and staircases visibly at 60+ FPS. Costs ≈1 tick of render delay on the authority — the same tradeoff Unity's `NetworkTransform` makes.
 - **Prediction is opt-in per field, not per entity** — `Predicted = true` on the exact fields the owner writes via `Simulate`. Non-predicted state (health, ability cooldowns tied to server-only effects) flows through the normal server-auth path and lands one RTT late — which is correct, because the owner should not be speculating about those.

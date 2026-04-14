@@ -313,7 +313,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             // A freshly-built binding has not been subscribed and nothing has written
             // through it — the flag must be false. If this ever flips, the owner-auth
-            // initial-sync fast path (ISSUES.md #19) blocks every legitimate snapshot.
+            // initial-sync fast path blocks every legitimate snapshot.
             var reactive = new ReactiveProperty<int>(0);
             var binding = CreateBinding(reactive);
             Assert.IsFalse(binding.OwnerWroteSinceSpawn);
@@ -324,7 +324,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             // Regression contract: R3 ReactiveProperty replays the current value on
             // Subscribe, so SubscribeAsAuthority synthesizes a "write" immediately.
-            // This test pins that behaviour so AspectReplicator.OnNetworkSpawn MUST
+            // This test pins that behaviour so EntityReplicator.OnNetworkSpawn MUST
             // keep calling ResetOwnerWroteSinceSpawn right after the subscribe — if
             // this test starts failing, either R3 changed semantics or someone removed
             // the flag assignment from the subscribe callback, and both branches need

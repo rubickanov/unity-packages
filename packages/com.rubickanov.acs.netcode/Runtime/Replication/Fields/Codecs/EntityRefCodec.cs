@@ -11,9 +11,9 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// NetworkObjectId is the only identity NGO guarantees to be in sync across peers.
     /// <para/>
     /// Not a <see cref="CodecRegistry"/> singleton: the codec holds an
-    /// <see cref="IEntityRefResolver"/> that is per-<see cref="AspectReplicationSystem"/>.
+    /// <see cref="IEntityRefResolver"/> that is per-<see cref="EntityReplicationSystem"/>.
     /// One instance is built lazily by the system
-    /// (<see cref="AspectReplicationSystem.GetOrCreateEntityRefCodec"/>) and injected by
+    /// (<see cref="EntityReplicationSystem.GetOrCreateEntityRefCodec"/>) and injected by
     /// <see cref="ReplicatedFieldBindingFactory"/> only for <see cref="EntityRef"/>-typed
     /// replicated fields.
     /// </summary>

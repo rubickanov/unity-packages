@@ -51,7 +51,7 @@ namespace Experiments
 
         private void LateUpdate()
         {
-            // Sync transform after AspectReplicator.Update() has run TickRender,
+            // Sync transform after EntityReplicator.Update() has run TickRender,
             // so .Smooth() reads the freshest interpolated value for this frame.
             transform.position = _aspect.Position.Smooth();
             transform.rotation = _aspect.Rotation.Smooth();

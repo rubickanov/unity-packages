@@ -27,7 +27,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// once per domain lifetime, so with Domain Reload disabled the registrations persist across
     /// play sessions and each <see cref="ResetStatics"/> correctly clears every live
     /// <c>Bindings</c> dictionary. New closed generics introduced later register naturally on
-    /// first touch. See ISSUES.md #17 / TODO.md Batch 8.
+    /// first touch.
     /// </para>
     /// </summary>
     internal static class InterpolationRegistry

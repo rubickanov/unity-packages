@@ -38,7 +38,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
     // ---- Aspect registrars ---------------------------------------------------
     //
-    // MonoEntity creates aspects lazily on Require<T>(). AspectReplicator's
+    // MonoEntity creates aspects lazily on Require<T>(). EntityReplicator's
     // OnNetworkSpawn iterates context.GetAllAspects() — so unless something has
     // already touched the aspect via Require<T>() before then, the replicator
     // sees an empty bag and binds zero fields. The registrars below run in

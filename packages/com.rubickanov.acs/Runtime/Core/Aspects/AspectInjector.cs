@@ -11,9 +11,8 @@ namespace Rubickanov.ACS.Runtime
     /// Caches reflection data per component type for performance.
     /// <para/>
     /// Caches are <see cref="ConcurrentDictionary{TKey,TValue}"/> so future headless
-    /// simulations (Simulate L2 Monte Carlo, per <c>IDEAS.md §14</c>) can run injection
-    /// across threads without racing on cache population. Under Unity's single-threaded
-    /// player loop the overhead is negligible.
+    /// simulations can run injection across threads without racing on cache population.
+    /// Under Unity's single-threaded player loop the overhead is negligible.
     /// </summary>
     public static class AspectInjector
     {

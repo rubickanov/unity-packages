@@ -16,7 +16,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
     /// carries a <c>ushort payloadBytes</c> prefix so records with an unknown
     /// <c>networkObjectId</c> can be skipped without dropping the batch tail.
     ///
-    /// Exercises <see cref="AspectReplicationSystem.ApplyStateBatch"/> directly over a
+    /// Exercises <see cref="EntityReplicationSystem.ApplyStateBatch"/> directly over a
     /// resolver-backed dictionary of reflection-built replicators — no NGO spawn, no
     /// NetworkManager. Mirrors the test scaffolding in <c>ApplyStateBufferRoundTripTests</c>.
     /// </summary>
@@ -48,12 +48,12 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
         // ---- Fixture helpers ----------------------------------------------------
 
-        private AspectReplicator BuildReplicator(ReplicatedFieldBinding[] bindings, AuthorityMode[] authorities)
+        private EntityReplicator BuildReplicator(ReplicatedFieldBinding[] bindings, AuthorityMode[] authorities)
         {
             var go = new GameObject("StateBatchTest_" + _spawned.Count);
             _spawned.Add(go);
             go.AddComponent<NetworkObject>();
-            var rep = go.AddComponent<AspectReplicator>();
+            var rep = go.AddComponent<EntityReplicator>();
             SetPrivate(rep, "_tickInterval", 0.05);
             SetPrivate(rep, "_bindings", bindings);
             SetPrivate(rep, "_bindingAuthorities", authorities);
@@ -63,8 +63,8 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
         private static void SetPrivate(object target, string name, object value)
         {
-            var f = typeof(AspectReplicator).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.IsNotNull(f, $"AspectReplicator must have a private field '{name}' — rename detected?");
+            var f = typeof(EntityReplicator).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(f, $"EntityReplicator must have a private field '{name}' — rename detected?");
             f!.SetValue(target, value);
         }
 
@@ -75,7 +75,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         }
 
         /// <summary>
-        /// Produces a record for one entity in the exact wire shape <see cref="AspectReplicationSystem.ApplyStateBatch"/>
+        /// Produces a record for one entity in the exact wire shape <see cref="EntityReplicationSystem.ApplyStateBatch"/>
         /// expects: <c>ulong id</c>, <c>ushort payloadBytes</c>, <c>int serverTick</c>,
         /// <c>byte[maskLen] mask</c>, then the field bytes in binding-index order.
         /// <paramref name="fieldsSize"/> is needed because <see cref="FastBufferWriter.Position"/>
@@ -149,13 +149,13 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
                 new Record(IdUnknown, 11, new byte[] { 0b01 }, sizeof(int), w => WriteFieldBytes(w, 999)),
                 new Record(IdB, 12, new byte[] { 0b01 }, sizeof(int), w => WriteFieldBytes(w, 77)));
 
-            var byId = new Dictionary<ulong, AspectReplicator> { [IdA] = repA, [IdB] = repB };
-            Func<ulong, AspectReplicator> resolve = id => byId.TryGetValue(id, out var r) ? r : null;
+            var byId = new Dictionary<ulong, EntityReplicator> { [IdA] = repA, [IdB] = repB };
+            Func<ulong, EntityReplicator> resolve = id => byId.TryGetValue(id, out var r) ? r : null;
 
             var reader = new FastBufferReader(batch, Allocator.Temp);
             try
             {
-                AspectReplicationSystem.ApplyStateBatch(reader, resolve);
+                EntityReplicationSystem.ApplyStateBatch(reader, resolve);
                 Assert.AreEqual(reader.Length, reader.Position,
                     "reader must have fully consumed the batch — otherwise an under-read slipped through.");
             }
@@ -177,13 +177,13 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
                 new Record(IdUnknownOther, 2, new byte[] { 0b01 }, sizeof(int), w => WriteFieldBytes(w, 222)),
                 new Record(IdA, 3, new byte[] { 0b01 }, sizeof(int), w => WriteFieldBytes(w, 55)));
 
-            var byId = new Dictionary<ulong, AspectReplicator> { [IdA] = repA };
-            Func<ulong, AspectReplicator> resolve = id => byId.TryGetValue(id, out var r) ? r : null;
+            var byId = new Dictionary<ulong, EntityReplicator> { [IdA] = repA };
+            Func<ulong, EntityReplicator> resolve = id => byId.TryGetValue(id, out var r) ? r : null;
 
             var reader = new FastBufferReader(batch, Allocator.Temp);
             try
             {
-                AspectReplicationSystem.ApplyStateBatch(reader, resolve);
+                EntityReplicationSystem.ApplyStateBatch(reader, resolve);
                 Assert.AreEqual(reader.Length, reader.Position);
             }
             finally { reader.Dispose(); }
@@ -209,13 +209,13 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
                     WriteFieldBytes(w, 1); WriteFieldBytes(w, 2); WriteFieldBytes(w, 3);
                 }));
 
-            var byId = new Dictionary<ulong, AspectReplicator> { [IdA] = repA };
-            Func<ulong, AspectReplicator> resolve = id => byId.TryGetValue(id, out var r) ? r : null;
+            var byId = new Dictionary<ulong, EntityReplicator> { [IdA] = repA };
+            Func<ulong, EntityReplicator> resolve = id => byId.TryGetValue(id, out var r) ? r : null;
 
             var reader = new FastBufferReader(batch, Allocator.Temp);
             try
             {
-                AspectReplicationSystem.ApplyStateBatch(reader, resolve);
+                EntityReplicationSystem.ApplyStateBatch(reader, resolve);
                 Assert.AreEqual(reader.Length, reader.Position,
                     "reader must land exactly at end-of-batch, even when the tail record was unknown " +
                     "and had a different mask/field layout than the known record.");

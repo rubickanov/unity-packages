@@ -5,7 +5,7 @@ ACS Netcode Experiment — Setup
    Create a new prefab with these components on the root:
    - MonoEntity
    - NetworkObject
-   - AspectReplicator
+   - EntityReplicator
    - ServerLogic
    - ExperimentInputProvider  (owner-only; reads WASD → ExperimentInputCommand)
    - ExperimentMover          (ISimulate; writes Position on both owner + server)

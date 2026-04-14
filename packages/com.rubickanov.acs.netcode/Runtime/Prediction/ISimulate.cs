@@ -16,7 +16,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// <para>
     /// An entity is expected to have a single <typeparamref name="TInput"/> across all of
     /// its <c>ISimulate</c> components — the input type is resolved from the first such
-    /// component found in <c>AspectReplicator.OnNetworkSpawn</c>.
+    /// component found in <c>EntityReplicator.OnNetworkSpawn</c>.
     /// </para>
     /// </remarks>
     public interface ISimulate<TInput>

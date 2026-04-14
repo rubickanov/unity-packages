@@ -12,7 +12,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     {
         private static readonly Dictionary<Type, NetworkScope> Cache = new();
 
-        // Play-Mode-without-Domain-Reload safety (ISSUES.md #17 / TODO.md Batch 8).
+        // Play-Mode-without-Domain-Reload safety: clear static cache on subsystem registration.
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
         {

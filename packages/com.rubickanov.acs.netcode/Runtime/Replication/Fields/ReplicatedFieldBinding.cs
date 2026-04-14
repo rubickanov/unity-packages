@@ -20,7 +20,6 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // ownership). Owner-auth initial-sync uses this to detect whether a pure-client
         // owner has already produced a local value; if it has, incoming server state
         // for that field must be ignored to avoid overwriting the fresh local write.
-        // See ISSUES.md #19.
         protected bool _ownerWroteSinceSpawn;
         public bool OwnerWroteSinceSpawn => _ownerWroteSinceSpawn;
         public void ResetOwnerWroteSinceSpawn() => _ownerWroteSinceSpawn = false;
@@ -32,7 +31,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // accumulated deltas since the last tick.
         public virtual void WriteSnapshotTo(FastBufferWriter writer) => WriteTo(writer);
         // SnapshotSize may exceed Size for collection bindings — a full snapshot can be
-        // larger than a single-tick delta. AspectReplicator uses this to size the initial-
+        // larger than a single-tick delta. EntityReplicator uses this to size the initial-
         // sync payload hint correctly.
         public virtual int SnapshotSize => Size;
         public abstract void ReadFrom(FastBufferReader reader);
@@ -159,7 +158,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         private static readonly Dictionary<Type, Func<object, object, ReplicatedFieldBinding>> ObservableRingBufferFactories = new();
         private static readonly HashSet<Type> WarnedUnsupportedTypes = new();
 
-        // Play-Mode-without-Domain-Reload safety (ISSUES.md #17 / TODO.md Batch 8).
+        // Play-Mode-without-Domain-Reload safety: clear static caches on subsystem registration.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
         {
@@ -174,9 +173,9 @@ namespace Rubickanov.ACS.Runtime.Netcode
         }
 
         // tickDelta is only consumed by the AuthorityRendered branch (sizes coalesce / stale
-        // windows, see ISSUES.md #23). Plain and PassiveInterpolated ignore it, so callers in
-        // tests that build those kinds can omit the argument.
-        // quantization defaults to None so existing call sites (tests, AspectReplicator pre-attribute)
+        // windows). Plain and PassiveInterpolated ignore it, so callers in tests that build
+        // those kinds can omit the argument.
+        // quantization defaults to None so existing call sites (tests, EntityReplicator pre-attribute)
         // keep raw-memcpy behaviour. Invalid (valueType, quantization) combos throw via CodecRegistry.
         // system is required only for EntityRef-typed fields — EntityRefCodec translates via the
         // system's EntityId ↔ NetworkObjectId maps. Defaulting it to null keeps the factory
@@ -187,14 +186,14 @@ namespace Rubickanov.ACS.Runtime.Netcode
             FieldBindingKind kind,
             double tickDelta = 0,
             QuantizationMode quantization = QuantizationMode.None,
-            AspectReplicationSystem? system = null)
+            EntityReplicationSystem? system = null)
         {
             object codec;
             if (valueType == typeof(EntityRef))
             {
                 if (system == null)
                     throw new InvalidOperationException(
-                        "[ReplicatedFieldBindingFactory] EntityRef replication requires an AspectReplicationSystem context. " +
+                        "[ReplicatedFieldBindingFactory] EntityRef replication requires an EntityReplicationSystem context. " +
                         "Pass the replicator's _system when calling Create.");
                 codec = system.GetOrCreateEntityRefCodec();
             }
@@ -218,7 +217,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                     }
 
                     // AuthorityRendered: tickDelta-parameterised ctor so coalesce / stale
-                    // windows track NetworkTickSystem.TickRate (see ISSUES.md #23).
+                    // windows track NetworkTickSystem.TickRate.
                     if (!AuthorityRenderFactories.TryGetValue(valueType, out var renderFactory))
                     {
                         renderFactory = BuildAuthorityRenderFactory(valueType);
@@ -230,7 +229,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 if (WarnedUnsupportedTypes.Add(valueType))
                 {
                     Debug.LogWarning(
-                        $"[AspectReplicator] InterpolationMode.Linear is set on a field of type '{valueType.Name}', " +
+                        $"[EntityReplicator] InterpolationMode.Linear is set on a field of type '{valueType.Name}', " +
                         $"but no lerper is registered for this type. Falling back to immediate apply. " +
                         $"Supported: float, double, Vector2, Vector3, Vector4, Quaternion, Color.");
                 }
@@ -278,14 +277,14 @@ namespace Rubickanov.ACS.Runtime.Netcode
             object observableList,
             Type elementType,
             QuantizationMode quantization = QuantizationMode.None,
-            AspectReplicationSystem? system = null)
+            EntityReplicationSystem? system = null)
         {
             object codec;
             if (elementType == typeof(EntityRef))
             {
                 if (system == null)
                     throw new InvalidOperationException(
-                        "[ReplicatedFieldBindingFactory] ObservableList<EntityRef> replication requires an AspectReplicationSystem context. " +
+                        "[ReplicatedFieldBindingFactory] ObservableList<EntityRef> replication requires an EntityReplicationSystem context. " +
                         "Pass the replicator's _system when calling CreateObservableList.");
                 codec = system.GetOrCreateEntityRefCodec();
             }
@@ -321,7 +320,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             Type keyType,
             Type valueType,
             QuantizationMode quantization = QuantizationMode.None,
-            AspectReplicationSystem? system = null)
+            EntityReplicationSystem? system = null)
         {
             // Value codec — identical to scalar / list resolution.
             object valueCodec;
@@ -329,7 +328,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             {
                 if (system == null)
                     throw new InvalidOperationException(
-                        "[ReplicatedFieldBindingFactory] ObservableDictionary<K,EntityRef> replication requires an AspectReplicationSystem context. " +
+                        "[ReplicatedFieldBindingFactory] ObservableDictionary<K,EntityRef> replication requires an EntityReplicationSystem context. " +
                         "Pass the replicator's _system when calling CreateObservableDictionary.");
                 valueCodec = system.GetOrCreateEntityRefCodec();
             }
@@ -382,14 +381,14 @@ namespace Rubickanov.ACS.Runtime.Netcode
             object observableHashSet,
             Type elementType,
             QuantizationMode quantization = QuantizationMode.None,
-            AspectReplicationSystem? system = null)
+            EntityReplicationSystem? system = null)
         {
             object codec;
             if (elementType == typeof(EntityRef))
             {
                 if (system == null)
                     throw new InvalidOperationException(
-                        "[ReplicatedFieldBindingFactory] ObservableHashSet<EntityRef> replication requires an AspectReplicationSystem context. " +
+                        "[ReplicatedFieldBindingFactory] ObservableHashSet<EntityRef> replication requires an EntityReplicationSystem context. " +
                         "Pass the replicator's _system when calling CreateObservableHashSet.");
                 codec = system.GetOrCreateEntityRefCodec();
             }
@@ -422,14 +421,14 @@ namespace Rubickanov.ACS.Runtime.Netcode
             object observableRingBuffer,
             Type elementType,
             QuantizationMode quantization = QuantizationMode.None,
-            AspectReplicationSystem? system = null)
+            EntityReplicationSystem? system = null)
         {
             object codec;
             if (elementType == typeof(EntityRef))
             {
                 if (system == null)
                     throw new InvalidOperationException(
-                        "[ReplicatedFieldBindingFactory] ObservableFixedSizeRingBuffer<EntityRef> replication requires an AspectReplicationSystem context. " +
+                        "[ReplicatedFieldBindingFactory] ObservableFixedSizeRingBuffer<EntityRef> replication requires an EntityReplicationSystem context. " +
                         "Pass the replicator's _system when calling CreateObservableRingBuffer.");
                 codec = system.GetOrCreateEntityRefCodec();
             }

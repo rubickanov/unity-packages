@@ -15,7 +15,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// broadcast, and the #19 initial-sync race around
     /// <c>OwnerWroteSinceSpawn</c>.
     /// </summary>
-    public class AspectReplicatorOwnerAuthTests : AspectReplicatorIntegrationTestBase
+    public class EntityReplicatorOwnerAuthTests : EntityReplicatorIntegrationTestBase
     {
         [UnityTest]
         public IEnumerator PureClientOwnerWritesOwnerAuthField_RelaysToOtherClients()
@@ -93,7 +93,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             AssertOnTimeout("Ownership change did not propagate.");
 
             LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex(
-                @"\[AspectReplicator\] Owner submitted server-auth field index .* on '.*'\. Dropping\."));
+                @"\[EntityReplicator\] Owner submitted server-auth field index .* on '.*'\. Dropping\."));
 
             // Build a forged owner-submit payload that includes the server-auth
             // field. Field order is alphabetical: [0] = OwnerValue (float),
@@ -187,7 +187,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             GetStateAspectOnClient(m_ClientNetworkManagers[0], networkObjectId).OwnerValue.Value = 42f;
 
             var ownerReplicator = GetReplicatorOnClient(m_ClientNetworkManagers[0], networkObjectId);
-            var bindingsField = typeof(AspectReplicator).GetField("_bindings",
+            var bindingsField = typeof(EntityReplicator).GetField("_bindings",
                 BindingFlags.NonPublic | BindingFlags.Instance)!;
             var ownerBindings = (ReplicatedFieldBinding[])bindingsField.GetValue(ownerReplicator)!;
             // [0] = OwnerValue (alphabetical sort).
@@ -215,7 +215,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         // ---- Helpers --------------------------------------------------------
 
         private static unsafe byte[] BuildInitialSyncPayload(
-            AspectReplicator replicator, int ownerServerValue, float ownerOwnerValue)
+            EntityReplicator replicator, int ownerServerValue, float ownerOwnerValue)
         {
             // Mirrors BuildInitialSyncPayload's writer layout: int serverTick,
             // byte[maskLen] fullMask, then every binding's bytes in order. Field
@@ -246,7 +246,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         /// Extracted from the iterator to satisfy C#'s "no unsafe in iterators" rule.
         /// </summary>
         private static unsafe void ApplyForgedOwnerSubmission(
-            AspectReplicator serverReplicator, float ownerValue, int serverValue)
+            EntityReplicator serverReplicator, float ownerValue, int serverValue)
         {
             var forgedWriter = new FastBufferWriter(64, Allocator.Temp);
             try

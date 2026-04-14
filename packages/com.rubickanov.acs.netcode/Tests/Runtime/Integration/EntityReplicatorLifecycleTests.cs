@@ -9,16 +9,16 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 {
     /// <summary>
     /// Integration coverage for the OnNetworkSpawn → bindings init → tick →
-    /// OnNetworkDespawn lifecycle of <see cref="AspectReplicator"/>, driven
+    /// OnNetworkDespawn lifecycle of <see cref="EntityReplicator"/>, driven
     /// through real NGO spawn/despawn on a host + 2 clients fixture.
     ///
     /// Pure-unit replicator tests live alongside in
     /// <c>ApplyStateBufferRoundTripTests</c> and friends; this suite exercises
     /// the parts that only show up when a real NetworkManager is in the loop.
     /// </summary>
-    public class AspectReplicatorLifecycleTests : AspectReplicatorIntegrationTestBase
+    public class EntityReplicatorLifecycleTests : EntityReplicatorIntegrationTestBase
     {
-        /// <summary>NetworkObject + MonoEntity + AspectReplicator + GiantStateAspectRegistrar (257 fields, one over the 256-field cap) — regression #3 fixture.</summary>
+        /// <summary>NetworkObject + MonoEntity + EntityReplicator + GiantStateAspectRegistrar (257 fields, one over the 256-field cap) — regression #3 fixture.</summary>
         protected GameObject _giantPrefab = null!;
 
         protected override void OnServerAndClientsCreated()
@@ -30,7 +30,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             // scan in every other integration suite.
             _giantPrefab = CreateNetworkObjectPrefab("GiantEntity");
             _giantPrefab.AddComponent<MonoEntity>();
-            _giantPrefab.AddComponent<AspectReplicator>();
+            _giantPrefab.AddComponent<EntityReplicator>();
             _giantPrefab.AddComponent<GiantStateAspectRegistrar>();
         }
 
@@ -69,7 +69,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             for (int i = 0; i < m_NetworkManagers.Length; i++)
             {
                 LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(
-                    @"\[AspectReplicator\] '.*' is missing MonoEntity"));
+                    @"\[EntityReplicator\] '.*' is missing MonoEntity"));
             }
 
             var serverInstance = SpawnObject(_brokenContextPrefab, m_ServerNetworkManager);
@@ -169,10 +169,10 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         {
             // GiantStateAspect has 257 [Replicated] fields — exactly one over
             // the 256 cap. OnNetworkSpawn must log an error and return WITHOUT
-            // registering with AspectReplicationSystem: silent truncation would
+            // registering with EntityReplicationSystem: silent truncation would
             // let two peers drop different excess fields and drift their
             // position-indexed bitmasks, writing network payloads to the wrong
-            // reactive properties (ISSUES.md #3).
+            // reactive properties.
             //
             // Error fires once per peer that runs OnNetworkSpawn (server + 2
             // clients = 3). Use a regex because the entity name is the
@@ -180,7 +180,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             for (int i = 0; i < m_NetworkManagers.Length; i++)
             {
                 LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(
-                    @"\[AspectReplicator\] Entity '.*' has 257 replicated fields, max is 256\. Aborting spawn"));
+                    @"\[EntityReplicator\] Entity '.*' has 257 replicated fields, max is 256\. Aborting spawn"));
             }
 
             var serverInstance = SpawnObject(_giantPrefab, m_ServerNetworkManager);
@@ -196,24 +196,24 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             {
                 var replicator = GetReplicatorOnClient(m_NetworkManagers[i], networkObjectId);
                 Assert.IsNull(GetSystem(replicator),
-                    $"Client {m_NetworkManagers[i].LocalClientId}: abort path must leave _system null, not register with AspectReplicationSystem.");
+                    $"Client {m_NetworkManagers[i].LocalClientId}: abort path must leave _system null, not register with EntityReplicationSystem.");
             }
         }
 
         // ---- Reflection helpers --------------------------------------------
 
-        private static int GetBindingCount(AspectReplicator replicator)
+        private static int GetBindingCount(EntityReplicator replicator)
         {
-            var field = typeof(AspectReplicator).GetField("_bindings",
+            var field = typeof(EntityReplicator).GetField("_bindings",
                 BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(field, "_bindings field renamed?");
             var arr = (ReplicatedFieldBinding[])field!.GetValue(replicator)!;
             return arr.Length;
         }
 
-        private static object GetSystem(AspectReplicator replicator)
+        private static object GetSystem(EntityReplicator replicator)
         {
-            var field = typeof(AspectReplicator).GetField("_system",
+            var field = typeof(EntityReplicator).GetField("_system",
                 BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(field, "_system field renamed?");
             return field!.GetValue(replicator);

@@ -317,7 +317,7 @@ Runtime визуализатор аспектов. Оверлей в play mode �
 
 ### Реализация
 
-EditorWindow + runtime компонент. В play mode подписывается на все `ReactiveProperty` выбранной сущности, рисует через IMGUI или UI Toolkit. Для сетевых метрик — hook в `AspectReplicationSystem` (счётчик байт per binding).
+EditorWindow + runtime компонент. В play mode подписывается на все `ReactiveProperty` выбранной сущности, рисует через IMGUI или UI Toolkit. Для сетевых метрик — hook в `EntityReplicationSystem` (счётчик байт per binding).
 
 Не влияет на production — `#if UNITY_EDITOR` или отдельный Editor asmdef.
 
@@ -476,51 +476,7 @@ NGO поддерживает `INetworkPrefabInstanceHandler` для кастом
 
 ---
 
-## 8. acs.sync
-
-Автомост между аспектами и Unity-компонентами. Убирает bridge-компоненты которые вручную пишут `transform.position = _aspect.Position.Value` в Update или в Subscribe.
-
-### Проблема
-
-Почти в каждом проекте на ACS есть "bridge" компонент — подписывается на аспект и синхронизирует значения в Transform, Rigidbody, Animator и т.д. Это boilerplate: компонент, [Aspect] поле, OnSubscribe, Subscribe, AddTo. На каждое поле.
-
-### Использование
-
-```csharp
-public class MovementAspect : IEntityAspect
-{
-    [SyncToTransform(Target = TransformField.Position)]
-    public readonly ReactiveProperty<Vector3> Position = new();
-
-    [SyncToTransform(Target = TransformField.Rotation)]
-    public readonly ReactiveProperty<Quaternion> Rotation = new();
-}
-
-public class PhysicsAspect : IEntityAspect
-{
-    [SyncToRigidbody(Target = RigidbodyField.Velocity)]
-    public readonly ReactiveProperty<Vector3> Velocity = new();
-}
-```
-
-Один атрибут вместо целого компонента. Сканер находит атрибуты при spawn, подписывается, bridge-код исчезает.
-
-### Архитектура
-
-`AspectSyncSystem` — компонент на сущности (или часть `EntityContext`). При Awake/OnEnable сканирует все аспекты, находит `[SyncTo*]` атрибуты, создаёт подписки. Кэш per-type как в ReplicationScanner.
-
-Поддерживаемые цели:
-- `TransformField` — Position, Rotation, LocalPosition, LocalRotation, LocalScale
-- `RigidbodyField` — Velocity, AngularVelocity
-- Можно расширять через `ISyncTarget` интерфейс для кастомных компонентов
-
-### Направление синка
-
-По умолчанию — **aspect → компонент** (reactive push). Обратное направление (transform → aspect) опционально через `[SyncFromTransform]` — полезно когда физика двигает rigidbody и нужно обновить аспект.
-
----
-
-## 9. acs.animation
+## 8. acs.animation
 
 Reactive binding аспектов к Animator. Убирает ручной `animator.SetFloat`/`SetBool`/`SetTrigger` в Update.
 
@@ -581,7 +537,7 @@ Editor-time проверка: если `[AnimatorParam("Speed")]` а в Animator
 
 ---
 
-## 10. acs.rules
+## 9. acs.rules
 
 Декларативный rules engine поверх реактивных аспектов. Data-driven игровые правила без хардкода.
 
@@ -641,7 +597,7 @@ builder
 
 ---
 
-## 11. acs.testing
+## 10. acs.testing
 
 Тест-утилиты для ACS. Fluent builder для сборки сущностей и assert-хелперы без GameObject, сцены и NetworkManager.
 
@@ -704,7 +660,7 @@ entity.AssertDirty<StateTestAspect>(s => s.Health);
 
 ---
 
-## 12. acs.live
+## 11. acs.live
 
 Веб-панель для живой настройки аспектов в реалтайме. Из игры стримится состояние по WebSocket в браузер — на телефоне, планшете, втором мониторе.
 
@@ -756,7 +712,7 @@ Dev-only. `#if DEVELOPMENT_BUILD || UNITY_EDITOR` — в release билде се
 
 ---
 
-## 13. acs.mirror
+## 12. acs.mirror
 
 Зеркало аспектов во внешнюю базу данных. Состояние сущностей доступно из внешних инструментов — админ-панели, аналитика, GM-тулзы.
 
@@ -814,7 +770,7 @@ IMirrorBackend
 
 ---
 
-## 14. acs.simulate
+## 13. acs.simulate
 
 Headless симуляция логики аспектов без рендера. Прогон тысяч боёв за секунды для балансировки, или dedicated сервер без GPU.
 
@@ -890,9 +846,9 @@ Console.WriteLine($"Health after 160s of burn: {health.Health.Value}");
 
 ---
 
-## 15. acs.bindings
+## 14. acs.bindings
 
-Декларативная привязка аспектов к UI. Как `acs.sync` для Transform/Rigidbody, но для UI элементов.
+Декларативная привязка аспектов к UI элементам.
 
 ### Использование
 
@@ -922,7 +878,7 @@ public class PlayerHudView : MonoBehaviour
 
 ---
 
-## 16. acs.commands
+## 15. acs.commands
 
 Командный паттерн для мутаций аспектов. Вместо прямого `Health.Value = x` — через типизированные команды.
 
@@ -968,18 +924,17 @@ CommandBus.Send(new DealDamageCommand { Target = enemy, Amount = 10f });
 
 **Пакеты-расширения:**
 1. **persistence** — минимальные примитивы Snapshot/Restore, переиспользует scanner + field bindings из netcode. Save-систему пишет игра сверху
-2. **sync** — убирает самый частый boilerplate, минимум кода для реализации
-3. **animation** — тот же паттерн что sync, убирает ещё один слой bridge-кода
-4. **debug** — помогает при разработке всего остального, окупается сразу
-5. **rules** — мощный инструмент для геймдизайнеров, хорошо ложится на reactive
-6. **pooling** — нужен при масштабе (десятки AI с респавном)
-7. **replay** — нишевый но эффектный, переиспользует существующую сериализацию
-8. **reactive** — quality of life, сокращает boilerplate
-9. **testing** — окупается при написании тестов для новых пакетов
-10. **live** — dev-time remote inspector, кайф для плейтестов
-11. **mirror** — production, GM-тулзы, аналитика
-12. **simulate** — headless прогон для балансировки и CI
-13. **queries (spatial)** — spatial hash, WithinRadius/Nearest. Возможно часть EQS
-14. **codegen** — высокая сложность, делать когда reflection станет bottleneck
-15. **bindings** — под вопросом, пересекается с `ui` пакетом. Может не понадобиться
-16. **commands** — под вопросом, ломает реактивный стиль. Скорее паттерн чем пакет
+2. **animation** — убирает слой bridge-кода между аспектами и Animator
+3. **debug** — помогает при разработке всего остального, окупается сразу
+4. **rules** — мощный инструмент для геймдизайнеров, хорошо ложится на reactive
+5. **pooling** — нужен при масштабе (десятки AI с респавном)
+6. **replay** — нишевый но эффектный, переиспользует существующую сериализацию
+7. **reactive** — quality of life, сокращает boilerplate
+8. **testing** — окупается при написании тестов для новых пакетов
+9. **live** — dev-time remote inspector, кайф для плейтестов
+10. **mirror** — production, GM-тулзы, аналитика
+11. **simulate** — headless прогон для балансировки и CI
+12. **queries (spatial)** — spatial hash, WithinRadius/Nearest. Возможно часть EQS
+13. **codegen** — высокая сложность, делать когда reflection станет bottleneck
+14. **bindings** — под вопросом, пересекается с `ui` пакетом. Может не понадобиться
+15. **commands** — под вопросом, ломает реактивный стиль. Скорее паттерн чем пакет

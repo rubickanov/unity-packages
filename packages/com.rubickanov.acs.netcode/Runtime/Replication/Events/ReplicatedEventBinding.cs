@@ -84,7 +84,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     {
         private static readonly Dictionary<Type, Func<object, AuthorityMode, Reliability, ReplicatedEventBinding>> Factories = new();
 
-        // Play-Mode-without-Domain-Reload safety (ISSUES.md #17 / TODO.md Batch 8).
+        // Play-Mode-without-Domain-Reload safety: clear static caches on subsystem registration.
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
         {

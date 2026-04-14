@@ -12,7 +12,7 @@ using UnityEngine.TestTools;
 namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 {
     /// <summary>
-    /// Base fixture for AspectReplicator integration tests. Spins up one host and
+    /// Base fixture for EntityReplicator integration tests. Spins up one host and
     /// <see cref="NumberOfClients"/> pure clients on a UnityTransport loopback
     /// connection, registers the test prefabs declared by subclasses, and exposes
     /// the helper surface the test suites rely on.
@@ -25,7 +25,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// <c>NetcodeIntegrationTest</c> used by the test suites below so individual
     /// tests read the same as they would against NGO's fixture.
     /// </summary>
-    public abstract class AspectReplicatorIntegrationTestBase
+    public abstract class EntityReplicatorIntegrationTestBase
     {
         // ---- Fixture config ------------------------------------------------
         //
@@ -99,22 +99,22 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         // single concern so individual tests do not pay the cost of standing
         // up unrelated components.
 
-        /// <summary>NetworkObject + MonoEntity + AspectReplicator + StateTestAspectRegistrar.</summary>
+        /// <summary>NetworkObject + MonoEntity + EntityReplicator + StateTestAspectRegistrar.</summary>
         protected GameObject _statePrefab = null!;
 
-        /// <summary>NetworkObject + MonoEntity + AspectReplicator + EventTestAspectRegistrar.</summary>
+        /// <summary>NetworkObject + MonoEntity + EntityReplicator + EventTestAspectRegistrar.</summary>
         protected GameObject _eventPrefab = null!;
 
         /// <summary>State prefab + ServerOnly + OwnerOnly marker components for scope tests.</summary>
         protected GameObject _scopePrefab = null!;
 
-        /// <summary>NetworkObject + AspectReplicator (no MonoEntity) — regression #13/#15 fixture.</summary>
+        /// <summary>NetworkObject + EntityReplicator (no MonoEntity) — regression #13/#15 fixture.</summary>
         protected GameObject _brokenContextPrefab = null!;
 
         /// <summary>Parent NetworkObject + scope marker, with a child NetworkObject also carrying a scope marker — regression #3 fixture.</summary>
         protected GameObject _nestedScopePrefab = null!;
 
-        /// <summary>NetworkObject + MonoEntity + AspectReplicator + MonsterStateAspectRegistrar (65 fields, one over the 64-field cap) — regression #2 fixture.</summary>
+        /// <summary>NetworkObject + MonoEntity + EntityReplicator + MonsterStateAspectRegistrar (65 fields, one over the 64-field cap) — regression #2 fixture.</summary>
         protected GameObject _monsterPrefab = null!;
 
         // Prefabs created via CreateNetworkObjectPrefab, tracked so teardown
@@ -138,25 +138,25 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         {
             _statePrefab = CreateNetworkObjectPrefab("StateEntity");
             _statePrefab.AddComponent<MonoEntity>();
-            _statePrefab.AddComponent<AspectReplicator>();
+            _statePrefab.AddComponent<EntityReplicator>();
             _statePrefab.AddComponent<StateTestAspectRegistrar>();
 
             _eventPrefab = CreateNetworkObjectPrefab("EventEntity");
             _eventPrefab.AddComponent<MonoEntity>();
-            _eventPrefab.AddComponent<AspectReplicator>();
+            _eventPrefab.AddComponent<EntityReplicator>();
             _eventPrefab.AddComponent<EventTestAspectRegistrar>();
 
             _scopePrefab = CreateNetworkObjectPrefab("ScopeEntity");
             _scopePrefab.AddComponent<MonoEntity>();
-            _scopePrefab.AddComponent<AspectReplicator>();
+            _scopePrefab.AddComponent<EntityReplicator>();
             _scopePrefab.AddComponent<StateTestAspectRegistrar>();
             _scopePrefab.AddComponent<ServerOnlyMarkerComponent>();
             _scopePrefab.AddComponent<OwnerOnlyMarkerComponent>();
 
-            // No MonoEntity: AspectReplicator must log an error and bail
+            // No MonoEntity: EntityReplicator must log an error and bail
             // gracefully without an NRE on OnNetworkSpawn. Regression #13/#15.
             _brokenContextPrefab = CreateNetworkObjectPrefab("BrokenContextEntity");
-            _brokenContextPrefab.AddComponent<AspectReplicator>();
+            _brokenContextPrefab.AddComponent<EntityReplicator>();
 
             // Nested NetworkObject: ApplyNetworkScopes on the parent must stop
             // walking children at the inner NetworkObject boundary, so the
@@ -164,7 +164,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             // replicator. Regression #3.
             _nestedScopePrefab = CreateNetworkObjectPrefab("NestedScopeParentEntity");
             _nestedScopePrefab.AddComponent<MonoEntity>();
-            _nestedScopePrefab.AddComponent<AspectReplicator>();
+            _nestedScopePrefab.AddComponent<EntityReplicator>();
             _nestedScopePrefab.AddComponent<ServerOnlyMarkerComponent>();
 
             var nestedChild = new GameObject("NestedScopeChild");
@@ -178,10 +178,10 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             nestedChild.AddComponent<ServerOnlyMarkerComponent>();
 
             // 65-field aspect: triggers the > 64 clamp path inside
-            // AspectReplicator.OnNetworkSpawn. Regression #2.
+            // EntityReplicator.OnNetworkSpawn. Regression #2.
             _monsterPrefab = CreateNetworkObjectPrefab("MonsterEntity");
             _monsterPrefab.AddComponent<MonoEntity>();
-            _monsterPrefab.AddComponent<AspectReplicator>();
+            _monsterPrefab.AddComponent<EntityReplicator>();
             _monsterPrefab.AddComponent<MonsterStateAspectRegistrar>();
         }
 
@@ -423,15 +423,15 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         // server's reference. Helpers below centralize that lookup.
 
         /// <summary>
-        /// Returns the <see cref="AspectReplicator"/> instance that lives on
+        /// Returns the <see cref="EntityReplicator"/> instance that lives on
         /// <paramref name="client"/>'s copy of the entity with the given id.
         /// </summary>
-        protected static AspectReplicator GetReplicatorOnClient(NetworkManager client, ulong networkObjectId)
+        protected static EntityReplicator GetReplicatorOnClient(NetworkManager client, ulong networkObjectId)
         {
             Assert.IsTrue(
                 client.SpawnManager.SpawnedObjects.ContainsKey(networkObjectId),
                 $"NetworkObject {networkObjectId} is not spawned on client {client.LocalClientId}.");
-            return client.SpawnManager.SpawnedObjects[networkObjectId].GetComponent<AspectReplicator>();
+            return client.SpawnManager.SpawnedObjects[networkObjectId].GetComponent<EntityReplicator>();
         }
 
         /// <summary>

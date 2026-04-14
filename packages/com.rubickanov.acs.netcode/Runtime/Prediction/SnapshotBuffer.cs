@@ -20,7 +20,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// predicted payload mixes heterogenous field types; the serialization
     /// format follows the existing replication wire order (alphabetical by
     /// field name, stable between peers). See
-    /// <see cref="AspectReplicator.PredictedBindingIndices"/> for the layout
+    /// <see cref="EntityReplicator.PredictedBindingIndices"/> for the layout
     /// source of truth.
     /// </remarks>
     [Preserve]

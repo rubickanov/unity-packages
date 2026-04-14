@@ -15,7 +15,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// and the owner-side IsOwner guard together keep every peer's receive
     /// count at exactly one per emit.
     /// </summary>
-    public class AspectReplicatorEventTests : AspectReplicatorIntegrationTestBase
+    public class EntityReplicatorEventTests : EntityReplicatorIntegrationTestBase
     {
         [UnityTest]
         public IEnumerator HostFiresServerAuthEvent_AllPeersReceiveExactlyOnce()

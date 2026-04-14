@@ -349,7 +349,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         public void Scan_EntityRefNoQuantization_CarriedOnFieldInfo()
         {
             // Baseline: a plain EntityRef field must scan successfully so the factory can
-            // construct an EntityRefCodec-backed binding in AspectReplicator.OnNetworkSpawn.
+            // construct an EntityRefCodec-backed binding in EntityReplicator.OnNetworkSpawn.
             var fields = ReplicationScanner.Scan(new PlainEntityRefAspect());
 
             Assert.AreEqual(1, fields.Length);

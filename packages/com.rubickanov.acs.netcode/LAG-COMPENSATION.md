@@ -76,7 +76,7 @@ The groundwork that can be reused when we do implement:
   single `byte[Capacity * slotSize]`, `Span<byte>` slot views, zero-alloc
   after construction. Currently used owner-side for reconciliation; trivially
   symmetrized to server-side.
-- **`AspectReplicator.CapturePredictedState`** — already serializes only
+- **`EntityReplicator.CapturePredictedState`** — already serializes only
   `[Replicated(Predicted = true)]` fields into a caller-provided span. A
   rewind API would reintroduce the symmetric `ReadFrom → ApplyFromNetwork`
   restore path that was removed as dead code in the Batch 5 cleanup; see
@@ -230,7 +230,7 @@ When the trigger fires (see "When to reconsider"), start with:
 - Leaves live physics untouched.
 - Fits the existing `SnapshotBuffer` primitive — add a server-side history
   buffer symmetric to the owner one, and wire it to a `Rewind(int tick)`
-  scope on `AspectReplicator`.
+  scope on `EntityReplicator`.
 - Anti-cheat cap: clamp rewind to `[serverTick - maxRewind, serverTick]` with
   `maxRewind` around 200 ms. One-line guard, big impact.
 

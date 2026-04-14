@@ -96,7 +96,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         [Test]
         public void OnNetworkSpawn_WhenEnabledIsFalse_DoesNotSubscribe_RegressionSixteen()
         {
-            // Simulates AspectReplicator.ApplyNetworkScopes synchronously disabling the
+            // Simulates EntityReplicator.ApplyNetworkScopes synchronously disabling the
             // component before OnNetworkSpawn fires — scope-disable of a [ServerOnly]
             // component running on a pure client. Before #16, OnSubscribe would still fire
             // (subscribe was tied to OnNetworkSpawn), and R3 subscriptions ignored the

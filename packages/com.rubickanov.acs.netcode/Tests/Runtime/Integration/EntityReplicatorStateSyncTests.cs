@@ -14,7 +14,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// Also covers the initial-sync snapshot path used by late-joining clients
     /// (regression #1).
     /// </summary>
-    public class AspectReplicatorStateSyncTests : AspectReplicatorIntegrationTestBase
+    public class EntityReplicatorStateSyncTests : EntityReplicatorIntegrationTestBase
     {
         [UnityTest]
         public IEnumerator ServerWritesField_AllClientsApplyAfterTick()
@@ -201,7 +201,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
             // (a) server-side binding must be clean.
             var serverReplicator = GetReplicatorOnClient(m_ServerNetworkManager, networkObjectId);
-            var bindingsField = typeof(AspectReplicator).GetField("_bindings",
+            var bindingsField = typeof(EntityReplicator).GetField("_bindings",
                 BindingFlags.NonPublic | BindingFlags.Instance);
             var serverBindings = (ReplicatedFieldBinding[])bindingsField!.GetValue(serverReplicator)!;
             for (int i = 0; i < serverBindings.Length; i++)
