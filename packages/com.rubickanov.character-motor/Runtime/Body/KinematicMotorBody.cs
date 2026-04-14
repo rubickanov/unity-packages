@@ -6,6 +6,14 @@ namespace Rubickanov.Motor
     /// CapsuleCast-based kinematic body. Tracks velocity internally and resolves
     /// collisions via iterative CapsuleCast sweeps. Deterministic — suitable for
     /// multiplayer with prediction and reconciliation.
+    ///
+    /// <para>
+    /// <see cref="SimulatedPosition"/>/<see cref="SimulatedRotation"/> are the
+    /// single source of truth. The underlying <see cref="UnityEngine.Transform"/>
+    /// is used transiently during <see cref="BeginFrame"/>/<see cref="EndFrame"/>
+    /// as a scratchpad for <see cref="Physics.CapsuleCast"/> — it is not an
+    /// authoritative output of the motor.
+    /// </para>
     /// </summary>
     public class KinematicMotorBody : IMotorBody
     {
@@ -19,9 +27,8 @@ namespace Rubickanov.Motor
         private Vector3 _velocity;
         private float _frameDeltaTime;
 
-        // Interpolation
-        private Vector3 _previousPosition;
         private Vector3 _simulatedPosition;
+        private Quaternion _simulatedRotation;
 
         public KinematicMotorBody(
             Rigidbody rb,
@@ -41,21 +48,25 @@ namespace Rubickanov.Motor
             _rb.useGravity = false;
             _rb.interpolation = RigidbodyInterpolation.None;
 
-            _previousPosition = _transform.position;
             _simulatedPosition = _transform.position;
+            _simulatedRotation = _transform.rotation;
         }
 
         public Transform Transform => _transform;
-        public Vector3 Position => _transform.position;
-        public Quaternion Rotation => _transform.rotation;
+        public Vector3 Position => _simulatedPosition;
+        public Quaternion Rotation => _simulatedRotation;
+        public Vector3 SimulatedPosition => _simulatedPosition;
+        public Quaternion SimulatedRotation => _simulatedRotation;
         public Vector3 Velocity => _velocity;
         public float CapsuleHeight => _capsule.height;
 
         public void BeginFrame(MotorState state, float deltaTime)
         {
-            // Restore exact simulated position for physics (undo visual interpolation)
+            // Prepare the collider for physics queries — sync transform to the
+            // authoritative simulated state. Anything a consumer's visual bridge
+            // wrote to the transform between ticks is overwritten here.
             _transform.position = _simulatedPosition;
-            _previousPosition = _simulatedPosition;
+            _transform.rotation = _simulatedRotation;
 
             _frameDeltaTime = deltaTime;
             state.CurrentVelocity = _velocity;
@@ -67,11 +78,6 @@ namespace Rubickanov.Motor
             ResolveMovement(displacement);
             _simulatedPosition = _transform.position;
             state.CurrentVelocity = _velocity;
-        }
-
-        public void Interpolate(float alpha)
-        {
-            _transform.position = Vector3.Lerp(_previousPosition, _simulatedPosition, alpha);
         }
 
         public void AddForce(Vector3 force, ForceMode mode)
@@ -101,14 +107,27 @@ namespace Rubickanov.Motor
 
         public void MovePosition(Vector3 position)
         {
-            _transform.position = position;
-            _previousPosition = position;
             _simulatedPosition = position;
+            // Keep the scratchpad in sync so subsequent modules/queries in the
+            // same tick see the updated collider position.
+            _transform.position = position;
         }
 
         public void Rotate(Vector3 axis, float angle, Space relativeTo)
         {
-            _transform.Rotate(axis, angle, relativeTo);
+            var delta = Quaternion.AngleAxis(angle, axis);
+            _simulatedRotation = relativeTo == Space.World
+                ? delta * _simulatedRotation
+                : _simulatedRotation * delta;
+            _transform.rotation = _simulatedRotation;
+        }
+
+        public void Teleport(Vector3 position, Quaternion rotation, Vector3 velocity)
+        {
+            _simulatedPosition = position;
+            _simulatedRotation = rotation;
+            _velocity = velocity;
+            // Transform is left alone; next BeginFrame will sync the collider.
         }
 
         public bool SphereCast(Vector3 origin, float radius, Vector3 direction,
@@ -135,23 +154,22 @@ namespace Rubickanov.Motor
         public BodySnapshot SaveState()
         {
             return new BodySnapshot(
-                _transform.position,
+                _simulatedPosition,
                 _velocity,
-                _transform.rotation,
+                _simulatedRotation,
                 _capsule.height
             );
         }
 
         public void RestoreState(BodySnapshot snapshot)
         {
-            _transform.position = snapshot.Position;
-            _previousPosition = snapshot.Position;
             _simulatedPosition = snapshot.Position;
+            _simulatedRotation = snapshot.Rotation;
             _velocity = snapshot.Velocity;
-            _transform.rotation = snapshot.Rotation;
             _capsule.height = snapshot.CapsuleHeight;
             _capsule.center = Vector3.up * (snapshot.CapsuleHeight * 0.5f);
-            Physics.SyncTransforms();
+            // No transform write, no Physics.SyncTransforms — next BeginFrame
+            // will sync the collider before any physics query runs.
         }
 
         private void ResolveMovement(Vector3 displacement)
