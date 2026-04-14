@@ -27,6 +27,17 @@ namespace Rubickanov.ACS.Runtime.Persistence
         /// implementation? Supply a callback here.
         /// </summary>
         public Action<IEntity> DisposeMissing { get; init; }
+
+        /// <summary>
+        /// Optional migration registry applied before field writes. Enables
+        /// <see cref="IAspectSnapshotMigrator"/> to rewrite the snapshot structure
+        /// (split/merge/delete aspects) and <see cref="IAspectMigrator"/> to evolve
+        /// individual aspects' fields across <see cref="PersistedVersionAttribute"/>
+        /// bumps. When <c>null</c> the package skips migrations and falls back to the
+        /// legacy behaviour: missing field → default kept; unknown field → ignored;
+        /// version mismatch → warning + skip of that aspect.
+        /// </summary>
+        public PersistenceMigrationRegistry Migrations { get; init; }
     }
 
     /// <summary>

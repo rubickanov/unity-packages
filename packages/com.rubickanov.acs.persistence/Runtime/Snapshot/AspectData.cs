@@ -16,6 +16,15 @@ namespace Rubickanov.ACS.Runtime.Persistence
     public sealed class AspectData
     {
         /// <summary>
+        /// Schema version of this aspect's persisted fields. <c>Snapshot()</c> stamps it
+        /// from <see cref="PersistedVersionAttribute"/>; <c>Restore()</c> runs registered
+        /// <see cref="IAspectMigrator"/> steps until this value matches the aspect's current
+        /// version. Default <c>0</c> — interpreted identically to an aspect without the attribute,
+        /// which keeps pre-1.2 snapshots forward-compatible.
+        /// </summary>
+        public int Version { get; set; }
+
+        /// <summary>
         /// Field values keyed by field name. Boxed scalar for <c>ReactiveProperty&lt;T&gt;</c>;
         /// for collection kinds see the concrete CLR types described on the class.
         /// Iteration is ordinal-sorted.

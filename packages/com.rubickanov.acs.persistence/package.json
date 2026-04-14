@@ -1,8 +1,8 @@
 {
   "name": "com.rubickanov.acs.persistence",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "displayName": "ACS - Persistence Extension",
-  "description": "Snapshot/restore primitives for ACS aspects. Collects [PersistedState] fields into a POCO value object and applies it back — no storage backend, no save slots, no migrations.",
+  "description": "Snapshot/restore primitives for ACS aspects. Collects [PersistedState] fields into a POCO value object and applies it back — no storage backend, no save slots. Supports stable aspect keys, per-aspect and snapshot-level migrations.",
   "unity": "2022.3",
   "author": {
     "name": "rubickanov"
