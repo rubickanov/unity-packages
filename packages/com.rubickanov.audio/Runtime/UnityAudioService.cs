@@ -201,6 +201,45 @@ namespace Rubickanov.Audio
             return handle;
         }
 
+        public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform follow, float volumeScale = 1f)
+        {
+            if (!sound.IsValid) return SoundHandle.Invalid;
+            if (follow == null) return SoundHandle.Invalid;
+
+            var source = RentSource();
+            source.transform.position = follow.position;
+            source.spatialBlend = 1f;
+            source.resource = sound.Resource;
+            source.volume = volumeScale;
+            ApplyPitch(source, in sound);
+            source.Play();
+
+            var handle = TrackHandle(source);
+            FollowAndReturnAsync(source, follow).Forget();
+            return handle;
+        }
+
+        private async UniTaskVoid FollowAndReturnAsync(AudioSource source, Transform follow)
+        {
+            try
+            {
+                while (source != null && source.isPlaying)
+                {
+                    if (follow != null)
+                        source.transform.position = follow.position;
+
+                    await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, _cts.Token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (source != null)
+                ReturnSource(source);
+        }
+
         public SoundHandle PlayLoop(in SoundConfig sound, float volumeScale = 1f)
         {
             if (!sound.IsValid) return SoundHandle.Invalid;

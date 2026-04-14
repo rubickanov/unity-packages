@@ -9,6 +9,7 @@ namespace Rubickanov.Audio
     {
         public SoundHandle PlaySFX(in SoundConfig sound, float volumeScale = 1f) => SoundHandle.Invalid;
         public SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f) => SoundHandle.Invalid;
+        public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform parent, float volumeScale = 1f) => SoundHandle.Invalid;
         public SoundHandle PlayLoop(in SoundConfig sound, float volumeScale = 1f) => SoundHandle.Invalid;
         public void StopSound(SoundHandle handle) { }
         public void PlayMusic(in SoundConfig music) { }
