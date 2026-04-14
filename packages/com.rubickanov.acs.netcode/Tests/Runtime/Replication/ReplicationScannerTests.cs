@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using ObservableCollections;
 using R3;
 using Rubickanov.ACS.Runtime.Netcode;
 using UnityEngine;
@@ -319,6 +320,44 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         }
 
         [Test]
+        public void Scan_QuantizationOnEntityRef_LogsErrorAndOmitsField()
+        {
+            // EntityRef bypasses CodecRegistry — it goes through EntityRefCodec which
+            // encodes NetworkObjectId, not the raw bytes. Silently ignoring Quantization
+            // here would let authors write [Replicated(Quantization = HalfPrecision)] on
+            // EntityRef and wonder why nothing happens. Scan must surface the mismatch.
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new QuantizationOnEntityRefAspect());
+            }
+            finally
+            {
+                Debug.unityLogger.logHandler = original;
+            }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("EntityRef")),
+                "Scanner must emit a LogError when Quantization is applied to an EntityRef field");
+        }
+
+        [Test]
+        public void Scan_EntityRefNoQuantization_CarriedOnFieldInfo()
+        {
+            // Baseline: a plain EntityRef field must scan successfully so the factory can
+            // construct an EntityRefCodec-backed binding in AspectReplicator.OnNetworkSpawn.
+            var fields = ReplicationScanner.Scan(new PlainEntityRefAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual(typeof(EntityRef), fields[0].ValueType);
+            Assert.AreEqual(QuantizationMode.None, fields[0].Quantization);
+        }
+
+        [Test]
         public void Scan_QuantizationHalfPrecisionOnInt_LogsErrorAndOmitsField()
         {
             // HalfPrecision is not valid for int — surface the mismatch at scan time
@@ -342,6 +381,386 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
                 "Scanner must emit a LogError when Quantization is invalid for the field type");
         }
 
+        // ---- ObservableList collection replication -----------------------------
+
+        [Test]
+        public void Scan_ObservableListOfInt_Accepted_AndMarkedAsCollection()
+        {
+            // Before the collection replication phase this aspect was rejected with
+            // "Collection delta-replication is not implemented yet". Now it must scan
+            // cleanly and carry ReplicatedFieldKind.ObservableList so the factory picks
+            // the correct binding.
+            var fields = ReplicationScanner.Scan(new ObservableListIntAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual("Items", fields[0].Field.Name);
+            Assert.AreEqual(ReplicatedFieldKind.ObservableList, fields[0].Kind);
+            Assert.AreEqual(typeof(int), fields[0].ValueType);
+        }
+
+        [Test]
+        public void Scan_ObservableListOfEntityRef_Accepted()
+        {
+            // EntityRef element type must go through EntityRefCodec, same as the scalar
+            // path. Scan-time validation rejects Quantization on EntityRef — baseline
+            // case here is plain [Replicated] with no quantization.
+            var fields = ReplicationScanner.Scan(new ObservableListEntityRefAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual(ReplicatedFieldKind.ObservableList, fields[0].Kind);
+            Assert.AreEqual(typeof(EntityRef), fields[0].ValueType);
+        }
+
+        [Test]
+        public void Scan_ObservableListOfString_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableListStringAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("not unmanaged")),
+                "Scanner must reject ObservableList<string> because string is managed");
+        }
+
+        [Test]
+        public void Scan_ObservableListWithInterpolationLinear_LogsErrorAndOmitsField()
+        {
+            // Collections have no meaningful lerp; flagging the combination at scan
+            // time prevents the author from silently getting raw (non-interpolated)
+            // behaviour on a field they explicitly annotated for interpolation.
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableListLinearInterpAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Interpolation")),
+                "Scanner must reject Interpolation = Linear on an ObservableList field");
+        }
+
+        [Test]
+        public void Scan_ObservableListWithPredictedTrue_LogsErrorAndOmitsField()
+        {
+            // Prediction pipeline serialises fixed-layout snapshots. Collections don't
+            // fit that contract in Phase 1; surface the mis-use rather than letting
+            // predicted capture silently write nothing.
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableListPredictedAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Prediction")),
+                "Scanner must reject Predicted = true on an ObservableList field");
+        }
+
+        // ---- ObservableDictionary collection replication -----------------------
+
+        [Test]
+        public void Scan_ObservableDictionaryOfStringFloat_Accepted_AndMarkedAsCollection()
+        {
+            // CooldownsAspect-style field: string key + unmanaged value. The scanner
+            // must carry KeyType == string and ValueType == float so the factory can
+            // build the StringKeyCodec + RawCodec<float> pair.
+            var fields = ReplicationScanner.Scan(new ObservableDictionaryStringFloatAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual("Cooldowns", fields[0].Field.Name);
+            Assert.AreEqual(ReplicatedFieldKind.ObservableDictionary, fields[0].Kind);
+            Assert.AreEqual(typeof(string), fields[0].KeyType);
+            Assert.AreEqual(typeof(float), fields[0].ValueType);
+        }
+
+        [Test]
+        public void Scan_ObservableDictionaryOfIntInt_Accepted_ExercisesUnmanagedKeyPath()
+        {
+            // Unmanaged key — goes through UnmanagedKeyCodec<int> in the binding factory.
+            var fields = ReplicationScanner.Scan(new ObservableDictionaryIntIntAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual(ReplicatedFieldKind.ObservableDictionary, fields[0].Kind);
+            Assert.AreEqual(typeof(int), fields[0].KeyType);
+            Assert.AreEqual(typeof(int), fields[0].ValueType);
+        }
+
+        [Test]
+        public void Scan_ObservableDictionaryOfIntEntityRef_Accepted()
+        {
+            // EntityRef value must route through EntityRefCodec, same as the list path.
+            var fields = ReplicationScanner.Scan(new ObservableDictionaryEntityRefValueAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual(ReplicatedFieldKind.ObservableDictionary, fields[0].Kind);
+            Assert.AreEqual(typeof(int), fields[0].KeyType);
+            Assert.AreEqual(typeof(EntityRef), fields[0].ValueType);
+        }
+
+        [Test]
+        public void Scan_ObservableDictionaryOfManagedKey_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableDictionaryManagedKeyAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("key type is not unmanaged and not string")),
+                "Scanner must reject ObservableDictionary with a managed non-string key");
+        }
+
+        [Test]
+        public void Scan_ObservableDictionaryOfManagedValue_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableDictionaryManagedValueAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("value type is not unmanaged")),
+                "Scanner must reject ObservableDictionary with a managed non-EntityRef value");
+        }
+
+        [Test]
+        public void Scan_ObservableDictionaryWithInterpolationLinear_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableDictionaryLinearInterpAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Interpolation")),
+                "Scanner must reject Interpolation = Linear on an ObservableDictionary field");
+        }
+
+        [Test]
+        public void Scan_ObservableDictionaryWithPredictedTrue_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableDictionaryPredictedAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Prediction")),
+                "Scanner must reject Predicted = true on an ObservableDictionary field");
+        }
+
+        [Test]
+        public void Scan_ObservableDictionaryWithHalfPrecisionOnFloatValue_Accepted()
+        {
+            // Quantization applies to the VALUE type — HalfPrecision on float is valid.
+            var fields = ReplicationScanner.Scan(new ObservableDictionaryHalfOnFloatAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual(QuantizationMode.HalfPrecision, fields[0].Quantization);
+            Assert.AreEqual(typeof(float), fields[0].ValueType);
+        }
+
+        [Test]
+        public void Scan_ObservableDictionaryWithHalfPrecisionOnIntValue_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableDictionaryHalfOnIntAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Quantization")),
+                "Scanner must reject HalfPrecision on ObservableDictionary<string,int> (int does not support quantization)");
+        }
+
+        // ---- ObservableHashSet collection replication --------------------------
+
+        [Test]
+        public void Scan_ObservableHashSetOfInt_Accepted_AndMarkedAsHashSetCollection()
+        {
+            var fields = ReplicationScanner.Scan(new ObservableHashSetIntAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual("Tags", fields[0].Field.Name);
+            Assert.AreEqual(ReplicatedFieldKind.ObservableHashSet, fields[0].Kind);
+            Assert.AreEqual(typeof(int), fields[0].ValueType);
+        }
+
+        [Test]
+        public void Scan_ObservableHashSetOfString_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableHashSetStringAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("not unmanaged")),
+                "Scanner must reject ObservableHashSet<string> because string is managed");
+        }
+
+        [Test]
+        public void Scan_ObservableHashSetWithInterpolationLinear_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableHashSetLinearInterpAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Interpolation")),
+                "Scanner must reject Interpolation = Linear on an ObservableHashSet field");
+        }
+
+        [Test]
+        public void Scan_ObservableHashSetWithPredictedTrue_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableHashSetPredictedAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Prediction")),
+                "Scanner must reject Predicted = true on an ObservableHashSet field");
+        }
+
+        // ---- ObservableFixedSizeRingBuffer collection replication --------------
+
+        [Test]
+        public void Scan_ObservableFixedSizeRingBufferOfInt_Accepted_AndMarkedAsRingBufferCollection()
+        {
+            var fields = ReplicationScanner.Scan(new ObservableRingBufferIntAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual("Log", fields[0].Field.Name);
+            Assert.AreEqual(ReplicatedFieldKind.ObservableRingBuffer, fields[0].Kind);
+            Assert.AreEqual(typeof(int), fields[0].ValueType);
+        }
+
+        [Test]
+        public void Scan_UnboundedObservableRingBuffer_LogsTargetedErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableRingBufferUnboundedIntAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("ObservableFixedSizeRingBuffer")),
+                "Scanner must reject plain ObservableRingBuffer<T> with a message naming the fixed-size alternative");
+        }
+
+        [Test]
+        public void Scan_ObservableRingBufferWithInterpolationLinear_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableRingBufferLinearInterpAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Interpolation")),
+                "Scanner must reject Interpolation = Linear on an ObservableFixedSizeRingBuffer field");
+        }
+
+        [Test]
+        public void Scan_ObservableRingBufferWithPredictedTrue_LogsErrorAndOmitsField()
+        {
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new ObservableRingBufferPredictedAspect());
+            }
+            finally { Debug.unityLogger.logHandler = original; }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Prediction")),
+                "Scanner must reject Predicted = true on an ObservableFixedSizeRingBuffer field");
+        }
+
         // ---- Test aspects -------------------------------------------------------
         // One per test to avoid static-cache contamination.
 
@@ -360,6 +779,17 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         {
             [Replicated(Quantization = QuantizationMode.HalfPrecision)]
             public ReactiveProperty<int> Bad = new ReactiveProperty<int>(0);
+        }
+
+        private class QuantizationOnEntityRefAspect
+        {
+            [Replicated(Quantization = QuantizationMode.HalfPrecision)]
+            public ReactiveProperty<EntityRef> Bad = new ReactiveProperty<EntityRef>(EntityRef.None);
+        }
+
+        private class PlainEntityRefAspect
+        {
+            [Replicated] public ReactiveProperty<EntityRef> Target = new ReactiveProperty<EntityRef>(EntityRef.None);
         }
 
         private class OrderingAspect
@@ -447,6 +877,136 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             [Replicated] public ReactiveProperty<int> Cherry = new ReactiveProperty<int>(0);
             [Replicated] public ReactiveProperty<int> Apple = new ReactiveProperty<int>(0);
             [Replicated] public ReactiveProperty<int> Banana = new ReactiveProperty<int>(0);
+        }
+
+        // ---- Collection-field test aspects -------------------------------------
+
+        private class ObservableListIntAspect
+        {
+            [Replicated] public ObservableList<int> Items = new ObservableList<int>();
+        }
+
+        private class ObservableListEntityRefAspect
+        {
+            [Replicated] public ObservableList<EntityRef> Targets = new ObservableList<EntityRef>();
+        }
+
+        private class ObservableListStringAspect
+        {
+            [Replicated] public ObservableList<string> BadTags = new ObservableList<string>();
+        }
+
+        private class ObservableListLinearInterpAspect
+        {
+            [Replicated(Interpolation = InterpolationMode.Linear)]
+            public ObservableList<int> Items = new ObservableList<int>();
+        }
+
+        private class ObservableListPredictedAspect
+        {
+            [Replicated(Predicted = true)]
+            public ObservableList<int> Items = new ObservableList<int>();
+        }
+
+        private class ObservableDictionaryStringFloatAspect
+        {
+            [Replicated] public ObservableDictionary<string, float> Cooldowns = new ObservableDictionary<string, float>();
+        }
+
+        private class ObservableDictionaryIntIntAspect
+        {
+            [Replicated] public ObservableDictionary<int, int> Map = new ObservableDictionary<int, int>();
+        }
+
+        private class ObservableDictionaryEntityRefValueAspect
+        {
+            [Replicated] public ObservableDictionary<int, EntityRef> Targets = new ObservableDictionary<int, EntityRef>();
+        }
+
+        private class ObservableDictionaryManagedKeyAspect
+        {
+            // List<int> is a managed reference type — invalid as a dictionary key.
+            [Replicated] public ObservableDictionary<List<int>, int> Bad = new ObservableDictionary<List<int>, int>();
+        }
+
+        private class ObservableDictionaryManagedValueAspect
+        {
+            // string value is managed and not EntityRef — invalid.
+            [Replicated] public ObservableDictionary<int, string> Bad = new ObservableDictionary<int, string>();
+        }
+
+        private class ObservableDictionaryLinearInterpAspect
+        {
+            [Replicated(Interpolation = InterpolationMode.Linear)]
+            public ObservableDictionary<string, int> Bad = new ObservableDictionary<string, int>();
+        }
+
+        private class ObservableDictionaryPredictedAspect
+        {
+            [Replicated(Predicted = true)]
+            public ObservableDictionary<string, int> Bad = new ObservableDictionary<string, int>();
+        }
+
+        private class ObservableDictionaryHalfOnFloatAspect
+        {
+            [Replicated(Quantization = QuantizationMode.HalfPrecision)]
+            public ObservableDictionary<string, float> Cooldowns = new ObservableDictionary<string, float>();
+        }
+
+        private class ObservableDictionaryHalfOnIntAspect
+        {
+            [Replicated(Quantization = QuantizationMode.HalfPrecision)]
+            public ObservableDictionary<string, int> Bad = new ObservableDictionary<string, int>();
+        }
+
+        // ---- ObservableHashSet test aspects ------------------------------------
+
+        private class ObservableHashSetIntAspect
+        {
+            [Replicated] public ObservableHashSet<int> Tags = new ObservableHashSet<int>();
+        }
+
+        private class ObservableHashSetStringAspect
+        {
+            [Replicated] public ObservableHashSet<string> BadTags = new ObservableHashSet<string>();
+        }
+
+        private class ObservableHashSetLinearInterpAspect
+        {
+            [Replicated(Interpolation = InterpolationMode.Linear)]
+            public ObservableHashSet<int> Tags = new ObservableHashSet<int>();
+        }
+
+        private class ObservableHashSetPredictedAspect
+        {
+            [Replicated(Predicted = true)]
+            public ObservableHashSet<int> Tags = new ObservableHashSet<int>();
+        }
+
+        // ---- ObservableFixedSizeRingBuffer test aspects ------------------------
+
+        private class ObservableRingBufferIntAspect
+        {
+            [Replicated] public ObservableFixedSizeRingBuffer<int> Log = new ObservableFixedSizeRingBuffer<int>(capacity: 8);
+        }
+
+        private class ObservableRingBufferUnboundedIntAspect
+        {
+            // Plain unbounded ObservableRingBuffer<T> must be rejected with a
+            // targeted error naming the supported alternative.
+            [Replicated] public ObservableRingBuffer<int> Log = new ObservableRingBuffer<int>();
+        }
+
+        private class ObservableRingBufferLinearInterpAspect
+        {
+            [Replicated(Interpolation = InterpolationMode.Linear)]
+            public ObservableFixedSizeRingBuffer<int> Log = new ObservableFixedSizeRingBuffer<int>(capacity: 8);
+        }
+
+        private class ObservableRingBufferPredictedAspect
+        {
+            [Replicated(Predicted = true)]
+            public ObservableFixedSizeRingBuffer<int> Log = new ObservableFixedSizeRingBuffer<int>(capacity: 8);
         }
 
         // ---- Log capture --------------------------------------------------------

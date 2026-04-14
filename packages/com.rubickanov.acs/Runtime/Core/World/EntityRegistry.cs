@@ -116,6 +116,14 @@ namespace Rubickanov.ACS.Runtime
         }
 
         /// <summary>
+        /// Every entity registered via <see cref="RegisterById"/> — including the owning
+        /// <see cref="World"/> itself (see <c>World</c> ctor). Used by cross-cutting walkers
+        /// like <c>acs.persistence</c> that need to visit every live entity regardless of
+        /// which aspect it carries.
+        /// </summary>
+        public IEnumerable<IEntity> AllEntities => _byId.Values;
+
+        /// <summary>
         /// Returns the raw bucket for <paramref name="aspectType"/>, or null if no entity
         /// carries it. Intended for zero-alloc iteration via <see cref="EntityQuery{T}"/>:
         /// callers get direct access to the <see cref="HashSet{T}.Enumerator"/> value-struct

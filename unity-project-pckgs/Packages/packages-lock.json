@@ -75,6 +75,14 @@
         "com.rubickanov.acs": "1.0.0"
       }
     },
+    "com.rubickanov.acs.persistence": {
+      "version": "file:../../packages/com.rubickanov.acs.persistence",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.rubickanov.acs": "1.0.0"
+      }
+    },
     "com.rubickanov.audio": {
       "version": "file:../../packages/com.rubickanov.audio",
       "depth": 0,

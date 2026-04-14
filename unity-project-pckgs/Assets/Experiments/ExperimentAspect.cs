@@ -23,7 +23,7 @@ namespace Experiments
         //       IS authority, and running reconcile on self-relayed batches
         //       would replay Simulate a second time per tick and accelerate
         //       the owner visibly).
-        [Replicated(Authority = AuthorityMode.Server, Interpolation = InterpolationMode.Linear, Predicted = true,
+        [Replicated(Authority = AuthorityMode.Owner, Interpolation = InterpolationMode.Linear, Predicted = true,
             Quantization = QuantizationMode.HalfPrecision)]
         public readonly ReactiveProperty<Vector3> Position = new(Vector3.zero);
 

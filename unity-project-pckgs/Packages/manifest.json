@@ -8,6 +8,7 @@
     "com.rlabrecque.steamworks.net": "https://github.com/rlabrecque/Steamworks.NET.git?path=/com.rlabrecque.steamworks.net",
     "com.rubickanov.acs": "file:../../packages/com.rubickanov.acs",
     "com.rubickanov.acs.netcode": "file:../../packages/com.rubickanov.acs.netcode",
+    "com.rubickanov.acs.persistence": "file:../../packages/com.rubickanov.acs.persistence",
     "com.rubickanov.audio": "file:../../packages/com.rubickanov.audio",
     "com.rubickanov.behaviortree": "file:../../packages/com.rubickanov.behaviortree",
     "com.rubickanov.character-motor": "file:../../packages/com.rubickanov.character-motor",
@@ -78,6 +79,7 @@
   "testables": [
     "com.rubickanov.acs",
     "com.rubickanov.acs.netcode",
+    "com.rubickanov.acs.persistence",
     "com.rubickanov.audio",
     "com.rubickanov.behaviortree",
     "com.rubickanov.character-motor",
