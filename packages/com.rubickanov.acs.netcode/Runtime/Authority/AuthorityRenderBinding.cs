@@ -82,8 +82,8 @@ namespace Rubickanov.ACS.Runtime.Netcode
         public override bool IsInterpolated => true;
         public T InterpolatedValue => _interpolatedValue;
 
-        public AuthorityRenderBinding(ReactiveProperty<T> reactive, Lerp<T> lerp, double tickDelta)
-            : base(reactive)
+        public AuthorityRenderBinding(ReactiveProperty<T> reactive, Lerp<T> lerp, double tickDelta, IFieldCodec<T> codec)
+            : base(reactive, codec)
         {
             _lerp = lerp;
             // Track tick rate so the coalesce / stale thresholds scale with it instead of

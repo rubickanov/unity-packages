@@ -437,6 +437,132 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             finally { bag.Dispose(); }
         }
 
+        // ---- Quantization -------------------------------------------------------
+
+        [Test]
+        public void WriteTo_QuantizedVector3_WritesSixBytes()
+        {
+            // HalfPrecision Vector3 → 3× half-float = 6B. Factory must thread the
+            // quantization mode through CodecRegistry into the binding's codec.
+            var reactive = new ReactiveProperty<Vector3>(new Vector3(1f, 2f, 3f));
+            var binding = (ReplicatedFieldBinding<Vector3>)ReplicatedFieldBindingFactory.Create(
+                reactive, typeof(Vector3), FieldBindingKind.Plain, 0, QuantizationMode.HalfPrecision);
+
+            unsafe
+            {
+                var writer = new FastBufferWriter(sizeof(Vector3), Allocator.Temp);
+                try
+                {
+                    int before = writer.Position;
+                    binding.WriteTo(writer);
+                    Assert.AreEqual(6, writer.Position - before);
+                }
+                finally { writer.Dispose(); }
+            }
+        }
+
+        [Test]
+        public void WriteTo_QuantizedQuaternion_WritesFourBytes()
+        {
+            // SmallestThree Quaternion → 2-bit index + 3× 10-bit signed = 32 bits = 4B.
+            var reactive = new ReactiveProperty<Quaternion>(Quaternion.identity);
+            var binding = (ReplicatedFieldBinding<Quaternion>)ReplicatedFieldBindingFactory.Create(
+                reactive, typeof(Quaternion), FieldBindingKind.Plain, 0, QuantizationMode.SmallestThree);
+
+            unsafe
+            {
+                var writer = new FastBufferWriter(sizeof(Quaternion), Allocator.Temp);
+                try
+                {
+                    int before = writer.Position;
+                    binding.WriteTo(writer);
+                    Assert.AreEqual(4, writer.Position - before);
+                }
+                finally { writer.Dispose(); }
+            }
+        }
+
+        [Test]
+        public void RoundTrip_QuantizedVector3_WithinHalfTolerance()
+        {
+            // End-to-end smoke: factory → binding → wire → binding → reactive. Tolerance
+            // ≈0.05 covers half-float error at magnitude ~10 with margin. Guards against
+            // a factory path that silently uses RawCodec even when quantization is set.
+            var src = new ReactiveProperty<Vector3>(new Vector3(12.5f, -7.25f, 0.125f));
+            var dst = new ReactiveProperty<Vector3>(Vector3.zero);
+            var sender = (ReplicatedFieldBinding<Vector3>)ReplicatedFieldBindingFactory.Create(
+                src, typeof(Vector3), FieldBindingKind.Plain, 0, QuantizationMode.HalfPrecision);
+            var receiver = (ReplicatedFieldBinding<Vector3>)ReplicatedFieldBindingFactory.Create(
+                dst, typeof(Vector3), FieldBindingKind.Plain, 0, QuantizationMode.HalfPrecision);
+
+            var writer = new FastBufferWriter(16, Allocator.Temp);
+            try
+            {
+                sender.WriteTo(writer);
+                var reader = new FastBufferReader(writer, Allocator.Temp);
+                try
+                {
+                    receiver.ReadFrom(reader);
+                    receiver.ApplyFromNetwork(0);
+                }
+                finally { reader.Dispose(); }
+            }
+            finally { writer.Dispose(); }
+
+            Assert.AreEqual(12.5f, dst.Value.x, 0.05f);
+            Assert.AreEqual(-7.25f, dst.Value.y, 0.05f);
+            Assert.AreEqual(0.125f, dst.Value.z, 0.05f);
+        }
+
+        [Test]
+        public void RoundTrip_QuantizedVector3WithInterpolation_LerpsBetweenSnapshots()
+        {
+            // Quantization + Interpolation must compose: each incoming snapshot is decoded
+            // (via FloatHalfCodec ×3) into the interpolation buffer, then TickRender lerps
+            // in T-space exactly as for the raw case. This is the main real-world config
+            // (Vector3 position replicated with half precision + linear smoothing).
+            var src = new ReactiveProperty<Vector3>(new Vector3(0f, 0f, 0f));
+            var dst = new ReactiveProperty<Vector3>(Vector3.zero);
+            var sender = (ReplicatedFieldBinding<Vector3>)ReplicatedFieldBindingFactory.Create(
+                src, typeof(Vector3), FieldBindingKind.Plain, 0, QuantizationMode.HalfPrecision);
+            var receiver = (InterpolatedFieldBinding<Vector3>)ReplicatedFieldBindingFactory.Create(
+                dst, typeof(Vector3), FieldBindingKind.PassiveInterpolated, 0, QuantizationMode.HalfPrecision);
+
+            // Two snapshots 1s apart: (0,0,0) at t=1, (10,0,0) at t=2.
+            SendSnapshot(sender, receiver, new Vector3(0f, 0f, 0f), receivedTime: 1.0);
+            src.Value = new Vector3(10f, 0f, 0f);
+            SendSnapshot(sender, receiver, new Vector3(10f, 0f, 0f), receivedTime: 2.0);
+
+            receiver.TickRender(1.5);
+
+            // Halfway between 0 and 10 is 5; half-float at magnitude ~10 is exact for
+            // integers in this range, so tolerance is just the lerp accumulated error.
+            Assert.AreEqual(5f, receiver.InterpolatedValue.x, 0.05f);
+            Assert.AreEqual(0f, receiver.InterpolatedValue.y, 0.05f);
+            Assert.AreEqual(0f, receiver.InterpolatedValue.z, 0.05f);
+        }
+
+        private static void SendSnapshot<T>(
+            ReplicatedFieldBinding<T> sender,
+            ReplicatedFieldBinding<T> receiver,
+            T _,
+            double receivedTime) where T : unmanaged
+        {
+            var writer = new FastBufferWriter(32, Allocator.Temp);
+            try
+            {
+                sender.WriteTo(writer);
+                var reader = new FastBufferReader(writer, Allocator.Temp);
+                try
+                {
+                    receiver.ReadFrom(reader);
+                    receiver.ApplyFromNetwork(receivedTime);
+                }
+                finally { reader.Dispose(); }
+            }
+            finally { writer.Dispose(); }
+        }
+
         // ---- Test fixtures ------------------------------------------------------
 
         private struct PackedStruct

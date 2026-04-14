@@ -48,16 +48,21 @@ namespace Rubickanov.ACS.Runtime.Netcode
         where T : unmanaged
     {
         protected readonly ReactiveProperty<T> _reactive;
+        // Per-field wire codec (raw memcpy by default; quantized for [Replicated(Quantization=...)]).
+        // Resolved by ReplicatedFieldBindingFactory via CodecRegistry. Always non-null —
+        // factory injects RawCodec<T> for the no-quantization case.
+        protected readonly IFieldCodec<T> _codec;
         protected T _pendingValue;
         protected bool _hasPendingValue;
         protected bool _suppressNotification;
 
-        public ReplicatedFieldBinding(ReactiveProperty<T> reactive)
+        public ReplicatedFieldBinding(ReactiveProperty<T> reactive, IFieldCodec<T> codec)
         {
             _reactive = reactive;
+            _codec = codec;
         }
 
-        public override unsafe int Size => sizeof(T);
+        public override int Size => _codec.Size;
 
         public override void SubscribeAsAuthority(ref DisposableBag disposables)
         {
@@ -69,26 +74,22 @@ namespace Rubickanov.ACS.Runtime.Netcode
             }).AddTo(ref disposables);
         }
 
-        public override unsafe void WriteTo(FastBufferWriter writer)
+        public override void WriteTo(FastBufferWriter writer)
         {
-            var value = _reactive.Value;
-            byte* ptr = (byte*)&value;
-            writer.WriteBytesSafe(ptr, sizeof(T));
+            _codec.Write(writer, _reactive.Value);
         }
 
-        public override unsafe void ReadFrom(FastBufferReader reader)
+        public override void ReadFrom(FastBufferReader reader)
         {
-            fixed (T* ptr = &_pendingValue)
-            {
-                reader.ReadBytesSafe((byte*)ptr, sizeof(T));
-            }
+            _pendingValue = _codec.Read(reader);
             _hasPendingValue = true;
         }
 
-        public override unsafe void Skip(FastBufferReader reader)
+        public override void Skip(FastBufferReader reader)
         {
-            T discard = default;
-            reader.ReadBytesSafe((byte*)&discard, sizeof(T));
+            // Decoded value is discarded — we just need the reader position to advance by
+            // exactly Size bytes, and the codec is the single source of truth on that.
+            _codec.Read(reader);
         }
 
         public override void ApplyFromNetwork(double receivedTime)
@@ -129,9 +130,11 @@ namespace Rubickanov.ACS.Runtime.Netcode
     [Preserve]
     internal static class ReplicatedFieldBindingFactory
     {
-        private static readonly Dictionary<Type, Func<object, ReplicatedFieldBinding>> FieldFactories = new();
-        private static readonly Dictionary<Type, Func<object, object, ReplicatedFieldBinding>> InterpFactories = new();
-        private static readonly Dictionary<Type, Func<object, object, double, ReplicatedFieldBinding>> AuthorityRenderFactories = new();
+        // Factory delegates take the codec (boxed IFieldCodec<T>) as the last argument. Codec
+        // is resolved by Create() via CodecRegistry from the (valueType, quantization) pair.
+        private static readonly Dictionary<Type, Func<object, object, ReplicatedFieldBinding>> FieldFactories = new();
+        private static readonly Dictionary<Type, Func<object, object, object, ReplicatedFieldBinding>> InterpFactories = new();
+        private static readonly Dictionary<Type, Func<object, object, double, object, ReplicatedFieldBinding>> AuthorityRenderFactories = new();
         private static readonly HashSet<Type> WarnedUnsupportedTypes = new();
 
         // Play-Mode-without-Domain-Reload safety (ISSUES.md #17 / TODO.md Batch 8).
@@ -147,8 +150,17 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // tickDelta is only consumed by the AuthorityRendered branch (sizes coalesce / stale
         // windows, see ISSUES.md #23). Plain and PassiveInterpolated ignore it, so callers in
         // tests that build those kinds can omit the argument.
-        public static ReplicatedFieldBinding Create(object reactiveProperty, Type valueType, FieldBindingKind kind, double tickDelta = 0)
+        // quantization defaults to None so existing call sites (tests, AspectReplicator pre-attribute)
+        // keep raw-memcpy behaviour. Invalid (valueType, quantization) combos throw via CodecRegistry.
+        public static ReplicatedFieldBinding Create(
+            object reactiveProperty,
+            Type valueType,
+            FieldBindingKind kind,
+            double tickDelta = 0,
+            QuantizationMode quantization = QuantizationMode.None)
         {
+            object codec = CodecRegistry.Resolve(valueType, quantization);
+
             if (kind == FieldBindingKind.PassiveInterpolated || kind == FieldBindingKind.AuthorityRendered)
             {
                 if (Interpolators.TryGetRaw(valueType, out var lerper))
@@ -160,7 +172,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                             interpFactory = BuildInterpFactory(valueType);
                             InterpFactories[valueType] = interpFactory;
                         }
-                        return interpFactory(reactiveProperty, lerper);
+                        return interpFactory(reactiveProperty, lerper, codec);
                     }
 
                     // AuthorityRendered: tickDelta-parameterised ctor so coalesce / stale
@@ -170,7 +182,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                         renderFactory = BuildAuthorityRenderFactory(valueType);
                         AuthorityRenderFactories[valueType] = renderFactory;
                     }
-                    return renderFactory(reactiveProperty, lerper, tickDelta);
+                    return renderFactory(reactiveProperty, lerper, tickDelta, codec);
                 }
 
                 if (WarnedUnsupportedTypes.Add(valueType))
@@ -188,40 +200,43 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 FieldFactories[valueType] = plainFactory;
             }
 
-            return plainFactory(reactiveProperty);
+            return plainFactory(reactiveProperty, codec);
         }
 
         // Cache ConstructorInfo rather than compiled delegates. ConstructorInfo.Invoke
         // is IL2CPP-safe for closed generic types whose ctors are preserved either by
         // AotHints.UsedOnlyForAOTCodeGeneration or by user link.xml entries; Expression
         // .Lambda.Compile() is not (no runtime IL emitter on IL2CPP).
-        private static Func<object, ReplicatedFieldBinding> BuildFieldFactory(Type valueType)
+        private static Func<object, object, ReplicatedFieldBinding> BuildFieldFactory(Type valueType)
         {
             var bindingType = typeof(ReplicatedFieldBinding<>).MakeGenericType(valueType);
             var reactiveType = typeof(ReactiveProperty<>).MakeGenericType(valueType);
-            var ctor = bindingType.GetConstructor(new[] { reactiveType })
-                ?? throw new InvalidOperationException($"No (ReactiveProperty<T>) ctor on {bindingType}.");
-            return reactive => (ReplicatedFieldBinding)ctor.Invoke(new[] { reactive });
+            var codecType = typeof(IFieldCodec<>).MakeGenericType(valueType);
+            var ctor = bindingType.GetConstructor(new[] { reactiveType, codecType })
+                ?? throw new InvalidOperationException($"No (ReactiveProperty<T>, IFieldCodec<T>) ctor on {bindingType}.");
+            return (reactive, codec) => (ReplicatedFieldBinding)ctor.Invoke(new[] { reactive, codec });
         }
 
-        private static Func<object, object, ReplicatedFieldBinding> BuildInterpFactory(Type valueType)
+        private static Func<object, object, object, ReplicatedFieldBinding> BuildInterpFactory(Type valueType)
         {
             var bindingType = typeof(InterpolatedFieldBinding<>).MakeGenericType(valueType);
             var reactiveType = typeof(ReactiveProperty<>).MakeGenericType(valueType);
             var lerpType = typeof(Lerp<>).MakeGenericType(valueType);
-            var ctor = bindingType.GetConstructor(new[] { reactiveType, lerpType })
-                ?? throw new InvalidOperationException($"No (ReactiveProperty<T>, Lerp<T>) ctor on {bindingType}.");
-            return (reactive, lerper) => (ReplicatedFieldBinding)ctor.Invoke(new[] { reactive, lerper });
+            var codecType = typeof(IFieldCodec<>).MakeGenericType(valueType);
+            var ctor = bindingType.GetConstructor(new[] { reactiveType, lerpType, codecType })
+                ?? throw new InvalidOperationException($"No (ReactiveProperty<T>, Lerp<T>, IFieldCodec<T>) ctor on {bindingType}.");
+            return (reactive, lerper, codec) => (ReplicatedFieldBinding)ctor.Invoke(new[] { reactive, lerper, codec });
         }
 
-        private static Func<object, object, double, ReplicatedFieldBinding> BuildAuthorityRenderFactory(Type valueType)
+        private static Func<object, object, double, object, ReplicatedFieldBinding> BuildAuthorityRenderFactory(Type valueType)
         {
             var bindingType = typeof(AuthorityRenderBinding<>).MakeGenericType(valueType);
             var reactiveType = typeof(ReactiveProperty<>).MakeGenericType(valueType);
             var lerpType = typeof(Lerp<>).MakeGenericType(valueType);
-            var ctor = bindingType.GetConstructor(new[] { reactiveType, lerpType, typeof(double) })
-                ?? throw new InvalidOperationException($"No (ReactiveProperty<T>, Lerp<T>, double) ctor on {bindingType}.");
-            return (reactive, lerper, tickDelta) => (ReplicatedFieldBinding)ctor.Invoke(new object[] { reactive, lerper, tickDelta });
+            var codecType = typeof(IFieldCodec<>).MakeGenericType(valueType);
+            var ctor = bindingType.GetConstructor(new[] { reactiveType, lerpType, typeof(double), codecType })
+                ?? throw new InvalidOperationException($"No (ReactiveProperty<T>, Lerp<T>, double, IFieldCodec<T>) ctor on {bindingType}.");
+            return (reactive, lerper, tickDelta, codec) => (ReplicatedFieldBinding)ctor.Invoke(new object[] { reactive, lerper, tickDelta, codec });
         }
     }
 }

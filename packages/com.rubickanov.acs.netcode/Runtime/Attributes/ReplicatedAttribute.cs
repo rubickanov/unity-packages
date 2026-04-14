@@ -28,5 +28,14 @@ namespace Rubickanov.ACS.Runtime.Netcode
         /// flag with a warning.
         /// </summary>
         public bool Predicted { get; set; } = false;
+
+        /// <summary>
+        /// Opt-in lossy compression of the field's wire payload. Default is
+        /// <see cref="QuantizationMode.None"/> — raw <c>sizeof(T)</c> bytes are sent. Picking
+        /// a quantizing mode replaces the per-field codec; the wire format outside the field
+        /// (mask, batch header, payloadBytes prefix) stays the same. Invalid combinations
+        /// (e.g. <see cref="QuantizationMode.HalfPrecision"/> on <c>int</c>) throw at scan time.
+        /// </summary>
+        public QuantizationMode Quantization { get; set; } = QuantizationMode.None;
     }
 }

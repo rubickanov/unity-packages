@@ -15,14 +15,16 @@ namespace Rubickanov.ACS.Runtime.Netcode
         public readonly AuthorityMode Authority;
         public readonly InterpolationMode Interpolation;
         public readonly bool Predicted;
+        public readonly QuantizationMode Quantization;
 
-        public ReplicatedFieldInfo(FieldInfo field, Type valueType, AuthorityMode authority, InterpolationMode interpolation, bool predicted)
+        public ReplicatedFieldInfo(FieldInfo field, Type valueType, AuthorityMode authority, InterpolationMode interpolation, bool predicted, QuantizationMode quantization)
         {
             Field = field;
             ValueType = valueType;
             Authority = authority;
             Interpolation = interpolation;
             Predicted = predicted;
+            Quantization = quantization;
         }
     }
 
@@ -167,12 +169,23 @@ namespace Rubickanov.ACS.Runtime.Netcode
                         predicted = false;
                     }
 
+                    // Fail-fast on invalid (T, QuantizationMode) at scan time so the developer
+                    // sees the error before the first wire write rather than chasing a
+                    // mid-tick InvalidOperationException from CodecRegistry.
+                    var quantization = attr.Quantization;
+                    if (!CodecRegistry.IsValid(valueType, quantization))
+                    {
+                        Debug.LogError($"[ReplicationScanner] Aspect '{aspectType.Name}' field '{fields[i].Name}' has [Replicated(Quantization = {quantization})] which is not valid for type '{valueType.Name}'. Valid combinations: HalfPrecision on float/Vector2/Vector3/Vector4; SmallestThree on Quaternion. Field is skipped.");
+                        continue;
+                    }
+
                     result.Add(new ReplicatedFieldInfo(
                         fields[i],
                         valueType,
                         attr.Authority,
                         attr.Interpolation,
-                        predicted));
+                        predicted,
+                        quantization));
                 }
 
                 current = current.BaseType;
