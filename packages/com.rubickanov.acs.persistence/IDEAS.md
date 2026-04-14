@@ -4,7 +4,22 @@ Post-v1 направления. Список не приоритизирован
 
 ---
 
-## 1. Versioning + migration
+## ~~1. Versioning + migration~~ ✅ Сделано
+
+Закрыто в v1.2.0. Три рычага:
+
+- **Стабильный ключ** — `[PersistedKey("hero")]` вместо `Type.FullName`. Ренеймы покрываются `[PersistedAlias("Old.Name")]` (multi-apply). Без атрибутов — текущее поведение, старые сейвы читаются.
+- **Per-aspect версия** — `[PersistedVersion(N)]` на аспекте + `IAspectMigrator` (шаг `FromVersion → FromVersion + 1`). `AspectData.Version` пишется автоматически. Registry композит цепочки. Нет registry или gap в цепочке — warning + skip аспекта. Downgrade (`snap > target`) — тоже skip.
+- **Snapshot-level миграции** — `IAspectSnapshotMigrator` над целым `AspectSnapshot`, триггер — `WorldSnapshot.FormatVersion`. Работают **до** per-aspect миграторов, прогоняются на World-снапшоте и на каждом entity-снапшоте. Покрывают split/merge/delete аспектов.
+
+Pipeline и интерфейсы — в пакете, регистрация конкретных migrator'ов — в save-слое. `WorldRestoreOptions.Migrations` протаскивает `PersistenceMigrationRegistry` через `RestoreAll` → `Restore`.
+
+Сознательно оставлено save-слою:
+- Изменение CLR-shape элемента в коллекции (`ObservableList<StructV1>` → `ObservableList<StructV2>` с новыми полями) — до migrator'а уже поздно; толерантный deserializer обязателен у save-слоя.
+- Политика `FormatVersion`-bump вне snapshot migrators — save-слой ставит поле сам, пакет не интерпретирует.
+
+<details>
+<summary>Исходный черновик</summary>
 
 **Проблема.** Снапшот это `Dictionary<string, AspectData>`, ключ — `Type.FullName`. Сейчас:
 - Переименовал аспект / переехал в другой namespace → старые сейвы не находят тип, `Restore` молча скипает аспект с warning'ом.
@@ -32,6 +47,8 @@ Post-v1 направления. Список не приоритизирован
 - Downgrade (из новой версии в старую) — за рамками. Сейвы только forward-compatible.
 
 **Решение — отложено до первого реального консумера с сейвами в проде.** До этого момента API миграций будет угадан наугад.
+
+</details>
 
 ---
 
@@ -152,7 +169,4 @@ public enum MissingEntityPolicy
 
 ## Связность пунктов
 
-- **#2 (WorldSnapshot)** — сделано. Готовая точка для `FormatVersion` когда возьмёмся за #1.
-- **#1 (миграции)** — самый крупный, ждёт реального save-слоя.
-
-Открытый пункт: **#1**.
+Все пункты v1.x закрыты. Для последующих идей — заводить новую нумерацию ниже.

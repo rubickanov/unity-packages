@@ -19,6 +19,16 @@ namespace Rubickanov.ACS.Runtime.Persistence
     public sealed class WorldSnapshot
     {
         /// <summary>
+        /// Snapshot-wide format version. Drives <see cref="IAspectSnapshotMigrator"/>
+        /// chains during <c>RestoreAll</c>. Write with
+        /// <c>World.SnapshotAll(keyOf, registry)</c> (stamps from
+        /// <see cref="PersistenceMigrationRegistry.CurrentFormatVersion"/>); the save
+        /// layer may override it to encode its own format conventions. Default <c>0</c>
+        /// for pre-1.2 snapshots and for worlds saved without a registry.
+        /// </summary>
+        public int FormatVersion { get; set; }
+
+        /// <summary>
         /// World-scoped aspect state. <c>null</c> when the <see cref="Runtime.World"/>
         /// carried no <c>[PersistedState]</c> fields at capture time.
         /// </summary>

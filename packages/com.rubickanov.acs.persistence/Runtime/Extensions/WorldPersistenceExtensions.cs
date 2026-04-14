@@ -27,22 +27,43 @@ namespace Rubickanov.ACS.Runtime.Persistence
 
         /// <summary>
         /// Captures the full persisted state of the world in a single detachable
-        /// <see cref="WorldSnapshot"/>. World-scoped aspects are written to
-        /// <see cref="WorldSnapshot.World"/>; every other entity with
-        /// <c>[PersistedState]</c> fields is written to <see cref="WorldSnapshot.Entities"/>
-        /// under the id returned by <paramref name="keyOf"/>.
-        /// <para/>
-        /// <paramref name="keyOf"/> is only invoked for non-world entities — the World
-        /// lives on its own structural slot in the snapshot and needs no id. A
-        /// <c>null</c> return or a duplicate id is a save-layer bug; both throw
-        /// rather than silently losing state.
+        /// <see cref="WorldSnapshot"/>. Equivalent to
+        /// <c>SnapshotAll(keyOf, registry: null)</c> — the resulting
+        /// <see cref="WorldSnapshot.FormatVersion"/> is <c>0</c>.
         /// </summary>
         public static WorldSnapshot SnapshotAll(this World world, Func<IEntity, string> keyOf)
+        {
+            return SnapshotAll(world, keyOf, registry: null);
+        }
+
+        /// <summary>
+        /// Captures the full persisted state of the world. World-scoped aspects go to
+        /// <see cref="WorldSnapshot.World"/>; every other entity with
+        /// <c>[PersistedState]</c> fields goes to <see cref="WorldSnapshot.Entities"/>
+        /// under the id returned by <paramref name="keyOf"/>.
+        /// <para/>
+        /// When <paramref name="registry"/> is non-null,
+        /// <see cref="WorldSnapshot.FormatVersion"/> is stamped with
+        /// <see cref="PersistenceMigrationRegistry.CurrentFormatVersion"/> — on restore the
+        /// same registry walks the chain of <see cref="IAspectSnapshotMigrator"/> from the
+        /// persisted version up to the current one.
+        /// <para/>
+        /// <paramref name="keyOf"/> is only invoked for non-world entities. A <c>null</c>
+        /// return or a duplicate id is a save-layer bug; both throw rather than silently
+        /// losing state.
+        /// </summary>
+        public static WorldSnapshot SnapshotAll(
+            this World world,
+            Func<IEntity, string> keyOf,
+            PersistenceMigrationRegistry registry)
         {
             if (world == null) throw new ArgumentNullException(nameof(world));
             if (keyOf == null) throw new ArgumentNullException(nameof(keyOf));
 
-            var result = new WorldSnapshot();
+            var result = new WorldSnapshot
+            {
+                FormatVersion = registry?.CurrentFormatVersion ?? 0,
+            };
 
             IEntity worldEntity = world;
             if (worldEntity.HasPersistedState())
@@ -78,15 +99,13 @@ namespace Rubickanov.ACS.Runtime.Persistence
         /// entity by the stored id or spawns a new one (prefab lookup is its concern) —
         /// and has its state restored through <c>Entity.Restore</c>.
         /// <para/>
-        /// <paramref name="options"/> — default <see cref="MissingEntityPolicy.Ignore"/> — decides
-        /// the fate of entities that live in the world but are absent from the snapshot.
-        /// See <see cref="MissingEntityPolicy"/>.
-        /// <para/>
-        /// If <paramref name="resolveOrSpawn"/> returns the same <see cref="IEntity"/>
-        /// instance for two distinct keys in the snapshot, the second restore overwrites
-        /// the first — that is a save-layer mapping bug, ACS does not second-guess it.
-        /// A <c>null</c> return is treated as "entity unavailable this session" and
-        /// surfaces a warning without failing the whole restore.
+        /// <paramref name="options"/> — default <see cref="MissingEntityPolicy.Ignore"/> —
+        /// decides the fate of entities that live in the world but are absent from the
+        /// snapshot. When <see cref="WorldRestoreOptions.Migrations"/> is supplied, the
+        /// registry runs <see cref="IAspectSnapshotMigrator"/> steps on each aspect
+        /// snapshot before per-aspect restoration and propagates into
+        /// <c>Entity.Restore(snapshot, registry)</c> so <see cref="IAspectMigrator"/>
+        /// chains run for field-level evolution.
         /// </summary>
         public static void RestoreAll(
             this World world,
@@ -98,8 +117,11 @@ namespace Rubickanov.ACS.Runtime.Persistence
             if (snapshot == null) throw new ArgumentNullException(nameof(snapshot));
             if (resolveOrSpawn == null) throw new ArgumentNullException(nameof(resolveOrSpawn));
 
+            var registry = options.Migrations;
+            ApplySnapshotMigrations(snapshot, registry);
+
             if (snapshot.World != null)
-                ((IEntity)world).Restore(snapshot.World);
+                ((IEntity)world).Restore(snapshot.World, registry);
 
             var restored = new HashSet<IEntity>();
             foreach (var pair in snapshot.Entities)
@@ -116,7 +138,7 @@ namespace Rubickanov.ACS.Runtime.Persistence
                     continue;
                 }
 
-                entity.Restore(entitySnap);
+                entity.Restore(entitySnap, registry);
                 restored.Add(entity);
             }
 
@@ -135,6 +157,50 @@ namespace Rubickanov.ACS.Runtime.Persistence
             var disposer = options.DisposeMissing ?? DefaultDispose;
             for (int i = 0; i < toDispose.Count; i++)
                 disposer(toDispose[i]);
+        }
+
+        private static void ApplySnapshotMigrations(WorldSnapshot snapshot, PersistenceMigrationRegistry registry)
+        {
+            if (registry == null) return;
+
+            var from = snapshot.FormatVersion;
+            var to = registry.CurrentFormatVersion;
+            if (from == to) return;
+
+            if (from > to)
+            {
+                Debug.LogWarning(
+                    $"[acs.persistence] RestoreAll: snapshot FormatVersion {from} is newer than registry CurrentFormatVersion {to}. " +
+                    "Downgrade is not supported — snapshot migrations skipped.");
+                return;
+            }
+
+            if (!registry.TryGetSnapshotChain(from, to, out var chain))
+            {
+                Debug.LogWarning(
+                    $"[acs.persistence] RestoreAll: no complete IAspectSnapshotMigrator chain from FormatVersion {from} to {to}. " +
+                    "Snapshot migrations skipped; per-aspect migrations still run.");
+                return;
+            }
+
+            for (int i = 0; i < chain.Count; i++)
+            {
+                try
+                {
+                    if (snapshot.World != null) chain[i].Migrate(snapshot.World);
+                    foreach (var entry in snapshot.Entities)
+                        chain[i].Migrate(entry.Value);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError(
+                        $"[acs.persistence] RestoreAll: IAspectSnapshotMigrator from FormatVersion {chain[i].FromFormatVersion} threw. " +
+                        $"Remaining snapshot migrations skipped. {ex}");
+                    return;
+                }
+            }
+
+            snapshot.FormatVersion = to;
         }
 
         // IEntity has no Dispose() on the interface — only the pure POCO Entity implements IDisposable,
