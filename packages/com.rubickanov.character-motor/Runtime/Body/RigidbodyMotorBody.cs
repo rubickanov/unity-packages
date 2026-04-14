@@ -6,6 +6,16 @@ namespace Rubickanov.Motor
     /// Rigidbody-based physics body. Forces are applied via <see cref="Rigidbody.AddForce"/>
     /// and resolved by Unity's physics engine. Best for singleplayer prototypes.
     /// Not suitable for deterministic replay (multiplayer reconciliation).
+    ///
+    /// <para>
+    /// <see cref="SimulatedPosition"/>/<see cref="SimulatedRotation"/> are latched
+    /// at <see cref="BeginFrame"/> and reflect the <em>post-physics state of the
+    /// previous tick</em>. PhysX resolves forces after all <c>FixedUpdate</c>
+    /// scripts return, so during a single <c>Simulate</c> call
+    /// <see cref="Rigidbody.position"/> has not yet advanced. Consumers reading
+    /// <see cref="SimulatedPosition"/> between ticks get a consistent,
+    /// one-tick-delayed snapshot — the inherent price of rigidbody mode.
+    /// </para>
     /// </summary>
     public class RigidbodyMotorBody : IMotorBody
     {
@@ -23,10 +33,8 @@ namespace Rubickanov.Motor
             hideFlags = HideFlags.HideAndDontSave
         };
 
-        // Interpolation — track physics positions without touching _rb.position
-        private Vector3 _previousPosition;
         private Vector3 _simulatedPosition;
-        private bool _isInterpolated;
+        private Quaternion _simulatedRotation;
 
         public RigidbodyMotorBody(Rigidbody rb, CapsuleCollider capsule, LayerMask groundMask)
         {
@@ -42,46 +50,32 @@ namespace Rubickanov.Motor
 
             _capsule.material = ZeroFrictionMaterial;
 
-            _previousPosition = _rb.position;
             _simulatedPosition = _rb.position;
+            _simulatedRotation = _rb.rotation;
         }
 
         public Transform Transform => _rb.transform;
-        public Vector3 Position => _rb.position;
-        public Quaternion Rotation => _rb.rotation;
+        public Vector3 Position => _simulatedPosition;
+        public Quaternion Rotation => _simulatedRotation;
+        public Vector3 SimulatedPosition => _simulatedPosition;
+        public Quaternion SimulatedRotation => _simulatedRotation;
         public Vector3 Velocity => _rb.linearVelocity;
         public float CapsuleHeight => _capsule.height;
 
         public void BeginFrame(MotorState state, float deltaTime)
         {
-            // Undo visual interpolation — restore physics transform for colliders
-            if (_isInterpolated)
-            {
-                _rb.transform.position = _simulatedPosition;
-                Physics.SyncTransforms();
-                _isInterpolated = false;
-            }
-
-            // Shift the interpolation window
-            _previousPosition = _simulatedPosition;
+            // Latch the current physics state. transform ↔ _rb.{position,rotation}
+            // is kept in sync by PhysX, so no explicit transform write is needed.
             _simulatedPosition = _rb.position;
-
+            _simulatedRotation = _rb.rotation;
             state.CurrentVelocity = _rb.linearVelocity;
         }
 
         public void EndFrame(MotorState state, float deltaTime)
         {
-            // No-op: Unity physics engine resolves forces applied during the frame.
-        }
-
-        public void Interpolate(float alpha)
-        {
-            // Capture latest post-PhysX position
-            _simulatedPosition = _rb.position;
-
-            // Move ONLY the transform for visual purposes — don't touch _rb.position
-            _rb.transform.position = Vector3.Lerp(_previousPosition, _simulatedPosition, alpha);
-            _isInterpolated = true;
+            // No-op: Unity physics engine resolves forces applied during the frame,
+            // but only after all FixedUpdates return — re-reading _rb.position here
+            // would give the same stale value as BeginFrame.
         }
 
         public void AddForce(Vector3 force, ForceMode mode)
@@ -97,15 +91,34 @@ namespace Rubickanov.Motor
 
         public void MovePosition(Vector3 position)
         {
+            // Physics-aware move; resolves during the next PhysX step. Note: unlike
+            // KinematicMotorBody.MovePosition, the collider is NOT moved immediately
+            // in the current tick — modules that need an instant collider shift must
+            // use Kinematic body.
             _rb.MovePosition(position);
-            _previousPosition = position;
             _simulatedPosition = position;
-            _isInterpolated = false;
         }
 
         public void Rotate(Vector3 axis, float angle, Space relativeTo)
         {
-            _rb.transform.Rotate(axis, angle, relativeTo);
+            var delta = Quaternion.AngleAxis(angle, axis);
+            var newRotation = relativeTo == Space.World
+                ? delta * _rb.rotation
+                : _rb.rotation * delta;
+            _rb.MoveRotation(newRotation);
+            _simulatedRotation = newRotation;
+        }
+
+        public void Teleport(Vector3 position, Quaternion rotation, Vector3 velocity)
+        {
+            // Direct writes to _rb.{position,rotation} are teleports — unlike
+            // MovePosition/MoveRotation, they do not interpolate across the
+            // physics step.
+            _rb.position = position;
+            _rb.rotation = rotation;
+            _rb.linearVelocity = velocity;
+            _simulatedPosition = position;
+            _simulatedRotation = rotation;
         }
 
         public bool SphereCast(Vector3 origin, float radius, Vector3 direction,
@@ -142,11 +155,10 @@ namespace Rubickanov.Motor
         public void RestoreState(BodySnapshot snapshot)
         {
             _rb.position = snapshot.Position;
-            _previousPosition = snapshot.Position;
-            _simulatedPosition = snapshot.Position;
-            _isInterpolated = false;
             _rb.linearVelocity = snapshot.Velocity;
             _rb.rotation = snapshot.Rotation;
+            _simulatedPosition = snapshot.Position;
+            _simulatedRotation = snapshot.Rotation;
             _capsule.height = snapshot.CapsuleHeight;
             _capsule.center = Vector3.up * (snapshot.CapsuleHeight * 0.5f);
         }

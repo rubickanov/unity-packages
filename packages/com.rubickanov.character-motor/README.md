@@ -97,6 +97,36 @@ var input = new MotorInput
 motor.Simulate(input, NetworkManager.ServerTime.FixedDeltaTime);
 ```
 
+### Rendering
+
+The motor does not own the visible transform. After each tick, `motor.Body.SimulatedPosition` and `motor.Body.SimulatedRotation` hold the authoritative state — the consumer reads them and renders however it wants (MonoBehaviour field, reactive aspect, network snapshot, …).
+
+Motor touches the transform internally during `Simulate` (the collider needs to be at the right position for `CapsuleCast`). The `LateUpdate` bridge below is the authoritative visual write from the consumer's perspective — overwrite freely.
+
+```csharp
+private void LateUpdate()
+{
+    transform.position = motor.Body.SimulatedPosition;
+    transform.rotation = motor.Body.SimulatedRotation;
+}
+```
+
+**Rigidbody mode note:** `SimulatedPosition` is latched at the start of each tick, so it reflects the *post-physics state of the previous tick*. This is a one-tick rendering lag inherent to rigidbody-driven bodies — PhysX resolves forces after `FixedUpdate` returns. Kinematic mode has no such lag.
+
+### Integration with a reactive aspect (optional)
+
+If the consumer drives an ACS-style aspect with a `ReactiveProperty<Vector3> Position`, the pattern is: after each `Simulate`, push `motor.Body.SimulatedPosition` into the property; in `LateUpdate`, write the property's smoothed value back to the transform. This makes the aspect the source of truth for replication / persistence, and keeps the motor oblivious to the aspect layer (no ACS dependency in this package).
+
+### Teleport / restore from external state
+
+To push authoritative state into the motor (e.g. after loading a save, or applying a server-authoritative position), use `Teleport`:
+
+```csharp
+motor.Body.Teleport(savedPosition, savedRotation, savedVelocity);
+```
+
+The next `Simulate` picks up from the new state without the motor overwriting it.
+
 ### Movement Orientation
 
 **TopDown** — WASD maps to world axes:

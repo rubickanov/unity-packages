@@ -21,6 +21,8 @@ namespace Rubickanov.Motor.Tests
         public Transform Transform => _go.transform;
         public Vector3 Position { get; set; }
         public Quaternion Rotation { get; set; } = Quaternion.identity;
+        public Vector3 SimulatedPosition => Position;
+        public Quaternion SimulatedRotation => Rotation;
         public Vector3 Velocity { get; set; }
         public float CapsuleHeight { get; set; } = 2f;
 
@@ -111,6 +113,13 @@ namespace Rubickanov.Motor.Tests
             RotateCalls.Add((axis, angle, relativeTo));
         }
 
+        public void Teleport(Vector3 position, Quaternion rotation, Vector3 velocity)
+        {
+            Position = position;
+            Rotation = rotation;
+            Velocity = velocity;
+        }
+
         public bool SphereCast(Vector3 origin, float radius, Vector3 direction, float distance, out RaycastHit hit)
         {
             if (SphereCastHandler != null)
@@ -163,8 +172,6 @@ namespace Rubickanov.Motor.Tests
                 results[i] = SphereCastNonAllocResults[i];
             return count;
         }
-
-        public void Interpolate(float alpha) { }
 
         public BodySnapshot SaveState() => new BodySnapshot(Position, Velocity, Rotation, CapsuleHeight);
 
