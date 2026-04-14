@@ -41,8 +41,8 @@ namespace Rubickanov.ACS.Runtime.Netcode
         public override bool IsInterpolated => true;
         public T InterpolatedValue => _interpolatedValue;
 
-        public InterpolatedFieldBinding(ReactiveProperty<T> reactive, Lerp<T> lerp)
-            : base(reactive)
+        public InterpolatedFieldBinding(ReactiveProperty<T> reactive, Lerp<T> lerp, IFieldCodec<T> codec)
+            : base(reactive, codec)
         {
             _lerp = lerp;
             InterpolationRegistry<T>.Register(reactive, this);

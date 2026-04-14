@@ -295,8 +295,72 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             CollectionAssert.AreEqual(new[] { "Apple", "Banana", "Cherry" }, namesFirst);
         }
 
+        // ---- Quantization mode propagation & validation -------------------------
+
+        [Test]
+        public void Scan_QuantizationNone_DefaultOnFieldInfo()
+        {
+            // No explicit Quantization in the attribute → ReplicatedFieldInfo.Quantization
+            // must default to None so the factory routes to RawCodec<T> and existing
+            // bindings keep their byte-exact wire format.
+            var fields = ReplicationScanner.Scan(new QuantizationDefaultAspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual(QuantizationMode.None, fields[0].Quantization);
+        }
+
+        [Test]
+        public void Scan_QuantizationHalfPrecisionOnVector3_CarriedOnFieldInfo()
+        {
+            var fields = ReplicationScanner.Scan(new QuantizationHalfVector3Aspect());
+
+            Assert.AreEqual(1, fields.Length);
+            Assert.AreEqual(QuantizationMode.HalfPrecision, fields[0].Quantization);
+        }
+
+        [Test]
+        public void Scan_QuantizationHalfPrecisionOnInt_LogsErrorAndOmitsField()
+        {
+            // HalfPrecision is not valid for int — surface the mismatch at scan time
+            // rather than waiting for an InvalidOperationException at the first wire write.
+            var capture = new CapturingLogHandler();
+            var original = Debug.unityLogger.logHandler;
+            Debug.unityLogger.logHandler = capture;
+            ReplicatedFieldInfo[] fields;
+            try
+            {
+                fields = ReplicationScanner.Scan(new QuantizationInvalidIntAspect());
+            }
+            finally
+            {
+                Debug.unityLogger.logHandler = original;
+            }
+
+            Assert.AreEqual(0, fields.Length);
+            Assert.IsTrue(
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("Quantization")),
+                "Scanner must emit a LogError when Quantization is invalid for the field type");
+        }
+
         // ---- Test aspects -------------------------------------------------------
         // One per test to avoid static-cache contamination.
+
+        private class QuantizationDefaultAspect
+        {
+            [Replicated] public ReactiveProperty<Vector3> Position = new ReactiveProperty<Vector3>(Vector3.zero);
+        }
+
+        private class QuantizationHalfVector3Aspect
+        {
+            [Replicated(Quantization = QuantizationMode.HalfPrecision)]
+            public ReactiveProperty<Vector3> Position = new ReactiveProperty<Vector3>(Vector3.zero);
+        }
+
+        private class QuantizationInvalidIntAspect
+        {
+            [Replicated(Quantization = QuantizationMode.HalfPrecision)]
+            public ReactiveProperty<int> Bad = new ReactiveProperty<int>(0);
+        }
 
         private class OrderingAspect
         {

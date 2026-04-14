@@ -223,7 +223,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                         _                                           => FieldBindingKind.Plain,
                     };
 
-                    var binding = ReplicatedFieldBindingFactory.Create(reactive, info.ValueType, kind, _tickInterval);
+                    var binding = ReplicatedFieldBindingFactory.Create(reactive, info.ValueType, kind, _tickInterval, info.Quantization);
 
                     if (isAuthority)
                     {

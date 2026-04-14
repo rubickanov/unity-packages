@@ -54,6 +54,14 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
                 ReplicatedFieldBindingFactory.Create(reactive, typeof(T), FieldBindingKind.Plain);
         }
 
+        private static ReplicatedFieldBinding<T> MakeBinding<T>(
+            ReactiveProperty<T> reactive, QuantizationMode quantization)
+            where T : unmanaged
+        {
+            return (ReplicatedFieldBinding<T>)ReplicatedFieldBindingFactory.Create(
+                reactive, typeof(T), FieldBindingKind.Plain, 0, quantization);
+        }
+
         private void SetBindings(ReplicatedFieldBinding[] bindings, AuthorityMode[] authorities)
         {
             SetPrivate(_replicator, "_bindings", bindings);
@@ -336,6 +344,164 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
                     "server-auth field must apply even when OwnerWroteSinceSpawn is set");
             }
             finally { bag.Dispose(); }
+        }
+
+        // ---- Quantization e2e ---------------------------------------------------
+
+        [Test]
+        public void ApplyStateBuffer_QuantizedVector3_AppliedWithinHalfPrecisionTolerance()
+        {
+            // End-to-end through the real pipeline: sender encodes via FloatHalfCodec×3 (6B
+            // on wire instead of 12B), payload is laid out exactly as AspectReplicationSystem
+            // would lay it out, ApplyStateBuffer reads through the receiver's codec and lands
+            // the value on the reactive within half-float tolerance. This proves the codec
+            // selection survives the full path and the wire shrinks as advertised.
+            var sender = new ReactiveProperty<Vector3>(new Vector3(12.5f, -7.25f, 0.125f));
+            var receiver = new ReactiveProperty<Vector3>(Vector3.zero);
+            var senderBinding = MakeBinding(sender, QuantizationMode.HalfPrecision);
+            var receiverBinding = MakeBinding(receiver, QuantizationMode.HalfPrecision);
+
+            SetBindings(new ReplicatedFieldBinding[] { receiverBinding },
+                new[] { AuthorityMode.Server });
+
+            // Ask the sender's binding to write the field into the payload. Bytes written
+            // == codec.Size (6). If the factory threaded RawCodec by mistake we'd write 12
+            // and ApplyStateBuffer would mis-align on later fields.
+            int writtenBytes = 0;
+            var payload = BuildPayload(serverTick: 1, dirtyMask: new byte[] { 0b1 }, w =>
+            {
+                int before = w.Position;
+                senderBinding.WriteTo(w);
+                writtenBytes = w.Position - before;
+            });
+
+            Assert.AreEqual(6, writtenBytes,
+                "sender must have written 6 bytes (HalfPrecision Vector3) — if 12, codec wasn't applied");
+
+            _replicator.ApplyStateBuffer(payload, StateApplyMode.ApplyAll);
+
+            // Half-float at magnitude ~10 has ~0.01 quantization error; 0.05 is a safe margin.
+            Assert.AreEqual(12.5f, receiver.Value.x, 0.05f);
+            Assert.AreEqual(-7.25f, receiver.Value.y, 0.05f);
+            Assert.AreEqual(0.125f, receiver.Value.z, 0.05f);
+        }
+
+        [Test]
+        public void ApplyStateBuffer_QuantizedQuaternion_AppliedWithinSmallestThreeTolerance()
+        {
+            // Same e2e idea for Quaternion → SmallestThree (4B on wire instead of 16B).
+            // Tolerance is angular (dot ≥ 0.999 ≈ ~1° error) — the documented bound.
+            var input = Quaternion.Euler(30f, 60f, 90f);
+            var sender = new ReactiveProperty<Quaternion>(input);
+            var receiver = new ReactiveProperty<Quaternion>(Quaternion.identity);
+            var senderBinding = MakeBinding(sender, QuantizationMode.SmallestThree);
+            var receiverBinding = MakeBinding(receiver, QuantizationMode.SmallestThree);
+
+            SetBindings(new ReplicatedFieldBinding[] { receiverBinding },
+                new[] { AuthorityMode.Server });
+
+            int writtenBytes = 0;
+            var payload = BuildPayload(serverTick: 1, dirtyMask: new byte[] { 0b1 }, w =>
+            {
+                int before = w.Position;
+                senderBinding.WriteTo(w);
+                writtenBytes = w.Position - before;
+            });
+
+            Assert.AreEqual(4, writtenBytes,
+                "sender must have written 4 bytes (SmallestThree Quaternion) — if 16, codec wasn't applied");
+
+            _replicator.ApplyStateBuffer(payload, StateApplyMode.ApplyAll);
+
+            float dot = Mathf.Abs(Quaternion.Dot(input, receiver.Value));
+            Assert.GreaterOrEqual(dot, 0.999f, $"angular error too large: dot={dot}");
+        }
+
+        [Test]
+        public void ApplyStateBuffer_MixedQuantizedAndRawFields_RoutedCorrectlyByPerFieldSize()
+        {
+            // Hardest e2e: three bindings of mixed codecs in one payload — quantized Vec3 (6B)
+            // + raw int (4B) + quantized Quat (4B) = 14B total. If any codec lies about its
+            // Size, the next field's read mis-aligns and decodes garbage. This is the test
+            // most likely to catch a Size/Read mismatch in any codec.
+            var rVec = new ReactiveProperty<Vector3>(Vector3.zero);
+            var rInt = new ReactiveProperty<int>(0);
+            var rQuat = new ReactiveProperty<Quaternion>(Quaternion.identity);
+
+            var inputVec = new Vector3(3f, 4f, 5f);
+            var inputQuat = Quaternion.AngleAxis(45f, Vector3.up);
+
+            var sVec = new ReactiveProperty<Vector3>(inputVec);
+            var sInt = new ReactiveProperty<int>(0x12345678);
+            var sQuat = new ReactiveProperty<Quaternion>(inputQuat);
+            var senderVec = MakeBinding(sVec, QuantizationMode.HalfPrecision);
+            var senderInt = MakeBinding(sInt);                                  // raw — control
+            var senderQuat = MakeBinding(sQuat, QuantizationMode.SmallestThree);
+
+            var bVec = MakeBinding(rVec, QuantizationMode.HalfPrecision);
+            var bInt = MakeBinding(rInt);
+            var bQuat = MakeBinding(rQuat, QuantizationMode.SmallestThree);
+
+            SetBindings(new ReplicatedFieldBinding[] { bVec, bInt, bQuat },
+                new[] { AuthorityMode.Server, AuthorityMode.Server, AuthorityMode.Server });
+
+            var payload = BuildPayload(serverTick: 1, dirtyMask: new byte[] { 0b111 }, w =>
+            {
+                senderVec.WriteTo(w);
+                senderInt.WriteTo(w);
+                senderQuat.WriteTo(w);
+            });
+
+            _replicator.ApplyStateBuffer(payload, StateApplyMode.ApplyAll);
+
+            // Vec3 within half tolerance.
+            Assert.AreEqual(inputVec.x, rVec.Value.x, 0.05f);
+            Assert.AreEqual(inputVec.y, rVec.Value.y, 0.05f);
+            Assert.AreEqual(inputVec.z, rVec.Value.z, 0.05f);
+            // Int bit-exact (raw codec, 4B).
+            Assert.AreEqual(0x12345678, rInt.Value);
+            // Quat angular tolerance.
+            float dot = Mathf.Abs(Quaternion.Dot(inputQuat, rQuat.Value));
+            Assert.GreaterOrEqual(dot, 0.999f, $"angular error too large: dot={dot}");
+        }
+
+        [Test]
+        public void ApplyStateBuffer_SkipOwnerAuthOnQuantizedField_AdvancesByCodecSizeNotSizeofT()
+        {
+            // Skip path semantics: ApplyStateBuffer calls Skip(reader) only when a field IS
+            // in the payload (bit set) but is owner-auth and the mode says skip — used by
+            // pure-client owners who already have a fresher local value.
+            //
+            // The reader MUST advance by codec.Size, not sizeof(T). With a quantized Vec3,
+            // sizeof(T)=12 but Size=6; if Skip walked sizeof(T), the reader would jump 6B
+            // past the Vec3 into the next field, and the next field's read would return
+            // garbage. Here: owner-auth quantized Vec3 + server-auth int, both masked dirty,
+            // mode=SkipOwnerAuth → Vec3 skipped (6B), int applied (4B from offset 6).
+            var rVec = new ReactiveProperty<Vector3>(new Vector3(99f, 99f, 99f));
+            var rInt = new ReactiveProperty<int>(0);
+            var bVec = MakeBinding(rVec, QuantizationMode.HalfPrecision);
+            var bInt = MakeBinding(rInt);
+
+            SetBindings(new ReplicatedFieldBinding[] { bVec, bInt },
+                new[] { AuthorityMode.Owner, AuthorityMode.Server });
+
+            var sVec = new ReactiveProperty<Vector3>(new Vector3(1f, 2f, 3f));
+            var sInt = new ReactiveProperty<int>(777);
+            var senderVec = MakeBinding(sVec, QuantizationMode.HalfPrecision);
+            var senderInt = MakeBinding(sInt);
+
+            var payload = BuildPayload(serverTick: 1, dirtyMask: new byte[] { 0b11 }, w =>
+            {
+                senderVec.WriteTo(w);   // 6 bytes that Skip must consume
+                senderInt.WriteTo(w);   // 4 bytes that must land on rInt
+            });
+
+            _replicator.ApplyStateBuffer(payload, StateApplyMode.SkipOwnerAuth);
+
+            Assert.AreEqual(new Vector3(99f, 99f, 99f), rVec.Value,
+                "owner-auth field with SkipOwnerAuth must NOT be applied");
+            Assert.AreEqual(777, rInt.Value,
+                "if Skip used sizeof(T)=12 instead of codec.Size=6, the int read would be misaligned");
         }
 
         [Test]

@@ -1,6 +1,6 @@
 # Aspect-Component System (ACS)
 
-Entity composition framework for Unity. Aspects hold reactive data, components drive behavior, MonoEntity ties them together.
+Entity composition framework for Unity. Aspects hold reactive data, components drive behavior, the entity ties them together. Unity-bound and pure-C# entities share one interface so logic runs the same in the Editor, a headless server, or an edit-mode test.
 
 ## Dependencies
 
@@ -10,21 +10,17 @@ Entity composition framework for Unity. Aspects hold reactive data, components d
 ## Architecture
 
 ```
-IEntityAspect (marker interface)
-    ^
-    |  Require<T>() / [Aspect] injection
-IEntity ── Entity (pure POCO)
-    ^  ── MonoEntity (MonoBehaviour adapter)
-    |
-    |  Context property
-EntityComponent (MonoBehaviour base, OnSubscribe hook)
-IEntityLogic    (pure reactive, AttachLogic auto-dispose)
-ITickable       (pure update loop, driven by EntityTickRunner)
-
-
-SingletonMonoEntity<T>   →   MonoWorld (scene-wide singleton)
-    ↓                               ↓
-MonoEntity               World (pure registry + EntityQuery<T1..T8>)
+IEntity                           IEntityAspect            IEntityLogic / ITickable
+    ├── Entity      (pure C#)     (marker, data only)      (pure C#, optional)
+    ├── MonoEntity  (MonoBehaviour)
+    └── World       (pure C#)            ▲
+            ▲                            │   Require<T>() / [Aspect] injection
+            └── MonoWorld  (singleton MonoEntity)
+                            │
+                            │  owns
+                            ▼
+                      EntityRegistry        — Type → entities (Query<T>)
+                                            — EntityId → entity (TryFindById)
 ```
 
 Three tiers of entity behavior:
@@ -37,8 +33,8 @@ Three tiers of entity behavior:
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **ACS.Runtime** | Yes | Core framework: MonoEntity, EntityComponent, World, MonoWorld, EntityQuery |
-| **ACS.Editor** | Editor | MonoEntity inspector with aspect usage analysis |
+| **ACS.Runtime** | Yes | Core framework and Unity adapters: `Entity`, `MonoEntity`, `World`, `MonoWorld`, `EntityQuery`, injectors, tick runner |
+| **ACS.Editor** | Editor | `MonoEntity` inspector with aspect usage analysis |
 
 ## Core Concepts
 
@@ -46,20 +42,25 @@ Three tiers of entity behavior:
 
 **Component** — Single unit of behavior that reads and writes aspects. Extends **EntityComponent** (MonoBehaviour). One component, one job.
 
-**IEntity** — The aspect-container contract (`Require<T>` / `TryGet<T>` / `Has<T>` / `GetAllAspects` / `Destroyed`). Implemented by the Unity-bound `MonoEntity` and the pure POCO `Entity`. Anything that only needs to read/write aspects should depend on `IEntity` so it can run without Unity.
+**IEntity** — The aspect-container contract: `Id`, `Require<T>`, `TryGet<T>`, `Has<T>`, `GetAllAspects`, `AspectTypes`, `Destroyed`. Implemented by the Unity-bound `MonoEntity` and the pure POCO `Entity` (and by `World` itself). Depend on `IEntity` — never on `MonoEntity` — unless you actually need Unity.
 
-**MonoEntity** — MonoBehaviour on the entity root. Components obtain aspects via `[Aspect]` field injection or `Context.Require<T>()`. Fires `Destroyed` from `OnDestroy`.
+**MonoEntity** — MonoBehaviour on the entity root. Components obtain aspects via `[Aspect]` field injection or `Context.Require<T>()`. Allocates its `Id` and registers with `World.Current` in `Awake`; fires `Destroyed` in `OnDestroy`.
 
-**Entity** — Pure C# `IEntity` for pocket entities (item in an inventory, buff without a visual), headless simulations, and edit-mode tests. Lifetime ends with `Dispose()`, which fires `Destroyed` and clears the aspect dictionary.
+**Entity** — Pure C# `IEntity` for pocket entities (item in an inventory, buff without a visual), headless simulations, and edit-mode tests. Pass a `World` into the constructor to auto-register; otherwise stays standalone. Lifetime ends with `Dispose()`.
 
-**World** — Pure-C# `IEntity` that owns world-scoped aspects and the entity registry + query surface. Construct one directly for headless simulations. Exposes a static `Current` slot (one active world at a time) that backs `World.Require<T>()` and `World.Query<T>()` — both throw `InvalidOperationException` if no world is active, so call sites stay honest. No Unity dependencies.
+**World** — Pure-C# `IEntity` that owns world-scoped aspects and the entity registry. Exposes a static `Current` slot (one active world at a time) that backs `World.Require<T>()`, `World.Query<T>()`, and `World.TryFindById(...)` — all throw `InvalidOperationException` if no world is active, so call sites stay honest. Has no Unity dependencies — construct one directly for headless simulations.
 
-**MonoWorld** — `SingletonMonoEntity<MonoWorld>` that owns a `World` instance, assigns it as `World.Current` during Awake, and clears it during OnDestroy. Drop one on a GameObject in the scene and every `MonoEntity` in that scene auto-registers with `MonoWorld.Instance.World`. All IEntity calls on the MonoWorld delegate into the embedded `World` — there is no duplicate aspect store.
+**MonoWorld** — `SingletonMonoEntity<MonoWorld>` that owns a `World` instance, assigns it as `World.Current` in `Awake`, and clears it in `OnDestroy`. Drop one on a scene GameObject and every `MonoEntity` auto-registers with `MonoWorld.Instance.World`. All `IEntity` calls on the MonoWorld delegate into the embedded `World` — there is no duplicate aspect store.
+
+**EntityId** — Session-local stable identifier allocated at entity construction. Never reused within a session; `EntityId.None` represents "no entity". Serves as the key for `World.TryFindById(...)` and as the routing handle used by extension packages (`acs.netcode`, future `acs.persistence`).
+
+**EntityRef** — Unmanaged `struct` wrapper around `EntityId` for aspect fields that reference other entities (AI target, parent, projectile owner). `TryResolve(world, out var entity)` hits the by-id registry each call — no cached reference, so a destroyed target is always observable as "dangling", never returned as a stale pointer. Replication-safe (`acs.netcode` passes it through unchanged).
 
 ## Quick Start
 
-1. Add **MonoEntity** to the root GameObject of your entity.
-2. Define an aspect:
+1. Drop a **MonoWorld** on a GameObject in the scene. It wires up `World.Current` so queries and world-scoped aspects work.
+2. Add a **MonoEntity** to the root GameObject of each entity.
+3. Define an aspect:
 
 ```csharp
 public class HealthAspect : IEntityAspect
@@ -70,7 +71,7 @@ public class HealthAspect : IEntityAspect
 }
 ```
 
-3. Write a component that reacts to it:
+4. Write a component that reacts to it:
 
 ```csharp
 public class DamageFlashObserver : EntityComponent
@@ -86,7 +87,7 @@ public class DamageFlashObserver : EntityComponent
 }
 ```
 
-The `[Aspect]` attribute resolves the field from the context in `Awake`. `OnSubscribe` wires subscriptions that are automatically disposed on `OnDisable`.
+The `[Aspect]` attribute resolves the field from the entity context in `Awake`. `OnSubscribe` wires subscriptions that are automatically disposed on `OnDisable`.
 
 ## Usage
 
@@ -132,7 +133,7 @@ protected override void OnSubscribe(ref DisposableBag disposables)
 
 ### Injecting Aspects into Components
 
-Mark fields with `[Aspect]` — injection happens in `EntityComponent.Awake` via reflection (cached per component type). Multiple components requesting the same type share the same instance:
+Mark fields with `[Aspect]` — injection happens in `EntityComponent.Awake` via reflection (cached per component type, compiled `Expression` delegates for the `Require<T>` call). Multiple components requesting the same type share the same instance:
 
 ```csharp
 public class CharacterController : EntityComponent
@@ -205,7 +206,7 @@ if (Context.Has<FlyingAspect>())
 
 ### World — Global State and Queries
 
-Add a **World** MonoBehaviour to a GameObject in your scene. It is itself an `MonoEntity`, so world-scoped aspects work exactly like entity aspects:
+With a `MonoWorld` in the scene, world-scoped aspects work exactly like entity aspects:
 
 ```csharp
 public class TimeAspect : IEntityAspect
@@ -219,7 +220,7 @@ public class TimeAspect : IEntityAspect
 var time = World.Require<TimeAspect>().TimeOfDay.Value;
 ```
 
-Components can also inject world aspects via a static accessor inside `OnSubscribe`:
+Components inject world aspects via the same static accessor inside `OnSubscribe`:
 
 ```csharp
 public class ZombieBehavior : EntityComponent
@@ -235,7 +236,7 @@ public class ZombieBehavior : EntityComponent
 }
 ```
 
-`World.Query<T>()` returns every aspect of that type currently in the scene. Multi-argument overloads (up to 8) yield tuples of `(entity, aspect1, aspect2, ...)`:
+`World.Query<T>()` returns every aspect of that type currently in the world. Multi-argument overloads (up to 8) yield tuples of `(entity, aspect1, aspect2, ...)`:
 
 ```csharp
 // All living health aspects — plain foreach keeps the query's struct enumerator zero-alloc.
@@ -247,10 +248,40 @@ foreach (var health in World.Query<HealthAspect>())
 
 // Entities carrying both health and position
 foreach (var (entity, health, pos) in World.Query<HealthAspect, PositionAspect>())
-    Debug.Log($"{entity.name} @ {pos.Value.Value}, hp={health.CurrentHealth.Value}");
+    Debug.Log($"{entity} @ {pos.Value.Value}, hp={health.CurrentHealth.Value}");
 ```
 
-Registration is automatic — every `Require<T>` call on any `MonoEntity` registers with the live `World`. Destruction unregisters.
+Registration is automatic — every `Require<T>` call on any `MonoEntity` registers with `World.Current`. Destruction unregisters.
+
+### Entity References — EntityId and EntityRef
+
+Every `IEntity` gets a session-local `EntityId` at construction. An `EntityRef` is the value-type wrapper you store on aspect data when a field *means* "a reference to another entity" (AI target, projectile owner, parent socket):
+
+```csharp
+public class AiTargetAspect : IEntityAspect
+{
+    public readonly ReactiveProperty<EntityRef> Target = new(EntityRef.None);
+}
+
+// Acquire a target
+aspect.Target.Value = EntityRef.From(playerEntity);
+
+// Consume it — resolve each time rather than caching, so destroyed targets are
+// observable as "dangling" and can't become a stale pointer in AI logic.
+if (aspect.Target.Value.TryResolve(World.Current!, out var target))
+    MoveToward(target);
+```
+
+Use raw `EntityId` only for infrastructure (registry keys, save payloads, network messages). `EntityRef` is the domain-facing type and the one replication ships natively.
+
+For direct by-id lookup (save/load bridges, debug tools, ad-hoc probes):
+
+```csharp
+if (World.Current!.TryFindById(savedId, out var entity))
+    RestoreInto(entity);
+```
+
+`TryFindById` returns `false` for `EntityId.None`, for ids belonging to a different world, and for destroyed entities.
 
 ### Custom Singletons
 
@@ -295,15 +326,24 @@ entity.AttachLogic(new DeathWatchLogic(health));
 entity.Dispose();  // fires Destroyed; AttachLogic disposes DeathWatchLogic.
 ```
 
-**IEntityLogic** is the pure-C# equivalent of `EntityComponent`: wire subscriptions in the constructor, release them in `Dispose`. `AttachLogic(entity, logic)` hooks `Destroyed` for you, so the logic disposes automatically when the owning entity dies.
+**IEntityLogic** is the pure-C# equivalent of `EntityComponent`: wire subscriptions in the constructor, release them in `Dispose`. `AttachLogic(entity, logic)` hooks `Destroyed` for you, so the logic disposes automatically when the owning entity dies. `Dispose` must be idempotent — if the caller disposes manually and the entity is later destroyed, the hook runs again:
 
 ```csharp
 public sealed class DeathWatchLogic : IEntityLogic
 {
     private readonly IDisposable _sub;
+    private bool _disposed;
+
     public DeathWatchLogic(HealthAspect health)
-        => _sub = health.Current.Subscribe(v => { if (v <= 0) OnDied(); });
-    public void Dispose() => _sub.Dispose();
+        => _sub = health.CurrentHealth.Subscribe(v => { if (v <= 0) OnDied(); });
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _sub.Dispose();
+    }
+
     private void OnDied() { /* ... */ }
 }
 ```
@@ -319,7 +359,7 @@ public sealed class CooldownTickable : ITickable
 }
 ```
 
-For scene-wide queries without a `MonoWorld` in the scene, construct a pure `World` directly and pass it to your entities — they auto-register on each first `Require<T>()` and auto-unregister on `Dispose`, the same way `MonoEntity` integrates with `World.Current`:
+For scene-wide queries without a `MonoWorld` in the scene, construct a pure `World` directly and pass it into each `Entity` — they auto-register on construction (by id) and on each first `Require<T>()` (per-aspect), and auto-unregister on `Dispose`:
 
 ```csharp
 var world = new World();
@@ -331,10 +371,12 @@ hero.Require<PositionAspect>();
 foreach (var (owner, health, pos) in world.QueryLocal<HealthAspect, PositionAspect>())
     // ...
 
-hero.Dispose(); // auto-unregisters — no manual world.Unregister needed.
+hero.Dispose(); // auto-unregisters from per-aspect buckets and the by-id index.
 ```
 
-If you want finer control (pocket entities that join a registry only conditionally, or headless sims that own registration externally), use the parameterless `new Entity()` ctor and call `world.Register(entity, typeof(T))` / `world.Unregister(entity, entity.AspectTypes)` yourself.
+`QueryLocal<...>` is the instance-scoped counterpart of the static `World.Query<...>` — use it when the world you care about is not `World.Current` (a pocket world running alongside the main one, a server-side mini-sim, a test). The static form dispatches to `QueryLocal` on `Current`.
+
+If you want finer control (pocket entities that join a registry only conditionally, headless sims that drive registration externally), use the parameterless `new Entity()` ctor and call `world.Register(entity)` / `world.Register(entity, typeof(T))` / `world.Unregister(...)` yourself.
 
 ### Extension Hooks
 
@@ -350,7 +392,7 @@ MonoEntity.OnAwakeCompleted += context =>
 };
 ```
 
-`MonoEntity.OnAspectCreated` fires once for every new aspect, including those created lazily via `Require` after `Start` (e.g. from `OnEnable`, `Update`, or delayed logic). Use it to react to aspects that may appear at any time during an entity's life:
+`MonoEntity.OnAspectCreated` fires once for every new aspect, including those created lazily via `Require` after `Start` (e.g. from `OnEnable`, `Update`, or delayed logic). World-scoped aspects created on `MonoWorld.Instance` also flow through this event. Use it to react to aspects that may appear at any time during an entity's life:
 
 ```csharp
 MonoEntity.OnAspectCreated += (entity, aspectType) =>
@@ -371,7 +413,7 @@ Character (MonoEntity)
 ├── CharacterAnimator      — reads MovementAspect, writes AnimationAspect
 └── DamageFlashObserver    — reads HealthAspect.Hit
 
-World (SingletonMonoEntity<World>)
+MonoWorld (SingletonMonoEntity<MonoWorld>)
 ├── TimeAspect             — global time of day
 └── WeatherAspect          — current weather
 ```
@@ -381,20 +423,9 @@ World (SingletonMonoEntity<World>)
 - **MonoEntity lazy-creates aspects** — `Require<T>()` returns an existing instance or creates a new one. No manual registration, no initialization order coupling.
 - **`[Aspect]` injection over `Require<T>` in Awake** — eliminates boilerplate, keeps the Awake override optional, and makes aspect dependencies a declarative part of the component's shape.
 - **`OnSubscribe` hook instead of manual `OnEnable`/`OnDisable`** — guarantees subscriptions are always paired with disposal. Component authors cannot forget to dispose.
-- **MonoWorld is just a MonoEntity** — replication (`[Replicated]`), persistence, and inspector tooling all work on world aspects for free. No separate "world component" abstraction.
+- **MonoWorld is a MonoEntity** — replication (`[Replicated]`), persistence, and inspector tooling all work on world aspects for free. No separate "world component" abstraction.
+- **Pure-C# World, Unity adapter on top** — identity/composition (aspects, registry, queries, by-id lookup) is plain C# via `World`. `MonoWorld` is a thin delegating adapter that assigns `World.Current` and forwards events. Headless simulations and fast edit-mode tests never touch `MonoBehaviour`.
 - **Queries ship in core, spatial queries do not** — `World.Query<T>()` is a type-bucket lookup with no physics dependency. Spatial queries (radius, nearest, grid) live in a separate package to keep core dependency-free.
-- **Static EntityInjector delegate instead of DI dependency** — keeps the package zero-DI. Any framework (VContainer, Zenject) plugs in with one line.
-- **No EntityNetworkComponent in this package** — netcode support lives in the ACS.Netcode extension to avoid a hard dependency on Netcode for GameObjects.
-- **Pure core split** — identity/composition (aspects, registry, queries) is plain C# via `IEntity` + `Entity` + `World`. `MonoEntity` / `MonoWorld` are the Unity adapters. Pocket entities, console-host simulations, and fast edit-mode tests never touch `MonoBehaviour`. The Unity-bound tier (`EntityComponent`, `EntityTickRunner`) exists only where `Transform`/`Rigidbody`/`Animator` actually matter.
-
-## Migration
-
-**`EntityContext` → `MonoEntity`** (rename, 2026-04): the MonoBehaviour class is now called `MonoEntity` to symmetrically pair with the new pure `Entity`. `[MovedFrom]` preserves serialized prefab/scene references, but update type names in code:
-
-| Before                   | After                |
-|--------------------------|----------------------|
-| `EntityContext`          | `MonoEntity`         |
-| `SingletonEntityContext<T>` | `SingletonMonoEntity<T>` |
-| `EntityContextEditor`    | `MonoEntityEditor`   |
-
-Query tuples now yield `(IEntity Entity, ...)` instead of `(MonoEntity Entity, ...)`. If you have an explicit type annotation in a `foreach (var (MonoEntity entity, ...) in World.Query<T1, T2>())`, drop the type and let `var` infer — or change it to `IEntity`.
+- **`EntityRef` resolves on every access** — no cached `IEntity` inside the struct. A managed field would break replication, and a cache would go stale after the target is destroyed. The by-id registry lookup is O(1), so the always-resolve policy costs nothing and keeps dangling references observable.
+- **Static `EntityInjector` delegate instead of DI dependency** — keeps the package zero-DI. Any framework (VContainer, Zenject) plugs in with one line.
+- **Netcode lives in `acs.netcode`** — the core package has no NGO dependency. Replication, RPCs, and ownership wire themselves via the static extension hooks.

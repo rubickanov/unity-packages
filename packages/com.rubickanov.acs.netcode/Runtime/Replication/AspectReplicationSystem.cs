@@ -277,6 +277,10 @@ namespace Rubickanov.ACS.Runtime.Netcode
                     writer.Seek(lenPos);
                     writer.WriteValueSafe((ushort)payloadBytes);
                     writer.Seek(endPos);
+
+                    // Debug probe for bandwidth measurement / experiments. Null unless a
+                    // subscriber is attached, so the hot path stays free in production.
+                    ReplicationDebug.OnEntityPayloadWritten?.Invoke(rep.NetworkObjectId, payloadBytes);
                 }
 
                 _networkManager.CustomMessagingManager.SendNamedMessage(

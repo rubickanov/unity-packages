@@ -23,15 +23,17 @@ namespace Experiments
         //       IS authority, and running reconcile on self-relayed batches
         //       would replay Simulate a second time per tick and accelerate
         //       the owner visibly).
-        [Replicated(Authority = AuthorityMode.Server, Interpolation = InterpolationMode.Linear, Predicted = true)]
+        [Replicated(Authority = AuthorityMode.Server, Interpolation = InterpolationMode.Linear, Predicted = true,
+            Quantization = QuantizationMode.HalfPrecision)]
         public readonly ReactiveProperty<Vector3> Position = new(Vector3.zero);
 
         // Server-auth: only server writes health
-        [Replicated(Authority = AuthorityMode.Server)]
+        [Replicated(Authority = AuthorityMode.Server, Quantization = QuantizationMode.HalfPrecision)]
         public readonly ReactiveProperty<float> Health = new(100f);
 
         // Server-auth + interpolated: server rotates, clients see smooth rotation
-        [Replicated(Authority = AuthorityMode.Server, Interpolation = InterpolationMode.Linear)]
+        [Replicated(Authority = AuthorityMode.Server, Interpolation = InterpolationMode.Linear,
+            Quantization = QuantizationMode.SmallestThree)]
         public readonly ReactiveProperty<Quaternion> Rotation = new(Quaternion.identity);
 
         // Server event: broadcast when damage happens

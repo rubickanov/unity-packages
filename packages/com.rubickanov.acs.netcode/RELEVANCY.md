@@ -1,6 +1,6 @@
-# Delta Compression + Relevancy — Design & Plan
+# Relevancy — Design & Plan
 
-Status: **planned, not implemented.** Referenced from `DESIGN.md` Layer 5.
+Status: **planned, not implemented.**
 
 This document locks in the scope and design decisions so implementation can
 proceed in a single focused pass.
@@ -9,10 +9,16 @@ proceed in a single focused pass.
 
 ## Context: what's already in place
 
-`AspectReplicationSystem.ServerTick` already does **field-level dirty delta**:
-each entity carries a `dirtyMask` bitset, and only dirty bindings are written
-to the batch. The wire format documented in `DESIGN.md` (Layer 0) is
-already delta-compressed at the field granularity.
+Two layers of compression already ship:
+
+- **Field-level dirty delta.** `AspectReplicationSystem.ServerTick` writes a
+  per-entity `dirtyMask` and only emits bytes for dirty bindings — the wire
+  is delta-compressed at field granularity.
+- **Value-level quantization (opt-in).** `[Replicated(Quantization = ...)]`
+  selects a per-field codec via `IFieldCodec<T>`. `HalfPrecision` halves
+  float/Vector2/3/4, `SmallestThree` quarters `Quaternion`. `payloadBytes`
+  per-entity prefix tracks actual codec output, so quantized fields
+  automatically shrink the packet.
 
 What's **not** in place:
 
@@ -20,11 +26,8 @@ What's **not** in place:
   non-host client via `_broadcastTargetIds`. Irrelevant entities ride along.
 - **Entity-level subscription.** There's no concept of "client C does not
   need entity E at all."
-- **Value-level compression.** Each binding writes raw `sizeof(T)` bytes —
-  no quantization, no bit-packing.
 
-Relevancy closes the first two gaps. Quantization is a separate, optional
-feature (see "Out of scope" below).
+Relevancy closes both gaps.
 
 ---
 
@@ -40,11 +43,13 @@ feature (see "Out of scope" below).
 
 **Out of scope (deferred, revisit only if profiler demands):**
 
-- Value-level quantization (`int16` positions, smallest-three quaternions).
-  Add as an opt-in attribute knob after relevancy is in place and bandwidth
-  is re-measured.
 - Baseline-acked delta (Quake-3 snapshot model). Large complexity, small
-  incremental win after field-dirty + relevancy. Not planned.
+  incremental win after field-dirty + relevancy + quantization. Not planned.
+- Range-based fixed-point quantization (`int16` with configurable world
+  range, e.g. ±500m / 0.015m step). Complementary to the current
+  half-float preset — useful only when half-float precision degrades at
+  large world coordinates. Add as a new `QuantizationMode` entry if it
+  ever matters.
 - Spatial hashing / grid buckets for relevancy queries. Naive O(entities ×
   clients) per relevancy tick is fine below ~50 entities × ~8 clients. Above
   that, see "Scaling notes" at the end.
@@ -259,10 +264,11 @@ Revisit these if/when they become real problems. Do not implement pre-emptively.
   stays the same; a `SpatialHashedDistanceRelevancy` replaces
   `DistanceRelevancy` and the `RelevancySystem` asks it for "relevant
   entities for this client" instead of iterating all.
-- **Value-level quantization.** Add `[Replicated(Quantize = ...)]` knobs
-  for positions / rotations. Only justified if profiler shows float-dominated
-  payloads after relevancy is in place. Squad-style int16 ±500m / 0.015m
-  step gives 50% savings on Vector3; smallest-three gives 75% on quaternions.
+- **Range-based fixed-point quantization.** Complement to the half-float /
+  smallest-three presets that already ship. Needed when world coordinates
+  exceed ~500 units and half-float error (mantissa = 10 bits) becomes
+  visually noticeable. Add as a new `QuantizationMode.FixedRange` with
+  configurable range/step on the attribute.
 - **Cell / sector interest management.** Static world grid, entities
   subscribe to cell they occupy, clients subscribe to their cell + neighbors.
   Scales to very large worlds with many entities. Only worth it when
