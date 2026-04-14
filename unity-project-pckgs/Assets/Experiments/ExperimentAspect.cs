@@ -37,8 +37,7 @@ namespace Experiments
         public readonly ReactiveProperty<Quaternion> Rotation = new(Quaternion.identity);
 
         // Server event: broadcast when damage happens
-        [ReplicatedEvent]
-        public readonly Subject<float> DamageDealt = new();
+        [ReplicatedEvent] public readonly Subject<float> DamageDealt = new();
 
         // Owner event (unreliable): cosmetic footstep
         [ReplicatedEvent(Authority = AuthorityMode.Owner, Reliability = Reliability.Unreliable)]

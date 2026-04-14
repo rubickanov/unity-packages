@@ -11,7 +11,7 @@ proceed in a single focused pass.
 
 Two layers of compression already ship:
 
-- **Field-level dirty delta.** `AspectReplicationSystem.ServerTick` writes a
+- **Field-level dirty delta.** `EntityReplicationSystem.ServerTick` writes a
   per-entity `dirtyMask` and only emits bytes for dirty bindings — the wire
   is delta-compressed at field granularity.
 - **Value-level quantization (opt-in).** `[Replicated(Quantization = ...)]`
@@ -36,7 +36,7 @@ Relevancy closes both gaps.
 **In scope for this iteration:**
 
 - Per-entity relevancy policy (distance-based default).
-- Per-client state batching in `AspectReplicationSystem`.
+- Per-client state batching in `EntityReplicationSystem`.
 - Per-client event filtering.
 - Integration with NGO's `NetworkObject.Observers` / `NetworkShow` / `NetworkHide`
   so spawn/despawn and initial sync flow through the existing pipeline.
@@ -103,7 +103,7 @@ override (third-person camera, spectator camera, multiple-perspective
 setups).
 
 Registered as a singleton per `NetworkManager`, similar to
-`AspectReplicationSystem` / `PredictionManager`. Lookup resolves on first
+`EntityReplicationSystem` / `PredictionManager`. Lookup resolves on first
 use; absence falls back to "everything relevant" with a one-time warning.
 
 ### NetworkRelevancy component
@@ -125,7 +125,7 @@ clients must see.
 
 ### RelevancySystem
 
-Per-`NetworkManager` singleton, mirrors `AspectReplicationSystem` lifecycle:
+Per-`NetworkManager` singleton, mirrors `EntityReplicationSystem` lifecycle:
 
 - Subscribes to `NetworkTickSystem.Tick`; runs the relevancy check every
   Nth tick where `N = round(tickRate / 10)` (≈10 Hz regardless of sim rate).
@@ -143,7 +143,7 @@ policy. Keeps the tick loop agnostic of geometry and trivially pluggable.
 
 ### Per-client state batching
 
-`AspectReplicationSystem.ServerTick` restructures from "one batch for all"
+`EntityReplicationSystem.ServerTick` restructures from "one batch for all"
 to "one batch per client":
 
 ```
@@ -193,8 +193,8 @@ on a singleton aspect without `NetworkRelevancy`.
 The flow when `NetworkShow(clientId)` triggers:
 
 1. NGO spawns the `NetworkObject` on the client.
-2. Client's `AspectReplicator.OnNetworkSpawn` fires.
-3. It calls `AspectReplicationSystem.RequestInitialSync(this)` → sends
+2. Client's `EntityReplicator.OnNetworkSpawn` fires.
+3. It calls `EntityReplicationSystem.RequestInitialSync(this)` → sends
    `ACS_SyncReq` to server.
 4. Server replies with `ACS_SyncReply` containing full state.
 

@@ -311,6 +311,34 @@ namespace Rubickanov.ACS.Tests
         }
 
         [Test]
+        public void OnAspectCreated_FiresForPureEntityAspect()
+        {
+            // The reason OnAspectCreated's raise site was consolidated into World.Register:
+            // pure-C# Entity.Require now flows through the same AspectCreated event, so
+            // subscribers (acs.netcode replication, inspector tooling) see pocket/headless
+            // entities instead of silently missing them.
+            var monoWorld = NewMonoWorld();
+            var pure = new Entity(monoWorld.World);
+            IEntity observedEntity = null;
+            Type observedType = null;
+            Action<IEntity, Type> handler = (e, t) => { observedEntity = e; observedType = t; };
+            MonoEntity.OnAspectCreated += handler;
+            try
+            {
+                pure.Require<TestAspectA>();
+            }
+            finally
+            {
+                MonoEntity.OnAspectCreated -= handler;
+                pure.Dispose();
+            }
+
+            Assert.AreSame(pure, observedEntity,
+                "Pure Entity aspect creation must reach MonoEntity.OnAspectCreated via World.AspectCreated forwarder.");
+            Assert.AreEqual(typeof(TestAspectA), observedType);
+        }
+
+        [Test]
         public void DuplicateMonoWorld_DisposesItsEmbeddedWorld()
         {
             // A duplicate MonoWorld self-destroys in Awake before it can become Instance,

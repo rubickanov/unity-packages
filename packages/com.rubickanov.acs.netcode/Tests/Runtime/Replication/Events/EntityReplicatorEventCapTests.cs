@@ -8,9 +8,9 @@ using UnityEngine;
 namespace Rubickanov.ACS.Runtime.Netcode.Tests
 {
     [TestFixture]
-    public class AspectReplicatorEventCapTests
+    public class EntityReplicatorEventCapTests
     {
-        // Regression #3 / #18 — ISSUES.md. The cap (256) must be enforced on _eventBindings
+        // The cap (256) must be enforced on _eventBindings
         // after OnNetworkSpawn's scan phase. The reason is subtle and worth spelling out
         // so a future reader doesn't "simplify" the check away: the event-index argument
         // to SubscribeAsAuthority is a byte, obtained from `(byte)i` in the subscribe loop.
@@ -33,7 +33,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             bool overflowed;
             try
             {
-                overflowed = AspectReplicator.ExceedsEventBindingCap(257, "TestEntity");
+                overflowed = EntityReplicator.ExceedsEventBindingCap(257, "TestEntity");
             }
             finally
             {
@@ -60,7 +60,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             bool overflowed;
             try
             {
-                overflowed = AspectReplicator.ExceedsEventBindingCap(256, "TestEntity");
+                overflowed = EntityReplicator.ExceedsEventBindingCap(256, "TestEntity");
             }
             finally
             {
@@ -86,7 +86,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             bool overflowed;
             try
             {
-                overflowed = AspectReplicator.ExceedsFieldBindingCap(257, "TestEntity");
+                overflowed = EntityReplicator.ExceedsFieldBindingCap(257, "TestEntity");
             }
             finally
             {
@@ -110,7 +110,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             bool overflowed;
             try
             {
-                overflowed = AspectReplicator.ExceedsFieldBindingCap(256, "TestEntity");
+                overflowed = EntityReplicator.ExceedsFieldBindingCap(256, "TestEntity");
             }
             finally
             {

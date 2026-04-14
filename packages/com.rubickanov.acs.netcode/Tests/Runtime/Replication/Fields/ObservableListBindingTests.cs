@@ -235,7 +235,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         [Test]
         public void Skip_AdvancesReaderPastEntirePayload()
         {
-            // Skip is how AspectReplicator handles unknown entities on the wire — the
+            // Skip is how EntityReplicator handles unknown entities on the wire — the
             // reader must end up exactly at the byte following the encoded field, no
             // matter how many ops were written. Regression guard: without the length
             // prefix, Skip would need to replay codec reads, coupling its behaviour to

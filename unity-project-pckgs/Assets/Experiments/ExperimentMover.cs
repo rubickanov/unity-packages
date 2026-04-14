@@ -23,7 +23,7 @@ namespace Experiments
     {
         [SerializeField] private float moveSpeed = 5f;
 
-        [Aspect] private ExperimentAspect _aspect = default!;
+        [Aspect] private readonly ExperimentAspect _aspect = default!;
 
         public void Simulate(in ExperimentInputCommand input, float dt)
         {

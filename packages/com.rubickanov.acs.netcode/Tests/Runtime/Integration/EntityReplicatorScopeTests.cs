@@ -7,7 +7,7 @@ using UnityEngine.TestTools;
 namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 {
     /// <summary>
-    /// Integration coverage for <c>AspectReplicator.ApplyNetworkScopes</c>:
+    /// Integration coverage for <c>EntityReplicator.ApplyNetworkScopes</c>:
     /// components marked <see cref="NetworkScope.ServerOnly"/> or
     /// <see cref="NetworkScope.OwnerOnly"/> must be disabled on peers that
     /// don't match the scope, and the ownership-transfer path must re-evaluate
@@ -15,7 +15,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// cascade past a nested NetworkObject) and #16 (a scope-disabled
     /// component must not subscribe on OnNetworkSpawn).
     /// </summary>
-    public class AspectReplicatorScopeTests : AspectReplicatorIntegrationTestBase
+    public class EntityReplicatorScopeTests : EntityReplicatorIntegrationTestBase
     {
         [UnityTest]
         public IEnumerator ServerOnlyComponent_OnPureClient_DisabledAfterSpawn()
@@ -163,7 +163,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         {
             // Regression #16: a scope-disabled EntityNetworkComponent must
             // never fire OnSubscribe on pure clients. The spawn sequence is:
-            // OnNetworkSpawn on AspectReplicator → ApplyNetworkScopes flips
+            // OnNetworkSpawn on EntityReplicator → ApplyNetworkScopes flips
             // enabled=false synchronously → OnNetworkSpawn on the marker →
             // TrySubscribe sees enabled==false and bails. Before the fix,
             // TrySubscribe was tied only to the spawn callback and ignored

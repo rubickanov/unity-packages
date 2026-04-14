@@ -7,7 +7,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// <summary>
     /// Base class for networked entity components. Override <see cref="OnSubscribe"/> to subscribe to aspect events;
     /// subscriptions are automatically disposed on <see cref="OnDisable"/> (including scope-disable from
-    /// <c>AspectReplicator.ApplyNetworkScopes</c>, so a disabled component never fires stray reactions — regression #16).
+    /// <c>EntityReplicator.ApplyNetworkScopes</c>, so a disabled component never fires stray reactions — regression #16).
     /// Mark aspect fields with <see cref="AspectAttribute"/> for automatic injection in Awake.
     /// </summary>
     public abstract class EntityNetworkComponent : NetworkBehaviour, IEntityComponent
@@ -49,7 +49,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         // Gate for the two entry points (OnEnable / OnNetworkSpawn). Subscribe only once,
         // and only when the component is both network-spawned AND enabled — the latter check
-        // is what closes the #16 race: if AspectReplicator scope-disabled us before our
+        // is what closes the #16 race: if EntityReplicator scope-disabled us before our
         // OnNetworkSpawn fired, we must stay silent despite the spawn callback.
         private void TrySubscribe()
         {

@@ -56,7 +56,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         // Collections apply ops immediately inside ReadFrom — there is no meaningful
         // "buffer + apply later" path because collections do not interpolate. Leaving
-        // ApplyFromNetwork as a no-op keeps the contract with AspectReplicator.
+        // ApplyFromNetwork as a no-op keeps the contract with EntityReplicator.
         public sealed override void ApplyFromNetwork(double receivedTime) { }
     }
 
@@ -103,7 +103,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         {
             get
             {
-                // Dynamic: AspectReplicationSystem polls this every tick when the field
+                // Dynamic: EntityReplicationSystem polls this every tick when the field
                 // is dirty so it can reserve the right number of bytes in the StateBatch
                 // payload. Scalars return a constant here; we return header + current
                 // pending ops.

@@ -67,7 +67,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             // ≈ 83 ms — slightly different from the old hard-coded constants (10 ms /
             // 66 ms) but wide enough that every existing test's sample gap still
             // classifies into the same branch (<10 ms coalesce, 30 ms slide, 500 ms
-            // stale bootstrap). See ISSUES.md #23.
+            // stale bootstrap).
             var binding = (AuthorityRenderBinding<T>)
                 ReplicatedFieldBindingFactory.Create(reactive, typeof(T), FieldBindingKind.AuthorityRendered, 1.0 / 30);
             _bindings.Add(binding);

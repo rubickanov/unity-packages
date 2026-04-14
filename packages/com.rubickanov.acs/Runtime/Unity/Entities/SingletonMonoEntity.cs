@@ -21,9 +21,14 @@ namespace Rubickanov.ACS.Runtime
         // guaranteed to null it (fast play-mode enter, cold exit on exception, asymmetric
         // scene-unload paths) — a stale reference survives into the next session and the first
         // Instance access returns a killed GameObject. Mirrors MonoEntity.ResetStaticEvents.
-        // Unity invokes the hook separately for every closed generic instantiation of
-        // SingletonMonoEntity<T>, so each concrete singleton type gets its own reset.
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        //
+        // [RuntimeInitializeOnLoadMethod] cannot live on a method in an open generic class —
+        // Unity logs "methods cannot be in generic classes" and skips the hook. The dispatch
+        // lives in SingletonMonoEntityResetter (non-generic): at SubsystemRegistration it walks
+        // every concrete subclass of SingletonMonoEntity&lt;T&gt; via reflection and invokes this
+        // method reflectively on each closed generic base. The test
+        // SingletonMonoEntityTests.ResetInstanceOnPlayStart_WithLiveInstance_NullsInstance
+        // pins the name "ResetInstanceOnPlayStart" so both reflection call sites stay in sync.
         private static void ResetInstanceOnPlayStart() => Instance = null;
 
         // A duplicate instance never becomes Instance, never registers aspects, and

@@ -14,21 +14,21 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
     {
         // ---- Fixture ------------------------------------------------------------
         //
-        // AspectReplicator is a NetworkBehaviour — normally configured in OnNetworkSpawn
+        // EntityReplicator is a NetworkBehaviour — normally configured in OnNetworkSpawn
         // via NGO lifecycle. We bypass the lifecycle: AddComponent the replicator on a
         // bare GameObject with a NetworkObject, then set _bindings / _bindingAuthorities /
         // _tickInterval via reflection. ApplyStateBuffer only reads these three fields,
         // so it runs correctly with no NetworkManager or spawn.
 
         private GameObject _go;
-        private AspectReplicator _replicator;
+        private EntityReplicator _replicator;
 
         [SetUp]
         public void SetUp()
         {
             _go = new GameObject(nameof(ApplyStateBufferRoundTripTests));
             _go.AddComponent<NetworkObject>();
-            _replicator = _go.AddComponent<AspectReplicator>();
+            _replicator = _go.AddComponent<EntityReplicator>();
             SetPrivate(_replicator, "_tickInterval", 0.05);
         }
 
@@ -40,10 +40,10 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
 
         private static void SetPrivate(object target, string name, object value)
         {
-            var f = typeof(AspectReplicator).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
+            var f = typeof(EntityReplicator).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
             // Meaningful precondition: if the runtime refactor renames these fields this
             // test suite must fail loudly, not silently apply to nothing.
-            Assert.IsNotNull(f, $"AspectReplicator must have a private field '{name}' — rename detected?");
+            Assert.IsNotNull(f, $"EntityReplicator must have a private field '{name}' — rename detected?");
             f.SetValue(target, value);
         }
 
@@ -70,7 +70,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         }
 
         /// <summary>
-        /// Builds a state payload in the exact wire format <see cref="AspectReplicator.ApplyStateBuffer"/>
+        /// Builds a state payload in the exact wire format <see cref="EntityReplicator.ApplyStateBuffer"/>
         /// expects: <c>int serverTick</c>, <c>byte[maskLen] dirtyMask</c>, then each dirty field's raw
         /// bytes in binding-index order.
         /// </summary>
@@ -352,7 +352,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         public void ApplyStateBuffer_QuantizedVector3_AppliedWithinHalfPrecisionTolerance()
         {
             // End-to-end through the real pipeline: sender encodes via FloatHalfCodec×3 (6B
-            // on wire instead of 12B), payload is laid out exactly as AspectReplicationSystem
+            // on wire instead of 12B), payload is laid out exactly as EntityReplicationSystem
             // would lay it out, ApplyStateBuffer reads through the receiver's codec and lands
             // the value on the reactive within half-float tolerance. This proves the codec
             // selection survives the full path and the wire shrinks as advertised.

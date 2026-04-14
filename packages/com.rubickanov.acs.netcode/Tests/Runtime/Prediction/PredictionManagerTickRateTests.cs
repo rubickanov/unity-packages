@@ -10,7 +10,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
     [TestFixture]
     public class PredictionManagerTickRateTests
     {
-        // Regression #16 (ISSUES.md): if NetworkTickSystem.TickRate is 0, the manager's
+        // If NetworkTickSystem.TickRate is 0, the manager's
         // _tickDelta collapses to 0 and every Simulate(in input, 0f) call becomes a no-op
         // — motion freezes silently with no warning, no crash, and no test failure until
         // someone plays the game. GetOrCreate must refuse to build the manager so the

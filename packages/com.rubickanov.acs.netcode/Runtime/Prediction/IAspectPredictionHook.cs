@@ -2,7 +2,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 {
     /// <summary>
     /// Non-generic view of <see cref="PredictionManager{TInput}"/> used by
-    /// <see cref="AspectReplicator"/> to drive register / unregister / reconcile
+    /// <see cref="EntityReplicator"/> to drive register / unregister / reconcile
     /// without holding a typed reference to a closed generic it cannot name.
     /// The implementation is resolved via reflection exactly once per entity
     /// (at register time) and stored on the replicator; the reconcile hot path
@@ -11,8 +11,8 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// </summary>
     internal interface IAspectPredictionHook
     {
-        void Register(AspectReplicator replicator);
-        void Unregister(AspectReplicator replicator);
-        void OnServerStateApplied(AspectReplicator replicator, int serverTick);
+        void Register(EntityReplicator replicator);
+        void Unregister(EntityReplicator replicator);
+        void OnServerStateApplied(EntityReplicator replicator, int serverTick);
     }
 }

@@ -12,7 +12,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// fire <see cref="RuntimeInitializeOnLoadMethodAttribute"/> on methods of generic classes,
     /// so each closed generic registers a clearer delegate via its static constructor and this
     /// class walks the list at <see cref="RuntimeInitializeLoadType.SubsystemRegistration"/>.
-    /// See ISSUES.md #17 / TODO.md Batch 8 for the Domain-Reload-off rationale.
+    /// Needed so Domain-Reload-off play cycles don't carry over stale static state.
     /// </summary>
     internal static class PredictionManagerReset
     {
@@ -39,13 +39,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Step 6 scaffolding only — there is no snapshot ring buffer or reconciliation
-    /// (see <c>DESIGN.md</c> step 7). Predicted clients will visibly snap when the
-    /// authoritative replicated state arrives; that is expected until step 7 lands.
+    /// Step 6 scaffolding only — there is no snapshot ring buffer or reconciliation.
+    /// Predicted clients will visibly snap when the authoritative replicated state
+    /// arrives; that is expected until step 7 lands.
     /// </para>
     /// <para>
     /// Subscribes to <c>NetworkTickSystem.Tick</c> <em>before</em>
-    /// <see cref="AspectReplicationSystem"/> does — <see cref="AspectReplicator.OnNetworkSpawn"/>
+    /// <see cref="EntityReplicationSystem"/> does — <see cref="EntityReplicator.OnNetworkSpawn"/>
     /// calls <c>PredictionManager.GetOrCreate</c> first so the server's <c>Simulate</c>
     /// writes land as dirty <see cref="ReplicatedFieldBinding"/> marks before the
     /// replication system's <c>ServerTick</c> batches and broadcasts them in the
@@ -65,8 +65,8 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         // Per-generic-specialization, per-domain flag to rate-limit the "TickRate is 0"
         // error to one log line — we'd otherwise spam once per predicted-entity spawn.
-        // Domain reload resets it naturally; Batch 8 (ISSUES.md #17) adds explicit
-        // SubsystemRegistration reset for the Disable-Domain-Reload dev loop.
+        // Domain reload resets it naturally; the SubsystemRegistration reset below
+        // handles the Disable-Domain-Reload dev loop.
         private static bool s_warnedZeroTickRate;
 
         // Register a clearer with the non-generic dispatcher so RuntimeInitializeOnLoadMethod
@@ -83,7 +83,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         private sealed class PredictedEntity
         {
-            public AspectReplicator Replicator = null!;
+            public EntityReplicator Replicator = null!;
             public IInputProvider<TInput>? Provider;
             public ISimulate<TInput>[] Simulators = Array.Empty<ISimulate<TInput>>();
             // Step 6.1: bounded ring of inputs keyed by the tick they were
@@ -96,7 +96,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // local Simulate each tick. Null on the server side and on
             // observer-only clients — only allocated when the manager's
             // owner branch first sees this entity. Sized by
-            // AspectReplicator.PredictedPayloadSize.
+            // EntityReplicator.PredictedPayloadSize.
             public SnapshotBuffer? Snapshots;
         }
 
@@ -123,7 +123,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // tail so our Simulate pass runs first this frame. Otherwise the server's
             // ReactiveProperty writes from Simulate would mark bindings dirty immediately
             // after ServerTick drained them — a full tick of relay latency.
-            if (AspectReplicationSystem.TryGet(networkManager, out var replication))
+            if (EntityReplicationSystem.TryGet(networkManager, out var replication))
                 replication.RequeueTick();
         }
 
@@ -132,11 +132,11 @@ namespace Rubickanov.ACS.Runtime.Netcode
             if (s_Systems.TryGetValue(networkManager, out var existing))
                 return existing;
 
-            // Regression guard #16 (ISSUES.md): a zero tick rate makes _tickDelta = 0
+            // Regression guard: a zero tick rate makes _tickDelta = 0
             // and every Simulate(in input, 0f) call a no-op — motion would freeze with
             // no warning. Refuse to build the manager so the misconfiguration surfaces
             // as "prediction never registered" instead of "inputs vanish silently".
-            // AspectReplicator bails its interpolation setup at the same check.
+            // EntityReplicator bails its interpolation setup at the same check.
             uint tickRate = networkManager.NetworkTickSystem.TickRate;
             if (tickRate == 0)
             {
@@ -159,7 +159,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         internal int EntityCount => _entities.Count;
 
-        public void Register(AspectReplicator replicator)
+        public void Register(EntityReplicator replicator)
         {
             var id = replicator.NetworkObjectId;
             if (_byNetworkObjectId.ContainsKey(id)) return;
@@ -178,7 +178,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _byNetworkObjectId[id] = entity;
         }
 
-        public void Unregister(AspectReplicator replicator)
+        public void Unregister(EntityReplicator replicator)
         {
             var id = replicator.NetworkObjectId;
             if (!_byNetworkObjectId.Remove(id)) return;
@@ -192,7 +192,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 }
             }
 
-            // Mirror AspectReplicationSystem: self-dispose when the last consumer leaves
+            // Mirror EntityReplicationSystem: self-dispose when the last consumer leaves
             // so domain reload / scene teardown doesn't leak a dangling Tick subscription.
             if (_entities.Count == 0)
                 Dispose();
@@ -268,7 +268,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             }
         }
 
-        private static void CaptureSnapshot(PredictedEntity entity, AspectReplicator rep, int tick)
+        private static void CaptureSnapshot(PredictedEntity entity, EntityReplicator rep, int tick)
         {
             int payloadSize = rep.PredictedPayloadSize;
             if (payloadSize == 0) return;
@@ -282,7 +282,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             rep.CapturePredictedState(slot);
         }
 
-        private TInput GatherInputFor(PredictedEntity entity, AspectReplicator rep)
+        private TInput GatherInputFor(PredictedEntity entity, EntityReplicator rep)
         {
             if (entity.Provider != null)
                 return entity.Provider.Gather();
@@ -363,7 +363,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // ------------------------------------------------------------------
 
         /// <summary>
-        /// Called by <see cref="AspectReplicator.NotifyServerStateApplied"/>
+        /// Called by <see cref="EntityReplicator.NotifyServerStateApplied"/>
         /// immediately after a state batch has written authoritative values
         /// into the predicted fields. Rewinds prediction on the owner client
         /// so the local view re-integrates on top of the authoritative state
@@ -381,7 +381,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         /// so the view is still correct; we just cannot smooth the transition
         /// via replay.</para>
         /// </remarks>
-        public void OnServerStateApplied(AspectReplicator rep, int serverTick)
+        public void OnServerStateApplied(EntityReplicator rep, int serverTick)
         {
             if (_disposed) return;
             if (!_byNetworkObjectId.TryGetValue(rep.NetworkObjectId, out var entity)) return;

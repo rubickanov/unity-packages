@@ -8,7 +8,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     //
     // 257 [Replicated] ReactiveProperty<int> fields — exactly one over the
     // 256-field cap. Used to drive the ExceedsFieldBindingCap abort path in
-    // AspectReplicator.OnNetworkSpawn through a real spawn — the predicate
+    // EntityReplicator.OnNetworkSpawn through a real spawn — the predicate
     // itself is unit-tested separately, but the integration wiring ("hit the
     // cap at spawn time and _system stays null / registration never happens")
     // is only observable end-to-end.

@@ -7,11 +7,11 @@ using UnityEngine.TestTools;
 namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 {
     /// <summary>
-    /// Integration coverage for <see cref="AspectReplicationSystem"/> centralized
+    /// Integration coverage for <see cref="EntityReplicationSystem"/> centralized
     /// batching: multi-entity dirty batching, zero-dirty skip, and
     /// spawn/despawn lifecycle cleanup.
     /// </summary>
-    public class AspectReplicationSystemBatchingTests : AspectReplicatorIntegrationTestBase
+    public class EntityReplicationSystemBatchingTests : EntityReplicatorIntegrationTestBase
     {
         [UnityTest]
         public IEnumerator TwoDirtyReplicators_OneTickWindow_BothClientsConverge()
@@ -91,7 +91,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
                 yield return WaitForSpawnOnAllClients(ids[i]);
 
             Assert.IsTrue(
-                AspectReplicationSystem.TryGet(m_ServerNetworkManager, out var serverSystem),
+                EntityReplicationSystem.TryGet(m_ServerNetworkManager, out var serverSystem),
                 "System must exist after spawning entities.");
             Assert.AreEqual(3, serverSystem.ReplicatorCount,
                 "System must track all 3 spawned replicators.");
@@ -105,7 +105,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             // After all replicators unregistered, the system auto-disposes and
             // removes itself from the static dictionary.
             Assert.IsFalse(
-                AspectReplicationSystem.TryGet(m_ServerNetworkManager, out _),
+                EntityReplicationSystem.TryGet(m_ServerNetworkManager, out _),
                 "System must self-dispose and remove from static registry when the last replicator unregisters.");
         }
     }

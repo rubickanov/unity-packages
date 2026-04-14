@@ -86,7 +86,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f4685a0ceaad6926389671c9d3304004, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: ACS.Runtime.Netcode::Rubickanov.ACS.Runtime.Netcode.AspectReplicator
+  m_EditorClassIdentifier: ACS.Runtime.Netcode::Rubickanov.ACS.Runtime.Netcode.EntityReplicator
   ShowTopMostFoldoutHeaderGroup: 1
 --- !u!114 &8476923404700115543
 MonoBehaviour:

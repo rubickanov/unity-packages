@@ -22,7 +22,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         /// <summary>
         /// When <c>true</c>, this field participates in the prediction/reconciliation snapshot.
         /// The list of predicted fields is discovered at scan time and cached on
-        /// <c>AspectReplicator</c> for the rollback buffer. Must be combined with
+        /// <c>EntityReplicator</c> for the rollback buffer. Must be combined with
         /// <see cref="AuthorityMode.Server"/> — <c>Predicted</c> on an owner-auth field is
         /// a no-op (the owner is already the source of truth) and the scanner clears the
         /// flag with a warning.

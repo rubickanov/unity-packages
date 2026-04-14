@@ -24,10 +24,14 @@ namespace Rubickanov.ACS.Runtime
         public static event Action<MonoEntity>? OnAwakeCompleted;
 
         /// <summary>
-        /// Raised once for every new aspect instance created on any entity, immediately after
-        /// registration with <see cref="World"/>. Fires from <see cref="Require{T}"/>, both for
-        /// aspects created during Awake-time injection and for those created lazily later. Does
-        /// not fire when <c>Require</c> returns an already-existing aspect.
+        /// Raised once for every new aspect instance created on any entity living in the current
+        /// <see cref="World"/> — including pure-C# <see cref="Entity"/> instances, not just
+        /// <see cref="MonoEntity"/>. Fires for aspects created during Awake-time injection and
+        /// for those created lazily later. Does not fire when <c>Require</c> returns an
+        /// already-existing aspect, nor when a <see cref="MonoEntity"/> runs <c>Require</c>
+        /// without a <see cref="World.Current"/> — the event is scoped to "new aspect
+        /// reachable via world queries", which is meaningless without a world.
+        /// Wired via <c>MonoWorld</c>'s forwarder from <see cref="World.AspectCreated"/>.
         /// Cleared each play session via <see cref="ResetStaticEvents"/>.
         /// </summary>
         public static event Action<IEntity, Type>? OnAspectCreated;
@@ -71,16 +75,15 @@ namespace Rubickanov.ACS.Runtime
 
         /// <summary>
         /// Returns the aspect of type <typeparamref name="T"/>, creating it if it doesn't exist yet.
+        /// When a <see cref="World.Current"/> is assigned, the aspect-creation notification flows
+        /// through <see cref="World.AspectCreated"/> → <c>MonoWorld</c>'s forwarder →
+        /// <see cref="OnAspectCreated"/>. Without a world, no notification fires — the event is
+        /// scoped to "new aspect reachable via world queries", which is meaningless without a world.
         /// </summary>
         public virtual T Require<T>() where T : class, IEntityAspect, new()
         {
             var instance = _store.GetOrAdd<T>(out var created);
-            if (created)
-            {
-                var type = typeof(T);
-                World.Current?.Register(this, type);
-                OnAspectCreated?.Invoke(this, type);
-            }
+            if (created) World.Current?.Register(this, typeof(T));
             return instance;
         }
 

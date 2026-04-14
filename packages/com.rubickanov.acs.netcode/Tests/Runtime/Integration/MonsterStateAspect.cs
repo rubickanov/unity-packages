@@ -7,7 +7,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     // ---- Monster aspect (regression #2) -------------------------------------
     //
     // 65 [Replicated] ReactiveProperty<int> fields — exactly one over the
-    // 64-field cap. Used to drive the clamp path in AspectReplicator.OnNetworkSpawn
+    // 64-field cap. Used to drive the clamp path in EntityReplicator.OnNetworkSpawn
     // through a real spawn, not a reflection-injected stub. The clamp is an
     // inline `if (_bindings.Length > 64)` guard, so the only way to exercise it
     // from integration-level code is to scan a real aspect that exceeds the cap.
