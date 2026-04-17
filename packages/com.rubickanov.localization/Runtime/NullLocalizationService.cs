@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using R3;
 using UnityEngine.Localization;
@@ -9,10 +10,13 @@ namespace Rubickanov.Localization
     /// No-op localization service for server and headless builds.
     /// All methods return empty strings, empty arrays, or completed tasks.
     /// </summary>
-    public class NullLocalizationService : ILocalizationService
+    public sealed class NullLocalizationService : ILocalizationService, IDisposable
     {
+        private static readonly Observable<Locale> EmptyObservable = Observable.Empty<Locale>();
+
         private readonly ReactiveProperty<LangLocale> _currentLocale = new(LangLocale.Empty);
         private readonly ReactiveProperty<bool> _isRtl = new(false);
+        private bool _disposed;
 
         /// <inheritdoc />
         public ReadOnlyReactiveProperty<LangLocale> CurrentLocale => _currentLocale;
@@ -21,10 +25,10 @@ namespace Rubickanov.Localization
         public ReadOnlyReactiveProperty<bool> IsRTL => _isRtl;
 
         /// <inheritdoc />
-        public Observable<Locale> OnLocaleChanged => Observable.Empty<Locale>();
+        public Observable<Locale> OnLocaleChanged => EmptyObservable;
 
         /// <inheritdoc />
-        public UniTask InitializeAsync() => UniTask.CompletedTask;
+        public UniTask InitializeAsync(CancellationToken cancellationToken = default) => UniTask.CompletedTask;
 
         /// <inheritdoc />
         public string GetString(LocalizationKey key) => string.Empty;
@@ -39,12 +43,21 @@ namespace Rubickanov.Localization
         public LocalizedValue Localize(LocalizationKey key, params object[] arguments) => new(string.Empty);
 
         /// <inheritdoc />
-        public UniTask SetLocaleAsync(string localeCode) => UniTask.CompletedTask;
+        public UniTask SetLocaleAsync(string localeCode, CancellationToken cancellationToken = default) => UniTask.CompletedTask;
 
         /// <inheritdoc />
-        public UniTask SetLocaleAsync(LangLocale locale) => UniTask.CompletedTask;
+        public UniTask SetLocaleAsync(LangLocale locale, CancellationToken cancellationToken = default) => UniTask.CompletedTask;
 
         /// <inheritdoc />
         public LangLocale[] GetAvailableLocales() => Array.Empty<LangLocale>();
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            _currentLocale.Dispose();
+            _isRtl.Dispose();
+        }
     }
 }

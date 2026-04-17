@@ -1,4 +1,5 @@
 using UnityEditor;
+using UnityEditor.Localization;
 
 namespace Rubickanov.Localization.Editor
 {
@@ -7,6 +8,8 @@ namespace Rubickanov.Localization.Editor
     /// </summary>
     public class LocalizationKeysPostprocessor : AssetPostprocessor
     {
+        private static bool _pendingGeneration;
+
         private static void OnPostprocessAllAssets(
             string[] importedAssets,
             string[] deletedAssets,
@@ -31,7 +34,7 @@ namespace Rubickanov.Localization.Editor
             {
                 foreach (var path in deletedAssets)
                 {
-                    if (IsStringTableAsset(path))
+                    if (IsDeletedStringTableAsset(path))
                     {
                         shouldRegenerate = true;
                         break;
@@ -39,13 +42,35 @@ namespace Rubickanov.Localization.Editor
                 }
             }
 
-            if (shouldRegenerate)
+            if (shouldRegenerate && !_pendingGeneration)
             {
-                EditorApplication.delayCall += LocalizationKeysGenerator.GenerateKeys;
+                _pendingGeneration = true;
+                EditorApplication.delayCall += RunGeneration;
             }
         }
 
+        private static void RunGeneration()
+        {
+            _pendingGeneration = false;
+            LocalizationKeysGenerator.GenerateKeys();
+        }
+
         private static bool IsStringTableAsset(string path)
+        {
+            if (!path.EndsWith(".asset"))
+                return false;
+
+            var collection = AssetDatabase.LoadAssetAtPath<StringTableCollection>(path);
+            if (collection != null)
+                return true;
+
+            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Localization.Tables.SharedTableData>(path);
+            return asset != null;
+        }
+
+        // For deleted assets the type is no longer resolvable via AssetDatabase — fall back
+        // to path heuristics. Best-effort: may over-trigger, but regeneration is idempotent.
+        private static bool IsDeletedStringTableAsset(string path)
         {
             if (!path.EndsWith(".asset"))
                 return false;

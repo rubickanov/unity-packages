@@ -16,9 +16,33 @@ namespace Rubickanov.Localization.Editor
     {
         private static LocalizationGeneratorSettings Settings => LocalizationGeneratorSettings.instance;
 
+        private static readonly Regex IdentifierPattern = new(@"[^a-zA-Z0-9_]", RegexOptions.Compiled);
+
+        private static readonly HashSet<string> CSharpKeywords = new(System.StringComparer.Ordinal)
+        {
+            "abstract", "as", "base", "bool", "break", "byte", "case", "catch",
+            "char", "checked", "class", "const", "continue", "decimal", "default",
+            "delegate", "do", "double", "else", "enum", "event", "explicit",
+            "extern", "false", "finally", "fixed", "float", "for", "foreach",
+            "goto", "if", "implicit", "in", "int", "interface", "internal",
+            "is", "lock", "long", "namespace", "new", "null", "object", "operator",
+            "out", "override", "params", "private", "protected", "public",
+            "readonly", "ref", "return", "sbyte", "sealed", "short", "sizeof",
+            "stackalloc", "static", "string", "struct", "switch", "this", "throw",
+            "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe",
+            "ushort", "using", "virtual", "void", "volatile", "while"
+        };
+
         [MenuItem("Tools/Generators/Localization")]
         public static void GenerateKeys()
         {
+            if (string.IsNullOrWhiteSpace(Settings.OutputPath))
+            {
+                Debug.LogError("[LocalizationKeysGenerator] OutputPath is empty. " +
+                               "Configure it in Project Settings / Localization Generator.");
+                return;
+            }
+
             var tables = FindAllStringTableCollections();
 
             if (tables.Count == 0)
@@ -178,7 +202,7 @@ namespace Rubickanov.Localization.Editor
             if (string.IsNullOrEmpty(input))
                 return "_";
 
-            var sanitized = Regex.Replace(input, @"[^a-zA-Z0-9_]", "_");
+            var sanitized = IdentifierPattern.Replace(input, "_");
 
             if (char.IsDigit(sanitized[0]))
             {
@@ -217,22 +241,7 @@ namespace Rubickanov.Localization.Editor
 
         private static bool IsCSharpKeyword(string word)
         {
-            var keywords = new HashSet<string>
-            {
-                "abstract", "as", "base", "bool", "break", "byte", "case", "catch",
-                "char", "checked", "class", "const", "continue", "decimal", "default",
-                "delegate", "do", "double", "else", "enum", "event", "explicit",
-                "extern", "false", "finally", "fixed", "float", "for", "foreach",
-                "goto", "if", "implicit", "in", "int", "interface", "internal",
-                "is", "lock", "long", "namespace", "new", "null", "object", "operator",
-                "out", "override", "params", "private", "protected", "public",
-                "readonly", "ref", "return", "sbyte", "sealed", "short", "sizeof",
-                "stackalloc", "static", "string", "struct", "switch", "this", "throw",
-                "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe",
-                "ushort", "using", "virtual", "void", "volatile", "while"
-            };
-
-            return keywords.Contains(word.ToLowerInvariant());
+            return CSharpKeywords.Contains(word.ToLowerInvariant());
         }
 
         private static void WriteToFile(string content)

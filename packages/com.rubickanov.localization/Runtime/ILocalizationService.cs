@@ -1,3 +1,4 @@
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using R3;
 using UnityEngine.Localization;
@@ -9,7 +10,10 @@ namespace Rubickanov.Localization
     /// </summary>
     public interface ILocalizationService
     {
-        UniTask InitializeAsync();
+        /// <summary>
+        /// Initializes Unity Localization and restores the saved locale (if any).
+        /// </summary>
+        UniTask InitializeAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Current locale with code and display names.
@@ -47,17 +51,17 @@ namespace Rubickanov.Localization
         LocalizedValue Localize(LocalizationKey key, params object[] arguments);
 
         /// <summary>
-        /// Changes the current locale by code.
+        /// Changes the current locale by code. Completes only after Unity has applied the locale.
         /// </summary>
-        UniTask SetLocaleAsync(string localeCode);
+        UniTask SetLocaleAsync(string localeCode, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Changes the current locale.
+        /// Changes the current locale. Completes only after Unity has applied the locale.
         /// </summary>
-        UniTask SetLocaleAsync(LangLocale locale);
+        UniTask SetLocaleAsync(LangLocale locale, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Gets all available locales.
+        /// Gets all available locales. Cached after <see cref="InitializeAsync"/>.
         /// </summary>
         LangLocale[] GetAvailableLocales();
     }

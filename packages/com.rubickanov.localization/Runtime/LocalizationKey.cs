@@ -19,9 +19,20 @@ namespace Rubickanov.Localization
 
         public LocalizationKey(string table, string key)
         {
-            Table = table ?? throw new ArgumentNullException(nameof(table));
-            Key = key ?? throw new ArgumentNullException(nameof(key));
+            if (string.IsNullOrWhiteSpace(table))
+                throw new ArgumentException("Table must be a non-empty string.", nameof(table));
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentException("Key must be a non-empty string.", nameof(key));
+
+            Table = table;
+            Key = key;
         }
+
+        /// <summary>
+        /// True when both <see cref="Table"/> and <see cref="Key"/> are non-empty.
+        /// False for <c>default(LocalizationKey)</c>.
+        /// </summary>
+        public bool IsValid => !string.IsNullOrEmpty(Table) && !string.IsNullOrEmpty(Key);
 
         public bool Equals(LocalizationKey other) =>
             Table == other.Table && Key == other.Key;

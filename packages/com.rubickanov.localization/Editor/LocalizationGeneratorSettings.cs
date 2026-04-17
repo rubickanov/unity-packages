@@ -64,11 +64,22 @@ namespace Rubickanov.Localization.Editor
                 LocalizationGeneratorSettings.instance.Save();
             }
 
+            var outputPath = LocalizationGeneratorSettings.instance.OutputPath;
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                EditorGUILayout.HelpBox(
+                    "Output Path is empty. Generation will fail until a valid path is set.",
+                    MessageType.Warning);
+            }
+
             EditorGUILayout.Space(20);
 
-            if (GUILayout.Button("Generate Keys", GUILayout.Height(25)))
+            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(outputPath)))
             {
-                LocalizationKeysGenerator.GenerateKeys();
+                if (GUILayout.Button("Generate Keys", GUILayout.Height(25)))
+                {
+                    LocalizationKeysGenerator.GenerateKeys();
+                }
             }
         }
 
