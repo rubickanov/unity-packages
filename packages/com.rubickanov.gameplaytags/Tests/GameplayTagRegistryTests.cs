@@ -78,6 +78,31 @@ namespace Rubickanov.GameplayTags.Tests
             Assert.IsFalse(registry.TryGet("  Damage  ", out _));
         }
 
+        [TestCase("A..B")]
+        [TestCase(".A")]
+        [TestCase("A.")]
+        [TestCase("A B")]
+        [TestCase("A.B C")]
+        [TestCase("1A")]
+        [TestCase("A-B")]
+        [TestCase("A.1B")]
+        [TestCase(".")]
+        public void Constructor_InvalidPath_Throws(string invalidPath)
+        {
+            Assert.Throws<ArgumentException>(() => new GameplayTagRegistry(new[] { invalidPath }));
+        }
+
+        [Test]
+        public void Constructor_ValidAlphanumericPath_Accepted()
+        {
+            var registry = new GameplayTagRegistry(new[] { "A1.B2C3.D" });
+
+            Assert.AreEqual(3, registry.Count);
+            Assert.IsTrue(registry.TryGet("A1", out _));
+            Assert.IsTrue(registry.TryGet("A1.B2C3", out _));
+            Assert.IsTrue(registry.TryGet("A1.B2C3.D", out _));
+        }
+
         [Test]
         public void Constructor_TagsAreSortedLexicographically()
         {
@@ -87,6 +112,121 @@ namespace Rubickanov.GameplayTags.Tests
             Assert.AreEqual("Alpha", names[0]);
             Assert.AreEqual("Mike", names[1]);
             Assert.AreEqual("Zeta", names[2]);
+        }
+
+        [Test]
+        public void AddTags_NewPaths_GetAppendedWithNewIndices()
+        {
+            var registry = new GameplayTagRegistry(new[] { "Damage" });
+            var existing = registry.Get("Damage");
+
+            registry.AddTags(new[] { "Status", "Buff" });
+
+            Assert.AreEqual(3, registry.Count);
+            Assert.AreEqual(existing, registry.Get("Damage"));
+            Assert.IsTrue(registry.TryGet("Status", out var status));
+            Assert.IsTrue(registry.TryGet("Buff", out var buff));
+            Assert.IsTrue(status.IsValid);
+            Assert.IsTrue(buff.IsValid);
+            Assert.AreNotEqual(existing, status);
+            Assert.AreNotEqual(existing, buff);
+            Assert.AreNotEqual(status, buff);
+        }
+
+        [Test]
+        public void AddTags_ExistingPath_IsNoOp()
+        {
+            var registry = new GameplayTagRegistry(new[] { "Damage", "Damage.Fire" });
+            var damage = registry.Get("Damage");
+            var fire = registry.Get("Damage.Fire");
+
+            registry.AddTags(new[] { "Damage", "Damage.Fire" });
+
+            Assert.AreEqual(2, registry.Count);
+            Assert.AreEqual(damage, registry.Get("Damage"));
+            Assert.AreEqual(fire, registry.Get("Damage.Fire"));
+        }
+
+        [Test]
+        public void AddTags_CreatesMissingParents()
+        {
+            var registry = new GameplayTagRegistry(Array.Empty<string>());
+
+            registry.AddTags(new[] { "A.B.C" });
+
+            Assert.AreEqual(3, registry.Count);
+            Assert.IsTrue(registry.TryGet("A", out _));
+            Assert.IsTrue(registry.TryGet("A.B", out _));
+            Assert.IsTrue(registry.TryGet("A.B.C", out _));
+
+            var leaf = registry.Get("A.B.C");
+            var mid = registry.Get("A.B");
+            var root = registry.Get("A");
+            Assert.AreEqual(mid, registry.GetParent(leaf));
+            Assert.AreEqual(root, registry.GetParent(mid));
+            Assert.AreEqual(GameplayTag.None, registry.GetParent(root));
+        }
+
+        [Test]
+        public void AddTags_PreservesExistingTagIndices()
+        {
+            var registry = new GameplayTagRegistry(new[] { "Damage", "Damage.Fire" });
+            var damageBefore = registry.Get("Damage");
+            var fireBefore = registry.Get("Damage.Fire");
+
+            registry.AddTags(new[] { "Aaa", "Aaa.Bbb", "Status.Stun" });
+
+            Assert.AreEqual(damageBefore, registry.Get("Damage"));
+            Assert.AreEqual(fireBefore, registry.Get("Damage.Fire"));
+        }
+
+        [TestCase("A..B")]
+        [TestCase(".A")]
+        [TestCase("A.")]
+        [TestCase("1A")]
+        [TestCase("A-B")]
+        public void AddTags_InvalidPath_Throws(string invalidPath)
+        {
+            var registry = new GameplayTagRegistry(new[] { "Damage" });
+
+            Assert.Throws<ArgumentException>(() => registry.AddTags(new[] { invalidPath }));
+        }
+
+        [Test]
+        public void AddTags_NullArgument_Throws()
+        {
+            var registry = new GameplayTagRegistry(Array.Empty<string>());
+
+            Assert.Throws<ArgumentNullException>(() => registry.AddTags(null!));
+        }
+
+        [Test]
+        public void AddTags_AfterInstall_VisibleThroughInstance()
+        {
+            var registry = new GameplayTagRegistry(new[] { "Damage" });
+            GameplayTagRegistry.Install(registry);
+
+            GameplayTagRegistry.Instance.AddTags(new[] { "Status.Stun" });
+
+            Assert.IsTrue(GameplayTagRegistry.Instance.TryGet("Status.Stun", out var stun));
+            Assert.IsTrue(stun.IsValid);
+            Assert.AreEqual(3, GameplayTagRegistry.Instance.Count);
+        }
+
+        [Test]
+        public void AddTags_UpdatesSortedViews()
+        {
+            var registry = new GameplayTagRegistry(new[] { "Mike" });
+            var namesBefore = registry.GetAllNames();
+            Assert.AreEqual(1, namesBefore.Count);
+
+            registry.AddTags(new[] { "Alpha", "Zeta" });
+
+            var namesAfter = registry.GetAllNames();
+            Assert.AreEqual(3, namesAfter.Count);
+            Assert.AreEqual("Alpha", namesAfter[0]);
+            Assert.AreEqual("Mike", namesAfter[1]);
+            Assert.AreEqual("Zeta", namesAfter[2]);
         }
 
         [Test]

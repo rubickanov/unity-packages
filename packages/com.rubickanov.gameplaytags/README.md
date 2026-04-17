@@ -36,9 +36,11 @@ GameplayTagContainer (sorted list, hierarchical queries)
 
 **GameplayTag** — Readonly struct identified by an integer index into the registry. Supports hierarchical matching via `Matches()`: `"Damage.Fire.DoT".Matches("Damage")` returns true.
 
-**GameplayTagRegistry** — Singleton that owns the tag hierarchy, name-to-index mapping, and parent-chain walk. Must be installed at startup.
+**GameplayTagRegistry** — Singleton that owns the tag hierarchy, name-to-index mapping, and parent-chain walk. Must be installed at startup. Main-thread only. Additive: call `AddTags(...)` after install to append new tags (parent tags are auto-created). Existing indices remain stable, so cached `GameplayTag` values and generated constants keep working.
 
-**GameplayTagContainer** — Mutable sorted collection of tags with `HasTag()` (hierarchical) and `HasTagExact()` (exact) queries. O(log n) exact lookups, O(n * depth) hierarchical queries.
+**GameplayTagContainer** — Mutable sorted collection of tags with `HasTag()` (hierarchical) and `HasTagExact()` (exact) queries. O(log n) exact lookups, O(n * depth) hierarchical queries. Mutating during enumeration throws `InvalidOperationException`.
+
+**ReadOnlyGameplayTagContainer** — Immutable view over a `GameplayTagContainer`. Used as the return type for accessors owned by other objects (e.g. `SerializedGameplayTagContainer.Container`) so callers can query but not mutate.
 
 ## Quick Start
 
@@ -56,6 +58,16 @@ void Awake()
 ```
 
 4. Generate constants: **Tools > Generators > Gameplay Tags**. The generator finds all `GameplayTagAsset` files in the project, merges their tags, and produces a single output file.
+
+### Adding Tags at Runtime
+
+Call `AddTags` to append more tags after install — useful for DLC, mod content, or async content loading:
+
+```csharp
+GameplayTagRegistry.Instance.AddTags(dlcTagAsset.TagPaths);
+```
+
+Existing indices are preserved, so previously cached `GameplayTag` values and generated constants remain valid. Invalid paths throw `ArgumentException`.
 
 ## Usage
 
@@ -114,7 +126,7 @@ Use **SerializedGameplayTag** and **SerializedGameplayTagContainer** for Inspect
 void OnEnable()
 {
     GameplayTag tag = _damageType.Tag;
-    GameplayTagContainer immune = _immunities.Container;
+    ReadOnlyGameplayTagContainer immune = _immunities.Container;
 }
 ```
 
@@ -138,7 +150,7 @@ public static class GameTags
 }
 ```
 
-Configure output path, namespace, and class name in **Project Settings > Gameplay Tags Generator**. Auto-regeneration triggers when any tag database asset is modified. If multiple `GameplayTagAsset` files exist, all are merged during generation.
+Configure output path, namespace, class name, access modifier (`public`/`internal`), and whether the class is `partial` in **Project Settings > Gameplay Tags Generator**. Auto-regeneration triggers when any tag database asset is modified. If multiple `GameplayTagAsset` files exist, all are merged during generation and in the Inspector dropdown picker.
 
 ## Examples
 
@@ -176,6 +188,7 @@ if (weaknesses.HasTag(incomingDamageType))
 ## Design Decisions
 
 - **Index-based struct (4 bytes)** — tags are compared by integer index, not string. Zero allocation at runtime after registry installation.
-- **Singleton registry with Install/Uninstall** — tags are meaningless without a hierarchy. The registry must exist before any tag operations. Explicit lifecycle avoids hidden static state issues.
-- **Serialized wrappers store string paths** — `SerializedGameplayTag` persists the dot-separated path, not the index. Indices can change when tags are added/removed; paths are stable.
+- **Singleton registry with Install/Uninstall** — tags are meaningless without a hierarchy. The registry must exist before any tag operations. `Uninstall()` exists primarily for tests; in production, prefer `AddTags(...)` to extend the live registry and keep existing indices stable. `Install`/`AddTags`/`Instance` are main-thread-only.
+- **Serialized wrappers store string paths** — `SerializedGameplayTag` persists the dot-separated path, not the index. Paths are stable; cached indices are re-resolved lazily after deserialize.
+- **`SerializedGameplayTagContainer.Container` returns a read-only view** — mutation must go through the `_paths` serialized field (editor) or by rebuilding the wrapper. The read-only view prevents aliasing issues that would otherwise arise from the struct's shared backing container.
 - **Runtime assembly has no engine references** — the core tag/registry/container types are pure C#, usable in server builds without Unity dependencies.

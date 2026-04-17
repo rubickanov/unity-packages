@@ -12,6 +12,7 @@ namespace Rubickanov.GameplayTags.Editor
     {
         private const float ButtonWidth = 20f;
         private const float Spacing = 2f;
+        private const float IndentPerLevel = 15f;
 
         public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
         {
@@ -44,9 +45,9 @@ namespace Rubickanov.GameplayTags.Editor
             {
                 var entryRect = new Rect(position.x, y, position.width, lineHeight);
                 var labelRect = new Rect(
-                    entryRect.x + EditorGUI.indentLevel * 15f,
+                    entryRect.x + EditorGUI.indentLevel * IndentPerLevel,
                     entryRect.y,
-                    entryRect.width - ButtonWidth - Spacing - EditorGUI.indentLevel * 15f,
+                    entryRect.width - ButtonWidth - Spacing - EditorGUI.indentLevel * IndentPerLevel,
                     lineHeight);
                 var removeRect = new Rect(
                     entryRect.xMax - ButtonWidth,
@@ -71,9 +72,9 @@ namespace Rubickanov.GameplayTags.Editor
 
             // Add Tag button
             var addRect = new Rect(
-                position.x + EditorGUI.indentLevel * 15f,
+                position.x + EditorGUI.indentLevel * IndentPerLevel,
                 y,
-                position.width - EditorGUI.indentLevel * 15f,
+                position.width - EditorGUI.indentLevel * IndentPerLevel,
                 lineHeight);
 
             if (GUI.Button(addRect, "Add Tag"))
