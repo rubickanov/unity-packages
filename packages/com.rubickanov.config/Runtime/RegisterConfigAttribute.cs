@@ -12,6 +12,9 @@ namespace Rubickanov.Config
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
     public class RegisterConfigAttribute : Attribute
     {
+        /// <summary>
+        /// Addressable address used by <see cref="IAssetLoader"/> to load the config asset.
+        /// </summary>
         public string Address { get; }
 
         public RegisterConfigAttribute(string address)

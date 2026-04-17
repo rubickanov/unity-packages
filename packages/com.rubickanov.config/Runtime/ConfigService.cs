@@ -1,84 +1,64 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using UnityEngine.AddressableAssets;
-using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace Rubickanov.Config
 {
+    /// <summary>
+    /// Default <see cref="IConfigService"/> implementation. Loads configs via a pluggable
+    /// <see cref="IAssetLoader"/>, coalesces concurrent loads of the same type, and tracks
+    /// release tokens so <see cref="ReleaseAll"/> can clean up on scene transitions.
+    /// </summary>
     public class ConfigService : IConfigService
     {
         private readonly ILogger<ConfigService> _logger;
+        private readonly IAssetLoader _loader;
         private readonly Dictionary<Type, CachedConfig> _cache = new();
+        private readonly Dictionary<Type, RegisterConfigAttribute?> _attributeCache = new();
+        private readonly Dictionary<Type, object> _pending = new();
 
-        private static readonly Dictionary<Type, RegisterConfigAttribute?> _attributeCache = new();
+        private bool _disposed;
 
-        public ConfigService(ILoggerFactory loggerFactory)
+        public ConfigService(ILoggerFactory loggerFactory, IAssetLoader loader)
         {
             _logger = loggerFactory.CreateLogger<ConfigService>();
+            _loader = loader;
         }
 
-        public async UniTask RefreshCatalogIfNeededAsync()
+        public UniTask RefreshCatalogIfNeededAsync(CancellationToken ct = default)
         {
-            var updates = await Addressables.CheckForCatalogUpdates();
-
-            if (updates.Count == 0)
-            {
-                _logger.LogDebug("Catalog is up to date");
-                return;
-            }
-
-            _logger.LogInformation("Updating {Count} catalogs", updates.Count);
-            await Addressables.UpdateCatalogs(updates);
-            _logger.LogInformation("Catalogs updated");
+            ThrowIfDisposed();
+            return _loader.RefreshCatalogIfNeededAsync(ct);
         }
 
-        public async UniTask<TConfig> LoadAsync<TConfig>() where TConfig : ConfigBase
+        public UniTask<TConfig> LoadAsync<TConfig>(CancellationToken ct = default) where TConfig : ConfigBase
         {
+            ThrowIfDisposed();
+
             var type = typeof(TConfig);
 
             if (_cache.TryGetValue(type, out var cached))
             {
-                return (TConfig)cached.Config;
+                return new UniTask<TConfig>((TConfig)cached.Config);
             }
 
-            var attribute = GetConfigAttribute(type);
-
-            if (attribute == null)
+            if (_pending.TryGetValue(type, out var pending))
             {
-                throw new InvalidOperationException(
-                    $"No [RegisterConfig] attribute on {type.Name}.");
+                return (UniTask<TConfig>)pending;
             }
 
-            _logger.LogDebug("Loading {Type} from {Address}", type.Name, attribute.Address);
-
-            AsyncOperationHandle<TConfig> handle;
-            try
-            {
-                handle = Addressables.LoadAssetAsync<TConfig>(attribute.Address);
-                await handle;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to load {Type} from {Address}", type.Name, attribute.Address);
-                throw;
-            }
-
-            var config = handle.Result;
-
-            if (!config.Validate())
-            {
-                _logger.LogWarning("{Type} validation failed", type.Name);
-            }
-
-            _cache[type] = new CachedConfig(config, handle);
-            return config;
+            var preserved = LoadInternalAsync<TConfig>(type, ct).Preserve();
+            _pending[type] = preserved;
+            return AwaitAndCleanup(type, preserved);
         }
 
         public TConfig Get<TConfig>() where TConfig : ConfigBase
         {
+            ThrowIfDisposed();
+
             var type = typeof(TConfig);
 
             if (_cache.TryGetValue(type, out var cached))
@@ -90,26 +70,111 @@ namespace Rubickanov.Config
                 $"Config {type.Name} is not loaded. Call LoadAsync<{type.Name}>() first.");
         }
 
+        public bool TryGet<TConfig>(out TConfig config) where TConfig : ConfigBase
+        {
+            ThrowIfDisposed();
+
+            if (_cache.TryGetValue(typeof(TConfig), out var cached))
+            {
+                config = (TConfig)cached.Config;
+                return true;
+            }
+
+            config = null!;
+            return false;
+        }
+
         public void ReleaseAll()
+        {
+            ThrowIfDisposed();
+            ReleaseAllInternal();
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            ReleaseAllInternal();
+            _disposed = true;
+        }
+
+        private async UniTask<TConfig> LoadInternalAsync<TConfig>(Type type, CancellationToken ct)
+            where TConfig : ConfigBase
+        {
+            var attribute = GetConfigAttribute(type);
+
+            if (attribute == null)
+            {
+                throw new InvalidOperationException(
+                    $"No [RegisterConfig] attribute on {type.Name}.");
+            }
+
+            _logger.LogDebug("Loading {Type} from {Address}", type.Name, attribute.Address);
+
+            TConfig config;
+            object releaseToken;
+            try
+            {
+                (config, releaseToken) = await _loader.LoadAsync<TConfig>(attribute.Address, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load {Type} from {Address}", type.Name, attribute.Address);
+                throw;
+            }
+
+            if (!config.Validate())
+            {
+                _logger.LogError("{Type} validation failed at {Address}", type.Name, attribute.Address);
+                _loader.Release(releaseToken);
+                throw new InvalidOperationException(
+                    $"{type.Name} failed Validate() — loaded from '{attribute.Address}'.");
+            }
+
+            _cache[type] = new CachedConfig(config, releaseToken);
+            return config;
+        }
+
+        private async UniTask<TConfig> AwaitAndCleanup<TConfig>(Type type, UniTask<TConfig> task)
+            where TConfig : ConfigBase
+        {
+            try
+            {
+                return await task;
+            }
+            finally
+            {
+                _pending.Remove(type);
+            }
+        }
+
+        private void ReleaseAllInternal()
         {
             foreach (var entry in _cache.Values)
             {
-                if (entry.Handle.IsValid())
-                {
-                    Addressables.Release(entry.Handle);
-                }
+                _loader.Release(entry.ReleaseToken);
             }
 
             _cache.Clear();
             _logger.LogDebug("Released all cached configs");
         }
 
-        public void Dispose()
+        private void ThrowIfDisposed()
         {
-            ReleaseAll();
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(ConfigService));
+            }
         }
 
-        private static RegisterConfigAttribute? GetConfigAttribute(Type type)
+        private RegisterConfigAttribute? GetConfigAttribute(Type type)
         {
             if (_attributeCache.TryGetValue(type, out var cached))
                 return cached;
@@ -122,12 +187,12 @@ namespace Rubickanov.Config
         private readonly struct CachedConfig
         {
             public readonly ConfigBase Config;
-            public readonly AsyncOperationHandle Handle;
+            public readonly object ReleaseToken;
 
-            public CachedConfig(ConfigBase config, AsyncOperationHandle handle)
+            public CachedConfig(ConfigBase config, object releaseToken)
             {
                 Config = config;
-                Handle = handle;
+                ReleaseToken = releaseToken;
             }
         }
     }
