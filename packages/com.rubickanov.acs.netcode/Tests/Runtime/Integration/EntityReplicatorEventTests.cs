@@ -2,7 +2,9 @@ using System;
 using System.Collections;
 using NUnit.Framework;
 using R3;
+using Unity.Collections;
 using Unity.Netcode;
+using UnityEngine;
 using UnityEngine.TestTools;
 
 namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
@@ -185,6 +187,72 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
                 ownerSub.Dispose();
                 client1Sub.Dispose();
             }
+        }
+
+        [UnityTest]
+        public IEnumerator OwnerSubmitsServerAuthEvent_ServerLogsWarning_NotRelayed()
+        {
+            // Symmetric to the owner-auth state-field forgery guard: the server must drop an
+            // owner-submitted event that targets a server-auth event index and surface a warning.
+            // Without this guard any client could forge server-auth events by lying about the
+            // index in its ACS_OwnerEvt payload.
+            //
+            // We drive the reject path by calling HandleOwnerEvent directly with the server-auth
+            // event index (ServerEvent = index 1, OwnerEvent = index 0 — alphabetical order).
+            var serverInstance = SpawnObject(_eventPrefab, m_ServerNetworkManager);
+            var networkObjectId = serverInstance.GetComponent<NetworkObject>().NetworkObjectId;
+            yield return WaitForSpawnOnAllClients(networkObjectId);
+
+            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex(
+                @"\[EntityReplicator\] Owner submitted server-auth event index 1 on '.*'\. Dropping\."));
+
+            int serverCount = 0, client1Count = 0;
+            var serverSub = GetEventAspectOnClient(m_ServerNetworkManager, networkObjectId)
+                .ServerEvent.Subscribe(_ => serverCount++);
+            var client1Sub = GetEventAspectOnClient(m_ClientNetworkManagers[1], networkObjectId)
+                .ServerEvent.Subscribe(_ => client1Count++);
+
+            try
+            {
+                var serverReplicator = GetReplicatorOnClient(m_ServerNetworkManager, networkObjectId);
+                ForgeOwnerEventSubmission(serverReplicator, eventIndex: 1, payload: 7);
+
+                for (int i = 0; i < 5; i++) yield return s_DefaultWaitForTick;
+
+                Assert.AreEqual(0, serverCount,
+                    "Server must NOT locally dispatch a forged owner-submitted server-auth event.");
+                Assert.AreEqual(0, client1Count,
+                    "Server must NOT relay a forged owner-submitted server-auth event to other clients.");
+            }
+            finally
+            {
+                serverSub.Dispose();
+                client1Sub.Dispose();
+            }
+        }
+
+        private static unsafe void ForgeOwnerEventSubmission(
+            EntityReplicator serverReplicator, byte eventIndex, int payload)
+        {
+            // HandleOwnerEvent reads the payload from the reader starting at the current
+            // position — FastBufferReader just needs the raw event bytes, not the NOB id / index
+            // prefix (those are decoded upstream in EntityReplicationSystem before dispatch).
+            var writer = new FastBufferWriter(sizeof(int), Allocator.Temp);
+            try
+            {
+                writer.WriteBytesSafe((byte*)&payload, sizeof(int));
+
+                var reader = new FastBufferReader(writer, Allocator.Temp);
+                try
+                {
+                    // Bypasses the wire path entirely: HandleOwnerEvent applies authority checks,
+                    // so passing null for the broadcaster is safe only because the reject branch
+                    // returns before touching it. That's exactly the branch this test is driving.
+                    serverReplicator.HandleOwnerEvent(eventIndex, reader, broadcaster: null!);
+                }
+                finally { reader.Dispose(); }
+            }
+            finally { writer.Dispose(); }
         }
 
         [UnityTest]

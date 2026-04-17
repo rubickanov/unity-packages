@@ -48,7 +48,22 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
                 // Stop at nested NetworkObject boundaries. Children that belong to a
                 // different NetworkObject must not be scope-managed by this controller.
-                if (behaviour.GetComponentInParent<NetworkObject>() != _root) continue;
+                if (behaviour.GetComponentInParent<NetworkObject>() != _root)
+                {
+                    // A user who put [NetworkScope] on a component living inside a nested
+                    // NetworkObject would otherwise see the attribute silently ignored — flag
+                    // it so they either move the component up or scope it on the nested NO.
+                    var nestedScope = NetworkScopeScanner.GetScope(component.GetType());
+                    if (nestedScope != NetworkScope.Everywhere)
+                    {
+                        Debug.LogWarning(
+                            $"[NetworkScopeController] {component.GetType().Name} on '{behaviour.gameObject.name}' " +
+                            $"is marked [NetworkScope({nestedScope})] but sits under a nested NetworkObject — " +
+                            $"its scope is NOT applied by the parent replicator. Move the component to the root " +
+                            $"NetworkObject, or attach an EntityReplicator to the nested NetworkObject.");
+                    }
+                    continue;
+                }
 
                 var scope = NetworkScopeScanner.GetScope(component.GetType());
                 if (scope == NetworkScope.Everywhere) continue;

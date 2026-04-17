@@ -180,7 +180,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             for (int i = 0; i < m_NetworkManagers.Length; i++)
             {
                 LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex(
-                    @"\[EntityReplicator\] Entity '.*' has 257 replicated fields, max is 256\. Aborting spawn"));
+                    @"\[EntityReplicator\] Entity '.*' has 257 replicated fields; max is 256"));
             }
 
             var serverInstance = SpawnObject(_giantPrefab, m_ServerNetworkManager);

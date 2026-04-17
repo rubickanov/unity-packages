@@ -19,6 +19,9 @@ namespace Rubickanov.ACS.Runtime.Netcode
         internal unsafe void ApplyStateBuffer(FastBufferReader reader, StateApplyMode mode, out int serverTick)
         {
             reader.ReadValueSafe(out serverTick);
+            // Stack-safe by construction: _maskByteCount is derived from _bindings.Length,
+            // which OnNetworkSpawn caps at 256 → maskByteCount ≤ 32. A 32-byte stackalloc
+            // is trivially within any reasonable stack budget.
             var mask = stackalloc byte[_maskByteCount];
             reader.ReadBytesSafe(mask, _maskByteCount);
             double receivedTime = serverTick * _tickInterval;

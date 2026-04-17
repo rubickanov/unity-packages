@@ -73,9 +73,17 @@ namespace Rubickanov.ACS.Runtime.Netcode
         {
             // Double-register silently overwrites the prior binding — a real bug in test
             // teardown or ownership-transfer cleanup would go unnoticed until Smooth() started
-            // returning values from a stale binding. Assert so we fail loud during the regression.
-            Debug.Assert(!Bindings.ContainsKey(reactive),
-                "InterpolationRegistry<T>: double-register on same ReactiveProperty — previous binding would be silently overwritten.");
+            // returning values from a stale binding. Release builds strip Debug.Assert, so the
+            // previous guard was invisible in shipping builds; use an unconditional error log
+            // (runtime-observable) and keep the overwrite so legitimate teardown-then-register
+            // cycles still recover gracefully.
+            if (Bindings.ContainsKey(reactive))
+            {
+                Debug.LogError(
+                    $"[InterpolationRegistry<{typeof(T).Name}>] double-register on the same ReactiveProperty — " +
+                    $"previous binding silently overwritten. Likely a missed Unregister in binding teardown " +
+                    $"or ownership-transfer cleanup.");
+            }
             Bindings[reactive] = binding;
         }
 

@@ -47,6 +47,21 @@ namespace Rubickanov.ACS.Runtime.Netcode
         private DisposableBag _ownerDisposables;
         private double _tickInterval;
         private double _interpolationDelaySeconds;
+        // Cached at spawn to detect runtime TickRate mutation. The binding windows
+        // (AuthorityRenderBinding coalesce / stale, interpolation delay, prediction tick
+        // delta) are sized against the spawn-time tick rate and cannot be recomputed
+        // cheaply after the fact — the correct fix is to respawn the entity, so we
+        // warn instead of silently drifting.
+        private uint _tickRateAtSpawn;
+        private static bool s_tickRateDriftWarned;
+
+        // Play-Mode-without-Domain-Reload safety: reset the one-shot latch on subsystem
+        // registration so a second Enter-Play without domain reload sees drift warnings again.
+        [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            s_tickRateDriftWarned = false;
+        }
         // Offset applied to incoming owner-auth senderTick to convert from the client's
         // estimated ServerTime to the server's authoritative time base. See
         // OwnerSubmitTickSync for the EMA math; the replicator only owns the instance and
@@ -80,6 +95,12 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // without re-scanning reflection. _predictionBinder owns the typed
         // PredictionManager<TInput> hook and the TInput resolution — see
         // PredictionBinder for the caching + registration lifecycle.
+        //
+        // Per-entity (not prefab-scoped) by design: each replicator owns an independent
+        // PredictionManager<TInput> input buffer and snapshot ring, which are per-entity
+        // state by definition. The reflection cost amortizes through PredictionHookCache's
+        // per-type cache, so the only truly per-entity work here is the small allocation of
+        // a PredictionBinder shell — cheap compared to the NetworkObject spawn it rides.
         private PredictedFieldInfo[] _predictedFields = Array.Empty<PredictedFieldInfo>();
         // Indices into _bindings that correspond to [Replicated(Predicted = true)] fields. Built in
         // OnNetworkSpawn by joining PredictionScanner output with ReplicationScanner
@@ -145,6 +166,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // collapse and the interpolated bindings list is cleared below so TickRender
             // never runs.
             uint tickRate = NetworkManager.NetworkTickSystem.TickRate;
+            _tickRateAtSpawn = tickRate;
             _tickInterval = tickRate > 0 ? 1.0 / tickRate : 0;
             _interpolationDelaySeconds = _interpolationDelayTicks * _tickInterval;
 
@@ -236,20 +258,29 @@ namespace Rubickanov.ACS.Runtime.Netcode
             if (!IsServer && _bindings.Length > 0)
                 _system.RequestInitialSync(this);
 
-            // Regression guard: the cap/clamp and mask-size recompute steps
-            // above have to stay coupled — bindings length, authority count, mask byte count,
-            // dirty-mask buffer length, and every predicted index must line up. They do today
-            // by construction, but a future reorder or new clamp could desync them silently.
-            // Debug.Assert is compiled out of release builds, so this costs nothing shipped.
-            Debug.Assert(_bindings.Length == _bindingAuthorities.Length,
-                "bindings / authorities length drift");
-            Debug.Assert(_maskByteCount == (_bindings.Length + 7) / 8,
-                "mask byte count does not match binding count");
-            Debug.Assert(_dirtyMaskBuffer.Length == _maskByteCount,
-                "dirty mask buffer size drift");
+            // Regression guard: bindings length, authority count, mask byte count, dirty-mask
+            // buffer length, and every predicted index must line up. They do today by
+            // construction, but a future reorder or new clamp could desync them silently — and
+            // a drift here corrupts every peer's decoded state because mask bit positions map
+            // straight to binding indices. Throw unconditionally (not Debug.Assert) so shipping
+            // builds fail loud at spawn instead of producing misrouted payloads.
+            if (_bindings.Length != _bindingAuthorities.Length)
+                throw new InvalidOperationException(
+                    $"[EntityReplicator] bindings/authorities length drift: " +
+                    $"{_bindings.Length} vs {_bindingAuthorities.Length} on '{gameObject.name}'.");
+            if (_maskByteCount != (_bindings.Length + 7) / 8)
+                throw new InvalidOperationException(
+                    $"[EntityReplicator] mask byte count does not match binding count: " +
+                    $"maskBytes={_maskByteCount}, bindings={_bindings.Length} on '{gameObject.name}'.");
+            if (_dirtyMaskBuffer.Length != _maskByteCount)
+                throw new InvalidOperationException(
+                    $"[EntityReplicator] dirty mask buffer size drift: " +
+                    $"buffer={_dirtyMaskBuffer.Length}, expected={_maskByteCount} on '{gameObject.name}'.");
             for (int i = 0; i < _predictedBindingIndices.Length; i++)
-                Debug.Assert(_predictedBindingIndices[i] < _bindings.Length,
-                    "predicted index out of range");
+                if (_predictedBindingIndices[i] >= _bindings.Length)
+                    throw new InvalidOperationException(
+                        $"[EntityReplicator] predicted index {_predictedBindingIndices[i]} out of range " +
+                        $"(bindings.Length={_bindings.Length}) on '{gameObject.name}'.");
         }
 
         // Extracted so the cap invariants are unit-testable without spinning up a
@@ -273,7 +304,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         {
             if (bindingCount > 256)
             {
-                Debug.LogError($"[EntityReplicator] Entity '{entityName}' has {bindingCount} replicated fields, max is 256. Aborting spawn — this replicator will not register with the replication system.");
+                Debug.LogError($"[EntityReplicator] Entity '{entityName}' has {bindingCount} replicated fields; max is 256 (valid indices 0..255, wire format uses one dirty-mask byte per 8 fields). Aborting spawn — this replicator will not register with the replication system.");
                 return true;
             }
             return false;
@@ -283,7 +314,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         {
             if (bindingCount > 256)
             {
-                Debug.LogError($"[EntityReplicator] Entity '{entityName}' has {bindingCount} replicated events, max is 256. Aborting spawn — this replicator will not register with the replication system.");
+                Debug.LogError($"[EntityReplicator] Entity '{entityName}' has {bindingCount} replicated events; max is 256 (valid indices 0..255, wire format packs the index into a single byte). Aborting spawn — this replicator will not register with the replication system.");
                 return true;
             }
             return false;
@@ -299,6 +330,8 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
             for (int i = 0; i < _bindings.Length; i++)
                 _bindings[i].OnDespawn();
+            for (int i = 0; i < _eventBindings.Length; i++)
+                _eventBindings[i].OnDespawn();
 
             _interpolatedBindings = Array.Empty<ReplicatedFieldBinding>();
             _ownerDisposables.Dispose();
@@ -311,8 +344,25 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         private void Update()
         {
-            if (_interpolatedBindings.Length == 0) return;
             if (!IsSpawned) return;
+
+            // Runtime TickRate drift guard. Spawn-time tick rate is baked into interpolation
+            // delay, AuthorityRenderBinding windows, and PredictionManager._tickDelta — none of
+            // which we can recompute in place. Fire once per session (static flag) to avoid
+            // log spam when many replicators tick past a just-changed rate. Fix: set TickRate
+            // before the first entity spawns and keep it constant, or respawn affected entities.
+            if (!s_tickRateDriftWarned && NetworkManager.NetworkTickSystem.TickRate != _tickRateAtSpawn)
+            {
+                s_tickRateDriftWarned = true;
+                Debug.LogWarning(
+                    $"[EntityReplicator] NetworkTickSystem.TickRate changed after spawn " +
+                    $"({_tickRateAtSpawn} → {NetworkManager.NetworkTickSystem.TickRate}) on '{gameObject.name}'. " +
+                    $"Interpolation delay, authority-render windows, and prediction tick delta are sized at spawn " +
+                    $"and will not update for already-spawned replicators. Respawn replicated entities to pick up " +
+                    $"the new tick rate.");
+            }
+
+            if (_interpolatedBindings.Length == 0) return;
 
             double renderTime = NetworkManager.ServerTime.Time - _interpolationDelaySeconds;
             for (int i = 0; i < _interpolatedBindings.Length; i++)
@@ -321,6 +371,13 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
         public override void OnGainedOwnership()
         {
+            // Re-evaluate [NetworkScope(OwnerOnly)] FIRST so sibling components are enabled
+            // before the aspect-level subscriptions below fire. OnNetworkSpawn orders it the
+            // same way (ApplyNetworkScopes → binding construction) to avoid scope-disabled
+            // components missing their first event; keeping the same order here fixes the
+            // mirror case at ownership transfer.
+            ReapplyOwnerScope();
+
             // Subscribe owner-auth field and event bindings now that this peer
             // is the authority. Previous owner's subscriptions were disposed in
             // their OnLostOwnership.
@@ -330,15 +387,15 @@ namespace Rubickanov.ACS.Runtime.Netcode
             // Reset the tick offset — a new owner has a different clock drift.
             _ownerSubmitTickSync.Reset();
 
-            // Clear stale interpolation buffers for owner-auth fields — this peer
-            // is now authority and writes locally, so old snapshots are irrelevant.
+            // Flip owner-auth bindings back into "sample-from-network" mode by dropping their
+            // subscribe-sampler flag. We intentionally do NOT wipe the _prev/_curr render pair
+            // (see OnAuthorityLost): preserving the last few samples lets the wall-clock
+            // smoothing carry the view across the transfer instead of snapping.
             for (int i = 0; i < _bindings.Length; i++)
             {
                 if (_bindingAuthorities[i] == AuthorityMode.Owner)
-                    _bindings[i].ClearInterpolationState();
+                    _bindings[i].OnAuthorityLost();
             }
-
-            ReapplyOwnerScope();
         }
 
         public override void OnLostOwnership()
@@ -348,16 +405,16 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _ownerDisposables.Dispose();
             _ownerDisposables = default;
 
-            // Clear owner-auth interpolation state symmetric to OnGainedOwnership.
-            // The subscribe-side sampler that fed AuthorityRenderBinding's render
-            // pair is gone now; the binding must drop _samplesFromSubscribe so
-            // incoming network snapshots (relayed from the new owner) sample
-            // through ApplyFromNetwork instead of being silently skipped. Without
-            // this, InterpolatedValue freezes on the last local write.
+            // Flip owner-auth bindings into "sample-from-network" mode. The subscribe-side
+            // sampler that fed AuthorityRenderBinding's render pair is gone now; without this,
+            // InterpolatedValue would freeze on the last local write because ApplyFromNetwork
+            // skips sampling whenever _samplesFromSubscribe is set. Unlike the old
+            // ClearInterpolationState path we keep the existing render pair so the first
+            // incoming relayed snapshot can smoothly slide onto _prev/_curr.
             for (int i = 0; i < _bindings.Length; i++)
             {
                 if (_bindingAuthorities[i] == AuthorityMode.Owner)
-                    _bindings[i].ClearInterpolationState();
+                    _bindings[i].OnAuthorityLost();
             }
 
             ReapplyOwnerScope();

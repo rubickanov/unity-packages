@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using R3;
 using Unity.Collections;
 using Unity.Netcode;
+using UnityEngine;
 using UnityEngine.Scripting;
 
 namespace Rubickanov.ACS.Runtime.Netcode
@@ -23,6 +25,12 @@ namespace Rubickanov.ACS.Runtime.Netcode
         public abstract void SubscribeAsAuthority(ref DisposableBag disposables, byte eventIndex,
             IEventBroadcaster broadcaster, ulong networkObjectId, bool isOwnerSubmit);
         public abstract void ApplyFromNetwork(FastBufferReader reader);
+        // Symmetric to ReplicatedFieldBinding.OnDespawn. Default no-op — subscribe-side
+        // teardown is covered by the DisposableBag passed into SubscribeAsAuthority, so
+        // stateless bindings have nothing to do here. Introduced for future bindings that
+        // carry lifecycle state beyond the Subscribe handle (e.g. if a binding ever owned
+        // a pooled buffer or native allocation).
+        public virtual void OnDespawn() { }
     }
 
     [Preserve]
@@ -113,7 +121,20 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var ctor = bindingType.GetConstructor(new[] { subjectType, typeof(AuthorityMode), typeof(Reliability) })
                 ?? throw new InvalidOperationException($"No (Subject<T>, AuthorityMode, Reliability) ctor on {bindingType}.");
             return (subject, authority, reliability) =>
-                (ReplicatedEventBinding)ctor.Invoke(new[] { subject, (object)authority, (object)reliability });
+            {
+                try
+                {
+                    return (ReplicatedEventBinding)ctor.Invoke(new[] { subject, (object)authority, (object)reliability });
+                }
+                catch (TargetInvocationException ex) when (ex.InnerException is NotSupportedException or MissingMethodException or TypeLoadException)
+                {
+                    Debug.LogError(
+                        $"[ReplicatedEventBindingFactory] Failed to construct {bindingType.FullName}. " +
+                        $"Most likely IL2CPP stripped the closed generic — add the payload type " +
+                        $"to Assets/link.xml with preserve=\"all\". Inner: {ex.InnerException}");
+                    throw;
+                }
+            };
         }
     }
 }

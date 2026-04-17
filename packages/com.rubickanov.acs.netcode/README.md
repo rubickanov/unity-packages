@@ -48,7 +48,7 @@ ReplicationScanner ──► ReplicatedFieldBinding<T>         ReplicatedEventBi
 
 ## Quick Start
 
-1. Make sure `NetworkManager` has a non-zero `NetworkTickSystem.TickRate` in its `NetworkConfig`. A tick rate of `0` disables replication with an error log.
+1. Make sure `NetworkManager` has a non-zero `NetworkTickSystem.TickRate` in its `NetworkConfig`. A tick rate of `0` disables replication with an error log. Tick rate is expected to be set before the first entity spawns and kept constant for the session — `EntityReplicator` caches the tick interval at spawn to size interpolation delay, coalesce/stale windows, and prediction deltas. Changing `TickRate` at runtime leaves already-spawned replicators on the old interval; the replicator logs a one-shot warning when it detects the drift. If you need to change the tick rate, do it before spawning any replicated entity.
 2. Add `NetworkObject` + `MonoEntity` + `EntityReplicator` to the prefab root. Set `Interpolation Delay Ticks` on the replicator (default `2` — lower is snappier, higher masks packet jitter).
 3. Mark aspect fields with `[Replicated]` / `[ReplicatedEvent]`:
 
@@ -119,6 +119,8 @@ public class CombatAspect : IEntityAspect
 ```
 
 Rule of thumb: if the player would notice a *single* missed instance, pick `Reliable`. If they would only notice *all* of them missing, pick `Unreliable`.
+
+Ordering: both variants preserve ordering within their own channel. `Reliable` events go through NGO's `ReliableFragmentedSequenced` delivery — no drops, original order. `Unreliable` events go through the `Unreliable` delivery — drops allowed, but sequencing is preserved so a late packet that arrives after a newer one is dropped rather than surfacing out of order. Ordering between `Reliable` and `Unreliable` channels is NOT guaranteed: a reliable event fired before an unreliable one may arrive after it.
 
 ### Authority
 
@@ -259,6 +261,19 @@ Built-in unmanaged types (`int`, `float`, `bool`, `double`, `Vector2..4`, `Quate
 ```xml
 <linker>
   <assembly fullname="ACS.Runtime.Netcode" preserve="all"/>
+</linker>
+```
+
+**`[NetworkScope]`-marked components must also be preserved.** `NetworkScopeScanner` reads the attribute via reflection (`GetCustomAttribute<NetworkScopeAttribute>`) on the component's concrete type. If IL2CPP strips the type — common for components referenced only from prefabs — the attribute lookup silently returns `null` and the component behaves as `Everywhere` instead of `OwnerOnly` / `ServerOnly`. Preserve the assembly that contains your scoped components (or each individual type) in `link.xml`:
+
+```xml
+<linker>
+  <assembly fullname="YourGame.Runtime" preserve="all"/>
+  <!-- or type-by-type: -->
+  <assembly fullname="YourGame.Runtime">
+    <type fullname="YourGame.Runtime.LocalPlayerInput" preserve="all"/>
+    <type fullname="YourGame.Runtime.AiDecisionMaker" preserve="all"/>
+  </assembly>
 </linker>
 ```
 

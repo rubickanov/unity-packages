@@ -541,26 +541,38 @@ namespace Rubickanov.ACS.Runtime.Netcode
         void IEventBroadcaster.SendEvent(ulong networkObjectId, byte eventIndex,
             FastBufferWriter writer, AuthorityMode authority, Reliability reliability, bool isOwnerSubmit)
         {
+            // Resolve (channel, delivery) via switch so a future Reliability variant triggers
+            // a compiler warning on the switch expression and surfaces at runtime via the
+            // default-throw rather than silently bucketing into Unreliable.
             string channel;
-            ulong targetClientId;
+            NetworkDelivery delivery;
+            switch (reliability)
+            {
+                case Reliability.Reliable:
+                    channel = isOwnerSubmit ? OwnerEventChannel : EventBroadcastChannel;
+                    delivery = NetworkDelivery.ReliableFragmentedSequenced;
+                    break;
+                case Reliability.Unreliable:
+                    channel = isOwnerSubmit ? OwnerEventUnreliableChannel : EventBroadcastUnreliableChannel;
+                    delivery = NetworkDelivery.Unreliable;
+                    break;
+                default:
+                    throw new System.ArgumentOutOfRangeException(nameof(reliability), reliability,
+                        "Unhandled Reliability variant in SendEvent. A new enum value needs a matching " +
+                        "(channel, NetworkDelivery) mapping here and the corresponding named-message " +
+                        "registration in EntityReplicationSystem's ctor.");
+            }
 
             if (isOwnerSubmit)
             {
-                channel = reliability == Reliability.Reliable ? OwnerEventChannel : OwnerEventUnreliableChannel;
-                targetClientId = NetworkManager.ServerClientId;
-
                 _networkManager.CustomMessagingManager.SendNamedMessage(
-                    channel, targetClientId, writer,
-                    reliability == Reliability.Reliable ? NetworkDelivery.ReliableFragmentedSequenced : NetworkDelivery.Unreliable);
+                    channel, NetworkManager.ServerClientId, writer, delivery);
             }
             else
             {
-                channel = reliability == Reliability.Reliable ? EventBroadcastChannel : EventBroadcastUnreliableChannel;
-
                 if (_broadcastTargetIds.Count == 0) return;
                 _networkManager.CustomMessagingManager.SendNamedMessage(
-                    channel, _broadcastTargetIds, writer,
-                    reliability == Reliability.Reliable ? NetworkDelivery.ReliableFragmentedSequenced : NetworkDelivery.Unreliable);
+                    channel, _broadcastTargetIds, writer, delivery);
             }
         }
 

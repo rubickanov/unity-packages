@@ -33,11 +33,12 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         }
 
         [Test]
-        public void Register_SameReactivePropertyTwice_FiresAssertion()
+        public void Register_SameReactivePropertyTwice_LogsError()
         {
             // Double-register silently overwrites the prior binding, which masks ownership-transfer
             // cleanup bugs (ex-owner's binding stays registered, new owner's overwrites it). The
-            // assert turns the silent overwrite into a loud failure during tests.
+            // previous Debug.Assert stripped from Release builds — Batch 5 replaced it with an
+            // unconditional Debug.LogError so the signal survives in shipping builds too.
             var reactive = new ReactiveProperty<float>(0f);
             var binding = new StubBinding<float>();
 
@@ -56,8 +57,8 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             }
 
             Assert.IsTrue(
-                capture.Captured.Any(e => e.type == LogType.Assert && e.message.Contains("double-register")),
-                "Registering a binding for the same ReactiveProperty twice must trip the Debug.Assert guard");
+                capture.Captured.Any(e => e.type == LogType.Error && e.message.Contains("double-register")),
+                "Registering a binding for the same ReactiveProperty twice must log an unconditional error");
         }
 
         [Test]
@@ -85,7 +86,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
         }
 
         [Test]
-        public void Unregister_RemovesEntry_SoRegisterAgainDoesNotTripAssert()
+        public void Unregister_RemovesEntry_SoRegisterAgainDoesNotLogError()
         {
             // After OnDespawn the registry entry must be gone, so a fresh spawn with the
             // same ReactiveProperty (e.g. pooled entity reuse) can register cleanly.
@@ -107,8 +108,8 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             }
 
             Assert.IsFalse(
-                capture.Captured.Any(e => e.type == LogType.Assert),
-                "Unregister followed by Register on the same ReactiveProperty must not trip the assertion");
+                capture.Captured.Any(e => e.type == LogType.Error),
+                "Unregister followed by Register on the same ReactiveProperty must not log an error");
         }
 
         private sealed class StubBinding<T> : IInterpolatedBinding<T> where T : unmanaged
