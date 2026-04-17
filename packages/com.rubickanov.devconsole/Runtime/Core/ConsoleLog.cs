@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace Rubickanov.DevConsole
 {
@@ -29,6 +30,16 @@ namespace Rubickanov.DevConsole
 
         /// <summary>Fired when the log is cleared.</summary>
         public static event Action? OnCleared;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            _head = 0;
+            _count = 0;
+            Array.Clear(Buffer, 0, Buffer.Length);
+            OnLogAdded = null;
+            OnCleared = null;
+        }
 
         /// <summary>Logs a message to the console.</summary>
         public static void Log(string message, LogType type = LogType.Info)

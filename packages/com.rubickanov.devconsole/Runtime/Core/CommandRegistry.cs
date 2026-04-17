@@ -14,11 +14,20 @@ namespace Rubickanov.DevConsole
         private static CommandRegistry? _instance;
         public static CommandRegistry Instance => _instance ??= new CommandRegistry();
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => _instance = null;
+
+        /// <summary>Delegate for custom argument parsers. Returns true on success and sets <paramref name="result"/>.</summary>
+        public delegate bool ArgumentParserDelegate(string input, out object? result);
+
         private readonly Dictionary<string, RegisteredCommand> _commands = new();
         private readonly Dictionary<Type, IAutoCompleteProvider> _providerCache = new();
+        private readonly Dictionary<Type, ArgumentParserDelegate> _customParsers = new();
+        private readonly Dictionary<Type, IAutoCompleteProvider> _defaultProviders = new();
         private bool _initialized;
 
         private string[] _sortedKeys = Array.Empty<string>();
+        private bool _sortedKeysDirty;
         private readonly List<string> _tokenBuffer = new();
 
         /// <summary>All registered commands keyed by lowercase name.</summary>
@@ -40,13 +49,47 @@ namespace Rubickanov.DevConsole
             ConsoleLog.LogSuccess($"Initialization complete. Registered {_commands.Count} commands.");
         }
 
+        /// <summary>Registers a custom parser for type <typeparamref name="T"/>. Returns this for chaining.</summary>
+        public CommandRegistry RegisterParser<T>(Func<string, (bool ok, T? value)> parser)
+        {
+            if (parser == null) throw new ArgumentNullException(nameof(parser));
+            _customParsers[typeof(T)] = (string input, out object? result) =>
+            {
+                var (ok, val) = parser(input);
+                result = val;
+                return ok;
+            };
+            return this;
+        }
+
+        /// <summary>Registers a default autocomplete provider for parameters of type <typeparamref name="T"/>.</summary>
+        public CommandRegistry RegisterDefaultProvider<T>(IAutoCompleteProvider provider)
+        {
+            return RegisterDefaultProvider(typeof(T), provider);
+        }
+
+        /// <summary>Registers a default autocomplete provider for parameters of the given type.</summary>
+        public CommandRegistry RegisterDefaultProvider(Type type, IAutoCompleteProvider provider)
+        {
+            if (type == null) throw new ArgumentNullException(nameof(type));
+            if (provider == null) throw new ArgumentNullException(nameof(provider));
+            _defaultProviders[type] = provider;
+            return this;
+        }
+
         /// <summary>Registers a command at runtime. Handler receives string args and returns an optional message.</summary>
         public void Register(string name, Func<string[], string?> handler, string description = "",
             string category = "General", IAutoCompleteProvider?[]? argProviders = null)
         {
-            _commands[name.ToLowerInvariant()] = new RegisteredCommand
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Command name must be non-empty.", nameof(name));
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            var key = name.ToLowerInvariant();
+            _commands[key] = new RegisteredCommand
             {
-                Name = name.ToLowerInvariant(),
+                Name = key,
                 Description = description,
                 Category = category,
                 Method = null,
@@ -54,13 +97,14 @@ namespace Rubickanov.DevConsole
                 ArgProviders = argProviders,
                 ManualHandler = handler
             };
-            RebuildSortedKeys();
+            _sortedKeysDirty = true;
         }
 
         /// <summary>Registers a command at runtime with no return value.</summary>
         public void Register(string name, Action<string[]> action, string description = "",
             string category = "General", IAutoCompleteProvider?[]? argProviders = null)
         {
+            if (action == null) throw new ArgumentNullException(nameof(action));
             Register(name, args =>
             {
                 action(args);
@@ -72,7 +116,11 @@ namespace Rubickanov.DevConsole
         public void RegisterGroup(string name, string description, string category,
             Action<CommandGroupBuilder> configure)
         {
-            var builder = new CommandGroupBuilder();
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Group name must be non-empty.", nameof(name));
+            if (configure == null) throw new ArgumentNullException(nameof(configure));
+
+            var builder = new CommandGroupBuilder(this);
             configure(builder);
 
             var subcommands = builder.Subcommands.ToArray();
@@ -88,7 +136,69 @@ namespace Rubickanov.DevConsole
                 ManualHandler = args => ExecuteGroup(cmdName, subcommands, args),
                 Subcommands = subcommands
             };
-            RebuildSortedKeys();
+            _sortedKeysDirty = true;
+        }
+
+        /// <summary>Shorthand alias for <see cref="RegisterGroup"/>.</summary>
+        public void Group(string name, string description, string category,
+            Action<CommandGroupBuilder> configure)
+            => RegisterGroup(name, description, category, configure);
+
+        /// <summary>
+        /// Scans <paramref name="target"/>'s instance methods for [ConsoleCommand] attributes and registers them.
+        /// Returns this for chaining.
+        /// </summary>
+        public CommandRegistry RegisterTarget(object target)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            var type = target.GetType();
+            foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public |
+                                                   BindingFlags.NonPublic))
+            {
+                var attr = method.GetCustomAttribute<ConsoleCommandAttribute>();
+                if (attr != null) RegisterMethod(method, attr, target);
+            }
+            return this;
+        }
+
+        /// <summary>
+        /// Removes all commands previously registered for <paramref name="target"/> via <see cref="RegisterTarget"/>.
+        /// Returns this for chaining.
+        /// </summary>
+        public CommandRegistry UnregisterTarget(object target)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            List<string>? toRemove = null;
+            foreach (var kvp in _commands)
+            {
+                if (kvp.Value.Target != null && ReferenceEquals(kvp.Value.Target, target))
+                {
+                    toRemove ??= new List<string>();
+                    toRemove.Add(kvp.Key);
+                }
+            }
+
+            if (toRemove != null)
+            {
+                for (int i = 0; i < toRemove.Count; i++)
+                    _commands.Remove(toRemove[i]);
+                _sortedKeysDirty = true;
+            }
+            return this;
+        }
+
+        /// <summary>Removes a command by name. Returns true if it existed.</summary>
+        public bool Unregister(string name)
+        {
+            var key = name.ToLowerInvariant();
+            if (_commands.Remove(key))
+            {
+                _sortedKeysDirty = true;
+                return true;
+            }
+            return false;
         }
 
         private static string? ExecuteGroup(string groupName, SubcommandDefinition[] subcommands, string[] args)
@@ -117,11 +227,16 @@ namespace Rubickanov.DevConsole
             return $"Unknown subcommand '{args[0]}'. Type '{groupName}' for available subcommands.";
         }
 
-        private void RebuildSortedKeys()
+        private string[] GetSortedKeys()
         {
-            _sortedKeys = new string[_commands.Count];
-            _commands.Keys.CopyTo(_sortedKeys, 0);
-            Array.Sort(_sortedKeys, StringComparer.Ordinal);
+            if (_sortedKeysDirty)
+            {
+                _sortedKeys = new string[_commands.Count];
+                _commands.Keys.CopyTo(_sortedKeys, 0);
+                Array.Sort(_sortedKeys, StringComparer.Ordinal);
+                _sortedKeysDirty = false;
+            }
+            return _sortedKeys;
         }
 
         private void DiscoverCommands()
@@ -142,16 +257,20 @@ namespace Rubickanov.DevConsole
                                                            BindingFlags.NonPublic))
                     {
                         var attr = method.GetCustomAttribute<ConsoleCommandAttribute>();
-                        if (attr != null) RegisterMethod(method, attr);
+                        if (attr != null) RegisterMethod(method, attr, null);
                     }
                 }
-                catch (ReflectionTypeLoadException)
+                catch (ReflectionTypeLoadException e)
                 {
+                    var loaderMsg = e.LoaderExceptions.Length > 0 && e.LoaderExceptions[0] != null
+                        ? e.LoaderExceptions[0]!.Message
+                        : e.Message;
+                    Debug.LogWarning($"[DevConsole] Skipped assembly '{asmName}': {loaderMsg}");
                 }
             }
         }
 
-        private void RegisterMethod(MethodInfo method, ConsoleCommandAttribute attr)
+        private void RegisterMethod(MethodInfo method, ConsoleCommandAttribute attr, object? target)
         {
             var parameters = method.GetParameters();
             var autoCompleteAttrs = method.GetCustomAttributes<AutoCompleteAttribute>().ToArray();
@@ -165,8 +284,12 @@ namespace Rubickanov.DevConsole
             {
                 if (providers[i] != null) continue;
                 var paramType = parameters[i].ParameterType;
-                if (paramType.IsEnum) providers[i] = GetOrCreateProvider(typeof(EnumAutoCompleteProvider), paramType);
-                else if (paramType == typeof(bool)) providers[i] = BoolAutoCompleteProvider.Instance;
+                if (_defaultProviders.TryGetValue(paramType, out var defaultProvider))
+                    providers[i] = defaultProvider;
+                else if (paramType.IsEnum)
+                    providers[i] = GetOrCreateProvider(typeof(EnumAutoCompleteProvider), paramType);
+                else if (paramType == typeof(bool))
+                    providers[i] = BoolAutoCompleteProvider.Instance;
             }
 
             if (_commands.TryGetValue(attr.Name, out _))
@@ -178,9 +301,22 @@ namespace Rubickanov.DevConsole
                 Description = attr.Description,
                 Category = attr.Category,
                 Method = method,
+                Target = target,
                 Parameters = parameters,
                 ArgProviders = providers
             };
+            _sortedKeysDirty = true;
+        }
+
+        internal IAutoCompleteProvider? ResolveProviderForType(Type paramType)
+        {
+            if (_defaultProviders.TryGetValue(paramType, out var defaultProvider))
+                return defaultProvider;
+            if (paramType.IsEnum)
+                return GetOrCreateProvider(typeof(EnumAutoCompleteProvider), paramType);
+            if (paramType == typeof(bool))
+                return BoolAutoCompleteProvider.Instance;
+            return null;
         }
 
         private IAutoCompleteProvider? GetOrCreateProvider(Type providerType, params object[] args)
@@ -297,7 +433,7 @@ namespace Rubickanov.DevConsole
 
             try
             {
-                var result = cmd.Method!.Invoke(null, parsedArgs);
+                var result = cmd.Method!.Invoke(cmd.Target, parsedArgs);
                 return result != null ? ExecutionResult.Ok(result.ToString()) : ExecutionResult.Ok();
             }
             catch (TargetInvocationException e)
@@ -310,9 +446,14 @@ namespace Rubickanov.DevConsole
             }
         }
 
-        private static bool TryParseArg(string input, Type targetType, out object? result)
+        /// <summary>Parses <paramref name="input"/> as <paramref name="targetType"/>. Consults custom parsers first, then built-ins.</summary>
+        public bool TryParseArg(string input, Type targetType, out object? result)
         {
             result = null;
+
+            if (_customParsers.TryGetValue(targetType, out var custom))
+                return custom(input, out result);
+
             try
             {
                 if (targetType == typeof(string))
@@ -323,7 +464,7 @@ namespace Rubickanov.DevConsole
 
                 if (targetType == typeof(int))
                 {
-                    result = int.Parse(input);
+                    result = int.Parse(input, CultureInfo.InvariantCulture);
                     return true;
                 }
 
@@ -335,13 +476,13 @@ namespace Rubickanov.DevConsole
 
                 if (targetType == typeof(ulong))
                 {
-                    result = ulong.Parse(input);
+                    result = ulong.Parse(input, CultureInfo.InvariantCulture);
                     return true;
                 }
 
                 if (targetType == typeof(long))
                 {
-                    result = long.Parse(input);
+                    result = long.Parse(input, CultureInfo.InvariantCulture);
                     return true;
                 }
 
@@ -363,9 +504,9 @@ namespace Rubickanov.DevConsole
                     if (p.Length == 3)
                     {
                         result = new Vector3(
-                            float.Parse(p[0], CultureInfo.InvariantCulture),
-                            float.Parse(p[1], CultureInfo.InvariantCulture),
-                            float.Parse(p[2], CultureInfo.InvariantCulture));
+                            float.Parse(p[0].Trim(), CultureInfo.InvariantCulture),
+                            float.Parse(p[1].Trim(), CultureInfo.InvariantCulture),
+                            float.Parse(p[2].Trim(), CultureInfo.InvariantCulture));
                         return true;
                     }
                 }
@@ -381,11 +522,13 @@ namespace Rubickanov.DevConsole
         /// <summary>Fills <paramref name="results"/> with autocomplete suggestions for the current input. Zero-alloc.</summary>
         public void GetSuggestions(string input, List<string> results, int maxResults = 10)
         {
+            var sortedKeys = GetSortedKeys();
+
             if (string.IsNullOrEmpty(input))
             {
-                int count = Math.Min(_sortedKeys.Length, maxResults);
+                int count = Math.Min(sortedKeys.Length, maxResults);
                 for (int i = 0; i < count; i++)
-                    results.Add(_sortedKeys[i]);
+                    results.Add(sortedKeys[i]);
                 return;
             }
 
@@ -396,11 +539,11 @@ namespace Rubickanov.DevConsole
             if (_tokenBuffer.Count == 1 && !endsWithSpace)
             {
                 var partial = _tokenBuffer[0].ToLowerInvariant();
-                for (int i = 0; i < _sortedKeys.Length; i++)
+                for (int i = 0; i < sortedKeys.Length; i++)
                 {
-                    if (_sortedKeys[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+                    if (sortedKeys[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase))
                     {
-                        results.Add(_sortedKeys[i]);
+                        results.Add(sortedKeys[i]);
                         if (results.Count >= maxResults) return;
                     }
                 }

@@ -11,6 +11,9 @@ namespace Rubickanov.DevConsole
         private static AliasRegistry? _instance;
         public static AliasRegistry Instance => _instance ??= new AliasRegistry();
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => _instance = null;
+
         private const string PrefsKey = "DevConsole_Aliases";
 
         private readonly Dictionary<string, string> _aliases = new();
@@ -39,6 +42,14 @@ namespace Rubickanov.DevConsole
             var removed = _aliases.Remove(name.ToLowerInvariant());
             if (removed) Save();
             return removed;
+        }
+
+        /// <summary>Removes all aliases and clears persisted storage.</summary>
+        public void Clear()
+        {
+            _aliases.Clear();
+            PlayerPrefs.DeleteKey(PrefsKey);
+            PlayerPrefs.Save();
         }
 
         private void Save()

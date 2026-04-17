@@ -11,6 +11,10 @@ namespace Rubickanov.DevConsole
         public string Description = "";
         public string Category = "";
         public MethodInfo? Method;
+
+        /// <summary>Instance target for method invocation. Null for static methods and manually registered commands.</summary>
+        public object? Target;
+
         public ParameterInfo[] Parameters = Array.Empty<ParameterInfo>();
         public IAutoCompleteProvider?[]? ArgProviders;
 

@@ -71,6 +71,26 @@ namespace Rubickanov.DevConsole.Commands
                 ConsoleLog.LogError($"Alias '{name}' not found.");
         }
 
+        [ConsoleCommand("alias_clear", "Remove all aliases", "Console")]
+        public static void AliasClear()
+        {
+            AliasRegistry.Instance.Clear();
+            ConsoleLog.LogSuccess("All aliases cleared.");
+        }
+
+        [ConsoleCommand("history_clear", "Remove all command history entries", "Console")]
+        public static void HistoryClear()
+        {
+            var history = CommandHistory.Current;
+            if (history == null)
+            {
+                ConsoleLog.LogError("Command history not available.");
+                return;
+            }
+            history.Clear();
+            ConsoleLog.LogSuccess("Command history cleared.");
+        }
+
         [ConsoleCommand("bind", "Bind a key to a command (no args=list, 2 args=bind)", "Console")]
         public static void Bind(string key = "", string command = "")
         {
@@ -119,6 +139,19 @@ namespace Rubickanov.DevConsole.Commands
                 ConsoleLog.LogSuccess($"Unbound {parsedKey}.");
             else
                 ConsoleLog.LogError($"No binding for {parsedKey}.");
+        }
+
+        [ConsoleCommand("binding_clear", "Remove all key bindings", "Console")]
+        public static void BindingClear()
+        {
+            var bindings = CommandBindings.GetInstance();
+            if (bindings == null)
+            {
+                ConsoleLog.Log("No bindings to clear.");
+                return;
+            }
+            bindings.Clear();
+            ConsoleLog.LogSuccess("All key bindings cleared.");
         }
 
         [ConsoleCommand("exec", "Execute commands from a file in StreamingAssets/console/ or persistentDataPath/console/", "Console")]

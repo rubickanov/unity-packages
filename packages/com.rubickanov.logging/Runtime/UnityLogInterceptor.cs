@@ -21,6 +21,15 @@ namespace Rubickanov.Logging
             Application.logMessageReceivedThreaded += OnLogMessageReceived;
         }
 
+        // Reset thread-static guard on Play Mode enter so a stuck-true value
+        // from a prior session doesn't silently drop logs when
+        // Enter Play Mode > Reload Domain is disabled.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            _isForwarding = false;
+        }
+
         public void Dispose()
         {
             Application.logMessageReceivedThreaded -= OnLogMessageReceived;

@@ -12,6 +12,9 @@ namespace Rubickanov.DevConsole
         /// <summary>Singleton instance. Null if console is not in the scene.</summary>
         public static DevConsoleUIToolkit? Instance { get; private set; }
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => Instance = null;
+
         private VisualElement _root = default!;
         private ScrollView _logScroll = default!;
         private VisualElement _logContainer = default!;

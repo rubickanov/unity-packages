@@ -8,6 +8,16 @@ namespace Rubickanov.DevConsole.Commands
     {
         private static bool _subscribed;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            if (_subscribed)
+            {
+                Application.logMessageReceived -= OnUnityLogMessage;
+                _subscribed = false;
+            }
+        }
+
         [ConsoleCommand("log_unity", "Toggle forwarding Unity Debug.Log messages to the console", "Logging")]
         public static void LogUnity(bool enabled = true)
         {

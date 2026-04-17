@@ -37,10 +37,10 @@ Hash-based (murmur3 finalizer) random number generation. Same inputs produce the
 // Float in [0, 1)
 float f = DeterministicRandom.Float01(tick, seed);
 
-// Float in [min, max)
+// Float in [min, maxExclusive)
 float spread = DeterministicRandom.Range(tick, seed, -0.5f, 0.5f);
 
-// Int in [min, max)
+// Int in [min, maxExclusive) -- throws ArgumentException if maxExclusive <= min
 int index = DeterministicRandom.Int(tick, seed, 0, enemies.Length);
 
 // Boolean (50/50)
@@ -58,14 +58,16 @@ All methods accept 2 or 3 `uint` keys. More keys give more degrees of freedom fo
 
 ### Circular Buffer
 
-Fixed-capacity ring buffer. Index wraps automatically.
+Fixed-capacity ring buffer. Index wraps automatically via modulo on `uint` keys. Underflow is well-defined (`3u - 10u` wraps to a large positive number), so lookback from low ticks works without special-casing.
 
 ```csharp
-var buffer = new CircularBuffer<SnapshotState>(128);
+var buffer = new CircularBuffer<SnapshotState>(capacity: 128u);
 
 buffer.Add(snapshot, tick);
-SnapshotState old = buffer.Get(tick - 10);
+SnapshotState old = buffer.Get(tick - 10u);
 buffer.Clear();
+
+uint capacity = buffer.Capacity;
 ```
 
 ### Object Pool
@@ -129,6 +131,9 @@ var pool = new EvictingPool<DecalProjector>(
     evictBuffer: 8,   // extra pool slots for items mid-eviction
     prewarm: 16
 );
+
+// Return every active instance without invoking onEvict (e.g., on scene change)
+pool.ReleaseAll();
 ```
 
 ### Description Attribute
@@ -164,4 +169,7 @@ com.rubickanov.utils/
 │   └── ComponentDescriptionEditor.cs
 └── Tests/
     └── Editor/
+        ├── CircularBufferTests.cs
+        ├── DeterministicRandomTests.cs
+        └── PoolTests.cs
 ```
