@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 
@@ -344,6 +345,65 @@ namespace Rubickanov.GameplayTags.Tests
                 second.Add(enumerator.Current.Index);
 
             CollectionAssert.AreEqual(first, second);
+        }
+
+        [Test]
+        public void Enumerator_AddTagDuringIteration_ThrowsOnMoveNext()
+        {
+            var container = TagTestFixtures.Container("Damage", "Status.Stun");
+            var enumerator = container.GetEnumerator();
+            enumerator.MoveNext();
+
+            container.AddTag(TagTestFixtures.Tag("Immune"));
+
+            Assert.Throws<InvalidOperationException>(() => enumerator.MoveNext());
+        }
+
+        [Test]
+        public void Enumerator_RemoveTagDuringIteration_ThrowsOnMoveNext()
+        {
+            var container = TagTestFixtures.Container("Damage", "Status.Stun");
+            var enumerator = container.GetEnumerator();
+            enumerator.MoveNext();
+
+            container.RemoveTag(TagTestFixtures.Tag("Damage"));
+
+            Assert.Throws<InvalidOperationException>(() => enumerator.MoveNext());
+        }
+
+        [Test]
+        public void Enumerator_ClearDuringIteration_ThrowsOnMoveNext()
+        {
+            var container = TagTestFixtures.Container("Damage", "Status.Stun");
+            var enumerator = container.GetEnumerator();
+            enumerator.MoveNext();
+
+            container.Clear();
+
+            Assert.Throws<InvalidOperationException>(() => enumerator.MoveNext());
+        }
+
+        [Test]
+        public void Enumerator_ClearOnEmptyContainer_DoesNotInvalidate()
+        {
+            var container = new GameplayTagContainer();
+            var enumerator = container.GetEnumerator();
+
+            container.Clear();
+
+            Assert.DoesNotThrow(() => enumerator.MoveNext());
+        }
+
+        [Test]
+        public void Enumerator_NoOpRemoveDuringIteration_DoesNotInvalidate()
+        {
+            var container = TagTestFixtures.Container("Damage");
+            var enumerator = container.GetEnumerator();
+            enumerator.MoveNext();
+
+            container.RemoveTag(TagTestFixtures.Tag("Status.Stun"));
+
+            Assert.DoesNotThrow(() => enumerator.MoveNext());
         }
     }
 }

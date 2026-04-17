@@ -23,65 +23,54 @@ namespace Rubickanov.GameplayTags.Editor
         protected override AdvancedDropdownItem BuildRoot()
         {
             var root = new AdvancedDropdownItem("Gameplay Tags");
-
             root.AddChild(new AdvancedDropdownItem("None"));
 
-            var asset = FindTagAsset();
-            if (asset == null)
+            var allNames = CollectAllTagNames();
+            if (allNames.Count == 0)
+            {
+                root.AddChild(new AdvancedDropdownItem("(no GameplayTagAsset found — create one via Assets > Create > Config > Gameplay Tags)"));
                 return root;
-
-            var registry = new GameplayTagRegistry(asset.TagPaths);
-            var names = registry.GetAllNames();
+            }
 
             var nodeMap = new Dictionary<string, GameplayTagDropdownItem>();
+            var parentKeys = new HashSet<string>();
 
-            // First pass: create all nodes
-            foreach (var name in names)
+            foreach (var name in allNames)
             {
-                var parts = name.Split('.');
                 AdvancedDropdownItem parentItem = root;
+                var start = 0;
+                var segmentEnd = -1;
 
-                for (var i = 0; i < parts.Length; i++)
+                while (start <= name.Length)
                 {
-                    var key = string.Join(".", parts, 0, i + 1);
+                    segmentEnd = name.IndexOf('.', start);
+                    var keyEnd = segmentEnd < 0 ? name.Length : segmentEnd;
+                    var key = name.Substring(0, keyEnd);
+                    var displayName = name.Substring(start, keyEnd - start);
 
                     if (!nodeMap.TryGetValue(key, out var item))
                     {
-                        item = new GameplayTagDropdownItem(parts[i], key);
+                        item = new GameplayTagDropdownItem(displayName, key);
                         nodeMap[key] = item;
                         parentItem.AddChild(item);
                     }
 
+                    if (parentItem is GameplayTagDropdownItem parentTagItem)
+                        parentKeys.Add(parentTagItem.FullPath);
+
                     parentItem = item;
+
+                    if (segmentEnd < 0)
+                        break;
+
+                    start = segmentEnd + 1;
                 }
             }
 
-            // Second pass: add a selectable "[Select]" child to non-leaf nodes
-            // so that parent tags can be picked directly
-            var leafPaths = new HashSet<string>(names);
-            foreach (var kvp in nodeMap)
+            foreach (var parentKey in parentKeys)
             {
-                var node = kvp.Value;
-                var path = kvp.Key;
-
-                // A node is non-leaf if any other path starts with "path."
-                var isParent = false;
-                foreach (var other in names)
-                {
-                    if (other.Length > path.Length
-                        && other.StartsWith(path)
-                        && other[path.Length] == '.')
-                    {
-                        isParent = true;
-                        break;
-                    }
-                }
-
-                if (isParent)
-                {
-                    var selectItem = new GameplayTagDropdownItem($"(select {node.name})", path);
-                    node.AddChild(selectItem);
-                }
+                var node = nodeMap[parentKey];
+                node.AddChild(new GameplayTagDropdownItem($"(select {node.name})", parentKey));
             }
 
             return root;
@@ -99,14 +88,37 @@ namespace Rubickanov.GameplayTags.Editor
                 _onSelected(tagItem.FullPath);
         }
 
-        private static GameplayTagAsset? FindTagAsset()
+        private static IReadOnlyList<string> CollectAllTagNames()
         {
             var guids = AssetDatabase.FindAssets("t:GameplayTagAsset");
             if (guids.Length == 0)
-                return null;
+                return Array.Empty<string>();
 
-            var path = AssetDatabase.GUIDToAssetPath(guids[0]);
-            return AssetDatabase.LoadAssetAtPath<GameplayTagAsset>(path);
+            var merged = new List<string>();
+            var seen = new HashSet<string>();
+
+            for (var i = 0; i < guids.Length; i++)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                var asset = AssetDatabase.LoadAssetAtPath<GameplayTagAsset>(path);
+                if (asset == null)
+                    continue;
+
+                foreach (var tagPath in asset.TagPaths)
+                {
+                    if (string.IsNullOrWhiteSpace(tagPath))
+                        continue;
+
+                    if (seen.Add(tagPath))
+                        merged.Add(tagPath);
+                }
+            }
+
+            if (merged.Count == 0)
+                return Array.Empty<string>();
+
+            var registry = new GameplayTagRegistry(merged);
+            return registry.GetAllNames();
         }
 
         private sealed class GameplayTagDropdownItem : AdvancedDropdownItem

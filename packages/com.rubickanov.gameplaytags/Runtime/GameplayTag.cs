@@ -23,6 +23,8 @@ namespace Rubickanov.GameplayTags
 
         /// <summary>
         /// Hierarchical match: returns true if this tag is or descends from <paramref name="parent"/>.
+        /// Requires an installed registry; throws <see cref="InvalidOperationException"/> otherwise
+        /// (except when either operand is <see cref="None"/>, which short-circuits to false).
         /// </summary>
         public bool Matches(GameplayTag parent)
         {

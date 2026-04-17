@@ -73,6 +73,9 @@ The actual working directory when Claude starts is `unity-project-pckgs/`, so pa
 - **`link.sh <project> [local|remote|status]`** switches a *consumer* project's manifest between local file paths (dev) and git URLs (release). Don't run it against `unity-project-pckgs` itself — that sandbox stays local.
 - **`docs/generate.sh`** regenerates the DocFX site. `docs/docfx.json`, `docs/index.md`, `docs/toc.yml`, `docs/guides/toc.yml`, `docs/api/index.md` are regenerated on every run — don't hand-edit them.
 - **Bumping a package version:** edit `packages/com.rubickanov.<name>/package.json`.
+- **No LINQ in runtime hot paths.** `System.Linq` is banned in `Runtime/` code that can fire per-tick / per-frame / per-entity — boxed enumerators and closure captures generate GC pressure Unity's main loop can't afford. Use `foreach`, hand-rolled loops, pooled `List<T>`, or a `struct Enumerator GetEnumerator()` pattern for public collection types.
+  - **Cold-path exception:** LINQ is acceptable in scan/reflection/spawn-time code that (1) runs at most once per type per session and (2) caches its result. Examples: `ReplicationScanner` building field metadata on first aspect discovery, reflection-driven factory setup. The allocation cost amortizes to zero over a game session and code clarity wins.
+  - **Tests may use LINQ freely.** Don't strip `.ToList()` / `.Any()` / `.Where()` out of test files during refactors.
 
 ## Tests
 

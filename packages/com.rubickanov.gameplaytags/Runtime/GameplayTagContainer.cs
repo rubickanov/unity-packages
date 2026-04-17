@@ -11,6 +11,7 @@ namespace Rubickanov.GameplayTags
     public sealed class GameplayTagContainer : IEnumerable<GameplayTag>
     {
         private readonly List<int> _indices;
+        private int _version;
 
         /// <summary>Number of tags in the container.</summary>
         public int Count => _indices.Count;
@@ -48,6 +49,7 @@ namespace Rubickanov.GameplayTags
                 return; // already present
 
             _indices.Insert(~insertIndex, tag.Index);
+            _version++;
         }
 
         /// <summary>Removes a tag. Returns true if it was present.</summary>
@@ -58,12 +60,17 @@ namespace Rubickanov.GameplayTags
                 return false;
 
             _indices.RemoveAt(index);
+            _version++;
             return true;
         }
 
         public void Clear()
         {
+            if (_indices.Count == 0)
+                return;
+
             _indices.Clear();
+            _version++;
         }
 
         /// <summary>
@@ -107,6 +114,9 @@ namespace Rubickanov.GameplayTags
             return true;
         }
 
+        /// <inheritdoc cref="HasAll(GameplayTagContainer)"/>
+        public bool HasAll(ReadOnlyGameplayTagContainer other) => HasAll(other.Source);
+
         /// <summary>Returns true if this container satisfies at least one tag in <paramref name="other"/> (hierarchical). Empty other returns false.</summary>
         public bool HasAny(GameplayTagContainer other)
         {
@@ -121,6 +131,9 @@ namespace Rubickanov.GameplayTags
 
             return false;
         }
+
+        /// <inheritdoc cref="HasAny(GameplayTagContainer)"/>
+        public bool HasAny(ReadOnlyGameplayTagContainer other) => HasAny(other.Source);
 
         /// <summary>Returns true if this container contains every exact tag in <paramref name="other"/>. Empty other returns true.</summary>
         public bool HasAllExact(GameplayTagContainer other)
@@ -137,6 +150,9 @@ namespace Rubickanov.GameplayTags
             return true;
         }
 
+        /// <inheritdoc cref="HasAllExact(GameplayTagContainer)"/>
+        public bool HasAllExact(ReadOnlyGameplayTagContainer other) => HasAllExact(other.Source);
+
         /// <summary>Returns true if this container contains at least one exact tag from <paramref name="other"/>. Empty other returns false.</summary>
         public bool HasAnyExact(GameplayTagContainer other)
         {
@@ -151,6 +167,9 @@ namespace Rubickanov.GameplayTags
 
             return false;
         }
+
+        /// <inheritdoc cref="HasAnyExact(GameplayTagContainer)"/>
+        public bool HasAnyExact(ReadOnlyGameplayTagContainer other) => HasAnyExact(other.Source);
 
         public override string ToString()
         {
@@ -167,40 +186,61 @@ namespace Rubickanov.GameplayTags
             return sb.ToString();
         }
 
-        public Enumerator GetEnumerator() => new(_indices);
+        public Enumerator GetEnumerator() => new(this);
 
         IEnumerator<GameplayTag> IEnumerable<GameplayTag>.GetEnumerator() => GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-        /// <summary>Zero-alloc enumerator for <see cref="GameplayTagContainer"/>.</summary>
+        /// <summary>
+        /// Zero-alloc enumerator for <see cref="GameplayTagContainer"/>.
+        /// Throws <see cref="System.InvalidOperationException"/> if the container is mutated during iteration.
+        /// </summary>
         public struct Enumerator : IEnumerator<GameplayTag>
         {
-            private readonly List<int> _indices;
+            private readonly GameplayTagContainer _owner;
+            private readonly int _version;
             private int _position;
 
-            internal Enumerator(List<int> indices)
+            internal Enumerator(GameplayTagContainer owner)
             {
-                _indices = indices;
+                _owner = owner;
+                _version = owner._version;
                 _position = -1;
             }
 
-            public GameplayTag Current => new(_indices[_position]);
+            public GameplayTag Current
+            {
+                get
+                {
+                    CheckVersion();
+                    return new GameplayTag(_owner._indices[_position]);
+                }
+            }
 
             object IEnumerator.Current => Current;
 
             public bool MoveNext()
             {
+                CheckVersion();
                 _position++;
-                return _position < _indices.Count;
+                return _position < _owner._indices.Count;
             }
 
             public void Reset()
             {
+                CheckVersion();
                 _position = -1;
             }
 
             public void Dispose() { }
+
+            private void CheckVersion()
+            {
+                if (_owner._version != _version)
+                    throw new System.InvalidOperationException(
+                        "GameplayTagContainer was modified during enumeration.");
+            }
         }
     }
 }
