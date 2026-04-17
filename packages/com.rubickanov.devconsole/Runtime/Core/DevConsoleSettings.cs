@@ -19,6 +19,9 @@ namespace Rubickanov.DevConsole
 
         private static DevConsoleSettings? _instance;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => _instance = null;
+
         public static DevConsoleSettings GetOrCreate()
         {
             if (_instance != null) return _instance;
