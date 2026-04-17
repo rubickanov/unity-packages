@@ -6,6 +6,8 @@ namespace Rubickanov.UI.UIToolkit
     public sealed class UIToolkitAnimationTarget : IAnimationTarget
     {
         private readonly VisualElement _element;
+        private Vector2 _translate;
+        private Vector2 _scale = Vector2.one;
 
         public UIToolkitAnimationTarget(VisualElement element)
         {
@@ -20,26 +22,26 @@ namespace Rubickanov.UI.UIToolkit
 
         public float TranslateX
         {
-            get => _element.resolvedStyle.translate.x;
-            set => _element.style.translate = new Translate(value, TranslateY);
+            get => _translate.x;
+            set { _translate.x = value; _element.style.translate = new Translate(_translate.x, _translate.y); }
         }
 
         public float TranslateY
         {
-            get => _element.resolvedStyle.translate.y;
-            set => _element.style.translate = new Translate(TranslateX, value);
+            get => _translate.y;
+            set { _translate.y = value; _element.style.translate = new Translate(_translate.x, _translate.y); }
         }
 
         public float ScaleX
         {
-            get => _element.resolvedStyle.scale.value.x;
-            set => _element.style.scale = new StyleScale(new Scale(new Vector3(value, ScaleY, 1f)));
+            get => _scale.x;
+            set { _scale.x = value; _element.style.scale = new StyleScale(new Scale(new Vector3(_scale.x, _scale.y, 1f))); }
         }
 
         public float ScaleY
         {
-            get => _element.resolvedStyle.scale.value.y;
-            set => _element.style.scale = new StyleScale(new Scale(new Vector3(ScaleX, value, 1f)));
+            get => _scale.y;
+            set { _scale.y = value; _element.style.scale = new StyleScale(new Scale(new Vector3(_scale.x, _scale.y, 1f))); }
         }
 
         public void SetVisible(bool visible)
@@ -49,6 +51,8 @@ namespace Rubickanov.UI.UIToolkit
 
         public void ResetAnimationState()
         {
+            _translate = Vector2.zero;
+            _scale = Vector2.one;
             _element.style.opacity = StyleKeyword.Null;
             _element.style.translate = StyleKeyword.Null;
             _element.style.scale = StyleKeyword.Null;

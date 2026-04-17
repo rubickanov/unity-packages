@@ -17,7 +17,9 @@ namespace Rubickanov.UI.UIToolkit
         public TooltipService(UIDocument document, StyleSheet? defaultStyleSheet = null)
         {
             _defaultStyleSheet = defaultStyleSheet;
-            _overlayLayer = document.rootVisualElement.Q("overlay-layer");
+            _overlayLayer = document.rootVisualElement.Q("overlay-layer")
+                ?? throw new InvalidOperationException(
+                    "TooltipService requires an 'overlay-layer' element in the UIDocument root.");
 
             _container = new VisualElement();
             _container.name = "tooltip-container";

@@ -19,8 +19,16 @@ namespace Rubickanov.UI
 
         public void Dispose()
         {
-            foreach (var action in _cleanupActions) action();
+            List<Exception>? errors = null;
+            for (int i = _cleanupActions.Count - 1; i >= 0; i--)
+            {
+                try { _cleanupActions[i](); }
+                catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
+            }
             _cleanupActions.Clear();
+
+            if (errors != null)
+                throw new AggregateException(errors);
         }
     }
 }

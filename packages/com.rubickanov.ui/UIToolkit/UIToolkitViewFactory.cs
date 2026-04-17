@@ -22,10 +22,20 @@ namespace Rubickanov.UI.UIToolkit
             _loadUxml = loadUxml;
             _serviceResolver = serviceResolver;
             var root = document.rootVisualElement;
-            _screenLayer = root.Q("screen-layer");
-            _hudLayer = root.Q("hud-layer");
-            _popupLayer = root.Q("popup-layer");
-            _overlayLayer = root.Q("overlay-layer");
+            _screenLayer = RequireLayer(root, "screen-layer");
+            _hudLayer = RequireLayer(root, "hud-layer");
+            _popupLayer = RequireLayer(root, "popup-layer");
+            _overlayLayer = RequireLayer(root, "overlay-layer");
+        }
+
+        private static VisualElement RequireLayer(VisualElement root, string name)
+        {
+            var element = root.Q(name);
+            if (element == null)
+                throw new InvalidOperationException(
+                    $"UIDocument root is missing required child '{name}'. " +
+                    "Expected elements: screen-layer, hud-layer, popup-layer, overlay-layer.");
+            return element;
         }
 
         public async UniTask<IView> Create<T>(UILayer layer) where T : class, IView
@@ -37,6 +47,9 @@ namespace Rubickanov.UI.UIToolkit
                 if (uitkView.UxmlName != null)
                 {
                     var (asset, handle) = await _loadUxml(uitkView.UxmlName);
+                    if (asset == null)
+                        throw new InvalidOperationException(
+                            $"Failed to load UXML '{uitkView.UxmlName}' for view {typeof(T).Name}.");
                     _uxmlHandles[view] = handle;
                     uitkView.Root = asset.CloneTree();
                 }

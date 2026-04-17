@@ -64,9 +64,18 @@ namespace Rubickanov.UI.UIToolkit
 
         public void Destroy()
         {
-            Hide();
+            if (IsVisible)
+            {
+                Hide();
+            }
+            else
+            {
+                ForceUnbind();
+            }
             Root.RemoveFromHierarchy();
         }
+
+        internal virtual void ForceUnbind() { }
 
         protected abstract UniTask OnBind(ViewModelBase viewModel);
         protected virtual void OnInitialize() { }

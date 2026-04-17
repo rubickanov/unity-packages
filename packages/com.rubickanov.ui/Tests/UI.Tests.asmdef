@@ -1,0 +1,26 @@
+{
+    "name": "UI.Tests",
+    "rootNamespace": "Rubickanov.UI.Tests",
+    "references": [
+        "GUID:83ac5b117fcc42099f5c21210c1a4a4e",
+        "GUID:345547c051ba483f94a27a51375c9860",
+        "GUID:f8fa371428e8df112b0162bd1e4301bb",
+        "GUID:f51ebe6a0ceec4240a699833d6309b23"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "R3.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

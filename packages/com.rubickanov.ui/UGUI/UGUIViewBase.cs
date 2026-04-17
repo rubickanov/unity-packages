@@ -74,9 +74,18 @@ namespace Rubickanov.UI.UGUI
         {
             if (_destroyed) return;
             _destroyed = true;
-            Hide();
+            if (IsVisible)
+            {
+                Hide();
+            }
+            else
+            {
+                ForceUnbind();
+            }
             Object.Destroy(gameObject);
         }
+
+        internal virtual void ForceUnbind() { }
 
         private void ConfigureCanvasGroup(bool visible)
         {

@@ -36,9 +36,16 @@ namespace Rubickanov.UI.UGUI
             ViewModel = default!;
         }
 
+        internal override void ForceUnbind()
+        {
+            if (ViewModel is null) return;
+            Unbind();
+        }
+
         private void UnbindAll()
         {
             _disposables.Dispose();
+            _disposables = new DisposableBag();
             foreach (var unbind in _unbindActions) unbind();
             _unbindActions.Clear();
         }
@@ -48,8 +55,9 @@ namespace Rubickanov.UI.UGUI
         protected virtual void OnUnbind() { }
 
         public T GetService<T>() where T : class
-            => ServiceResolver?.Resolve<T>()
-               ?? throw new InvalidOperationException($"Service {typeof(T).Name} is not registered in IViewServiceResolver.");
+            => ServiceResolver is null
+                ? throw new InvalidOperationException("IViewServiceResolver is not set on this view.")
+                : ServiceResolver.Require<T>();
 
         public void BindObservable<T>(Observable<T> observable, Action<T> handler)
             => Bind(observable, handler);
