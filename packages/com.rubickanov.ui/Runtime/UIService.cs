@@ -16,7 +16,17 @@ namespace Rubickanov.UI
         public UIService(IViewFactory factory)
         {
             _factory = factory;
+#if UNITY_EDITOR
+            DebugRegistry.Register(this);
+#endif
         }
+
+#if UNITY_EDITOR
+        public IReadOnlyDictionary<Type, IView> DebugViews => _views;
+        public IReadOnlyDictionary<Type, UILayer> DebugViewLayers => _viewLayers;
+        public IView? DebugActiveScreen => _activeScreen;
+        public IReadOnlyList<IView> DebugPopupStack => _popupStack;
+#endif
 
         public void SetVisibilityCallback(Action<bool> callback) => _onUIVisibilityChanged = callback;
 
@@ -49,7 +59,13 @@ namespace Rubickanov.UI
             _viewLayers.Remove(type);
         }
 
-        public T Get<T>() where T : IView => (T)_views[typeof(T)];
+        public T Get<T>() where T : IView
+        {
+            if (!_views.TryGetValue(typeof(T), out var view))
+                throw new InvalidOperationException(
+                    $"View {typeof(T).Name} is not registered in UIService.");
+            return (T)view;
+        }
 
         public async UniTask Show<T>(ViewModelBase viewModel) where T : IView
         {
@@ -60,15 +76,39 @@ namespace Rubickanov.UI
             if (layer == UILayer.Screen)
             {
                 _activeScreen?.Hide();
-                await view.Bind(viewModel);
-                await view.ShowAsync();
                 _activeScreen = view;
+                try
+                {
+                    await view.Bind(viewModel);
+                    await view.ShowAsync();
+                }
+                catch
+                {
+                    view.Hide();
+                    _activeScreen = null;
+                    throw;
+                }
             }
             else
             {
-                await view.Bind(viewModel);
-                await view.ShowAsync();
+                if (_popupStack.Contains(view))
+                {
+                    view.Hide();
+                    _popupStack.Remove(view);
+                }
+
                 _popupStack.Add(view);
+                try
+                {
+                    await view.Bind(viewModel);
+                    await view.ShowAsync();
+                }
+                catch
+                {
+                    view.Hide();
+                    _popupStack.Remove(view);
+                    throw;
+                }
             }
 
             _onUIVisibilityChanged?.Invoke(true);
@@ -170,6 +210,21 @@ namespace Rubickanov.UI
             _onUIVisibilityChanged?.Invoke(false);
         }
 
+        public async UniTask HideAllAsync(float duration = 0.3f)
+        {
+            if (_activeScreen == null && _popupStack.Count == 0) return;
+
+            var tasks = new List<UniTask>(_popupStack.Count + 1);
+            if (_activeScreen != null) tasks.Add(_activeScreen.HideAsync(duration));
+            foreach (var popup in _popupStack) tasks.Add(popup.HideAsync(duration));
+
+            await UniTask.WhenAll(tasks);
+
+            _activeScreen = null;
+            _popupStack.Clear();
+            _onUIVisibilityChanged?.Invoke(false);
+        }
+
         public void Dispose()
         {
             foreach (var view in _views.Values)
@@ -182,6 +237,18 @@ namespace Rubickanov.UI
             _viewLayers.Clear();
             _popupStack.Clear();
             _activeScreen = null;
+#if UNITY_EDITOR
+            DebugRegistry.Unregister(this);
+#endif
         }
     }
+
+#if UNITY_EDITOR
+    public static class DebugRegistry
+    {
+        public static readonly List<UIService> Instances = new();
+        public static void Register(UIService service) => Instances.Add(service);
+        public static void Unregister(UIService service) => Instances.Remove(service);
+    }
+#endif
 }

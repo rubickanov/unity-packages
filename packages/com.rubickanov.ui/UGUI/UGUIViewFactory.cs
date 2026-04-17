@@ -33,6 +33,10 @@ namespace Rubickanov.UI.UGUI
             var prefabName = typeof(T).Name;
 
             var prefab = await _loadPrefab(prefabName);
+            if (prefab == null)
+                throw new InvalidOperationException(
+                    $"Failed to load prefab '{prefabName}' for view {typeof(T).Name}.");
+
             var instance = UnityEngine.Object.Instantiate(prefab, layerTransform);
             instance.name = prefabName;
 

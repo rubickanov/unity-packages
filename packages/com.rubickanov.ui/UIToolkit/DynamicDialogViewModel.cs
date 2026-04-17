@@ -27,7 +27,14 @@ namespace Rubickanov.UI.UIToolkit
             => _completion.TrySetResult(new DialogResult(buttonId, HasInput ? InputValue : null));
 
         public void CompleteWithLast()
-            => Complete(Buttons[^1].Id);
+        {
+            if (Buttons.Count == 0)
+            {
+                _completion.TrySetResult(new DialogResult(string.Empty, HasInput ? InputValue : null));
+                return;
+            }
+            Complete(Buttons[^1].Id);
+        }
     }
 
     public readonly struct ButtonConfig

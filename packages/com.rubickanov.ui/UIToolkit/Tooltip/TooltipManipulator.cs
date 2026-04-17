@@ -13,6 +13,7 @@ namespace Rubickanov.UI.UIToolkit
 
         private IVisualElementScheduledItem? _scheduledShow;
         private bool _isShowing;
+        private bool _cancelled;
 
         public TooltipManipulator(TooltipService service, string text, float delay = 0.3f)
         {
@@ -62,6 +63,7 @@ namespace Rubickanov.UI.UIToolkit
                 return;
             }
 
+            _cancelled = false;
             _scheduledShow = target.schedule.Execute(ShowTooltip).StartingIn((long)(_delay * 1000f));
         }
 
@@ -85,6 +87,7 @@ namespace Rubickanov.UI.UIToolkit
         private void ShowTooltip()
         {
             _scheduledShow = null;
+            if (_cancelled) return;
 
             if (_contentFactory != null)
                 _service.Show(target, _contentFactory());
@@ -98,6 +101,7 @@ namespace Rubickanov.UI.UIToolkit
 
         private void CancelScheduledShow()
         {
+            _cancelled = true;
             if (_scheduledShow != null)
             {
                 _scheduledShow.Pause();

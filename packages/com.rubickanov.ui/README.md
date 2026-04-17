@@ -18,9 +18,14 @@ IViewFactory (view creation + layer attachment)
 ├── UIToolkitViewFactory — UI Toolkit backend
 └── UGUIViewFactory      — UGUI backend
 
-IDialogService (confirm/alert/modal)
-├── UIToolkitDialogService — popup-based dialogs
+IDialogService (confirm/alert/modal/builder)
+├── UIToolkitDialogService — popup-based dialogs (DynamicPopup + DialogBuilder)
 └── NullDialogService      — no-op for server builds
+
+IViewServiceResolver (optional service lookup from views)
+
+SceneViewScopeService (scene-lifetime view registration)
+└── ScopedViewRegistration (manual disposable scope)
 
 TooltipService (hover tooltips on overlay layer)
 TooltipManipulator (VisualElement hover behavior)
@@ -177,11 +182,85 @@ public class PauseViewModel : ViewModelBase
 
 ### Dialogs
 
+Standard confirm / alert / modal helpers:
+
 ```csharp
 bool confirmed = await dialogs.ShowConfirm("Exit", "Are you sure?", "Quit", "Cancel");
 await dialogs.ShowAlert("Error", message);
 using var modal = dialogs.ShowModal("Loading", "Please wait...");
 ```
+
+Custom dialogs via `DialogBuilder` (UIToolkit backend only):
+
+```csharp
+var dialogs = (UIToolkitDialogService)dialogService;
+
+var result = await dialogs.CreateDialog("Rename")
+    .WithMessage("Enter a new name:")
+    .WithInput(placeholder: "name", defaultValue: currentName)
+    .AddButton("Cancel", "cancel")
+    .AddButton("Save", "save", isPrimary: true)
+    .ShowAsync();
+
+if (result.ButtonId == "save")
+    rename(result.InputValue);
+```
+
+Supported builder options: `WithMessage`, `WithImage(Texture2D)`, `WithContent(Func<VisualElement>)`, `WithInput`, `AddButton(text, id, isPrimary)`. Pressing **Esc** completes the dialog with the last button (or an empty result if no buttons were added).
+
+Styling classes used by `DynamicPopup` are exposed through static `DialogStyle` fields (`Overlay`, `Panel`, `Title`, `Image`, `Message`, `Content`, `Input`, `Buttons`, `Button`, `ButtonPrimary`). Override them before showing the first dialog if you need different CSS hooks.
+
+### Scene-scoped registration
+
+When multiple views belong to a scene, use `SceneViewScopeService` to auto-unregister them on scene exit:
+
+```csharp
+public class GameplayScene : IDisposable
+{
+    private readonly ScopedViewRegistration _views;
+
+    public GameplayScene(SceneViewScopeService scope)
+    {
+        _views = scope.Begin();  // disposes previous scope if any
+    }
+
+    public async UniTask Load()
+    {
+        await _views.Register<HudView>(UILayer.HUD);
+        await _views.Register<PausePopup>(UILayer.Popup);
+    }
+
+    public void Dispose() => _views.Dispose();  // unregisters both views
+}
+```
+
+Calling `Begin()` again disposes the previous scope automatically — one active scope per service.
+
+### Service resolution
+
+Views access services through `IViewServiceResolver` (implemented as an adapter over your DI container):
+
+```csharp
+public class VContainerServiceResolver : IViewServiceResolver
+{
+    private readonly IObjectResolver _container;
+    public VContainerServiceResolver(IObjectResolver container) => _container = container;
+    public T? Resolve<T>() where T : class => _container.Resolve<T>();
+}
+```
+
+Register it once in your DI setup. Inside views:
+
+```csharp
+protected override UniTask OnBind()
+{
+    var audio = GetService<IAudioService>();   // throws if not registered
+    audio.Play("hover");
+    return UniTask.CompletedTask;
+}
+```
+
+`GetService<T>` calls `IViewServiceResolver.Require<T>()` — throws `InvalidOperationException` if the service is missing. Use `Resolver.Resolve<T>()` directly when a null return is acceptable.
 
 ### Tooltips
 
@@ -313,7 +392,7 @@ builder.RegisterBuildCallback(resolver =>
 - **IView has no Root** — keeps the interface backend-agnostic. **UIToolkitViewBase** adds `VisualElement Root`, **UGUIViewBase** adds its own root.
 - **IViewFactory owns all DOM operations** — creation, UXML loading, layer attachment. Views do not manage their own DOM placement.
 - **UIService is backend-agnostic** — delegates to **IViewFactory**, uses `Action<bool>` callback for cursor state instead of depending on a cursor service.
-- **IDialogService is separate from IUIService** — modals are implemented as popup views (**ConfirmPopup**/**AlertPopup**), not inline VisualElements.
+- **IDialogService is separate from IUIService** — modals are implemented as a single popup view (**DynamicPopup**) driven by **DialogBuilder** + **DynamicDialogViewModel**, not inline VisualElements.
 - **UxmlLoader delegate instead of IAssetService** — **UIToolkitViewFactory** takes a `UxmlLoader` delegate, avoiding a hard dependency on any asset loading strategy.
 
 ## File Structure
@@ -327,11 +406,13 @@ com.rubickanov.ui/
 │   ├── IDialogService.cs
 │   ├── IViewAnimation.cs
 │   ├── IAnimationTarget.cs
+│   ├── IViewServiceResolver.cs
 │   ├── NoneAnimation.cs
 │   ├── UIService.cs
 │   ├── ViewModelBase.cs
 │   ├── UILayer.cs
 │   ├── ScopedViewRegistration.cs
+│   ├── SceneViewScopeService.cs
 │   ├── NullUIService.cs
 │   └── NullDialogService.cs
 ├── UIToolkit/
@@ -340,10 +421,11 @@ com.rubickanov.ui/
 │   ├── UIToolkitViewFactory.cs
 │   ├── UIToolkitAnimationTarget.cs
 │   ├── UIToolkitDialogService.cs
-│   ├── ConfirmPopup.cs / ConfirmPopup.uxml
-│   ├── AlertPopup.cs / AlertPopup.uxml
-│   ├── ConfirmViewModel.cs
-│   ├── AlertViewModel.cs
+│   ├── DialogBuilder.cs
+│   ├── DialogResult.cs
+│   ├── DialogStyle.cs
+│   ├── DynamicPopup.cs
+│   ├── DynamicDialogViewModel.cs
 │   └── Tooltip/
 │       ├── TooltipService.cs
 │       ├── TooltipManipulator.cs

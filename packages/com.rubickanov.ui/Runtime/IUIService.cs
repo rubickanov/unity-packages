@@ -15,5 +15,6 @@ namespace Rubickanov.UI
         void HideTop();
         UniTask HideTopAsync(float duration = 0.3f);
         void HideAll();
+        UniTask HideAllAsync(float duration = 0.3f);
     }
 }
