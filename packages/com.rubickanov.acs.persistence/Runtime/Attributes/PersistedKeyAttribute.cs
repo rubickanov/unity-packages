@@ -18,8 +18,10 @@ namespace Rubickanov.ACS.Runtime.Persistence
 
         public PersistedKeyAttribute(string key)
         {
+            // Trim first so "  hero  " doesn't silently mismatch "hero" at lookup time.
+            key = key?.Trim();
             if (string.IsNullOrEmpty(key))
-                throw new ArgumentException("[PersistedKey] key must be a non-empty string.", nameof(key));
+                throw new ArgumentException("[PersistedKey] key must be a non-empty, non-whitespace string.", nameof(key));
             Key = key;
         }
     }

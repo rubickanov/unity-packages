@@ -9,6 +9,7 @@ namespace Rubickanov.StateMachine
         private const int MaxTransitionDepth = 16;
 
         private readonly Dictionary<TKey, IState> _states;
+        private readonly IEqualityComparer<TKey> _comparer;
 
         private IState? _currentState;
         private TKey _currentKey = default!;
@@ -21,24 +22,18 @@ namespace Rubickanov.StateMachine
         public event Action<TKey, TKey>? StateChanged;
 
         public StateMachine(int capacity = 4)
-        {
-            _states = new Dictionary<TKey, IState>(capacity);
-        }
+            : this(EqualityComparer<TKey>.Default, capacity) { }
 
         public StateMachine(IEqualityComparer<TKey> comparer, int capacity = 4)
         {
+            _comparer = comparer;
             _states = new Dictionary<TKey, IState>(capacity, comparer);
         }
 
         public TKey CurrentKey
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                if (!_isStarted)
-                    throw new InvalidOperationException("State machine has not been started.");
-                return _currentKey;
-            }
+            get => _currentKey;
         }
 
         public IState? CurrentState
@@ -53,10 +48,22 @@ namespace Rubickanov.StateMachine
             get => _isStarted;
         }
 
+        public bool HasPendingTransition
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _hasPendingTransition;
+        }
+
+        public TKey PendingKey
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _hasPendingTransition ? _pendingKey : default!;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsInState(TKey key)
         {
-            return _isStarted && EqualityComparer<TKey>.Default.Equals(_currentKey, key);
+            return _isStarted && _comparer.Equals(_currentKey, key);
         }
 
         public void AddState(TKey key, IState state)
@@ -70,6 +77,11 @@ namespace Rubickanov.StateMachine
         public T? GetState<T>(TKey key) where T : class, IState
         {
             return _states.TryGetValue(key, out var state) ? state as T : null;
+        }
+
+        public T? GetCurrentState<T>() where T : class, IState
+        {
+            return _currentState as T;
         }
 
         public void Start(TKey initialState)
@@ -89,7 +101,11 @@ namespace Rubickanov.StateMachine
             state.OnEnter();
             _isTransitioning = false;
 
-            ProcessPendingTransition();
+            if (_hasPendingTransition)
+            {
+                _hasPendingTransition = false;
+                PerformTransition(_pendingKey);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -121,6 +137,9 @@ namespace Rubickanov.StateMachine
             if (!_states.ContainsKey(key))
                 throw new ArgumentException($"State '{key}' has not been registered.", nameof(key));
 
+            if (_comparer.Equals(_currentKey, key))
+                return;
+
             if (_isTransitioning)
             {
                 _hasPendingTransition = true;
@@ -133,44 +152,43 @@ namespace Rubickanov.StateMachine
 
         private void PerformTransition(TKey key)
         {
-            _transitionDepth++;
-            if (_transitionDepth > MaxTransitionDepth)
+            var nextKey = key;
+
+            while (true)
             {
-                _transitionDepth = 0;
+                _transitionDepth++;
+                if (_transitionDepth > MaxTransitionDepth)
+                {
+                    _transitionDepth = 0;
+                    _hasPendingTransition = false;
+                    throw new InvalidOperationException(
+                        $"Maximum transition depth ({MaxTransitionDepth}) exceeded. Possible infinite loop detected.");
+                }
+
+                var previousKey = _currentKey;
+                var previousState = _currentState!;
+
+                _isTransitioning = true;
+                previousState.OnExit();
+
+                var nextState = _states[nextKey];
+                _currentKey = nextKey;
+                _currentState = nextState;
+
+                nextState.OnEnter();
+                _isTransitioning = false;
+
+                StateChanged?.Invoke(previousKey, nextKey);
+
+                if (!_hasPendingTransition)
+                {
+                    _transitionDepth = 0;
+                    return;
+                }
+
                 _hasPendingTransition = false;
-                throw new InvalidOperationException(
-                    $"Maximum transition depth ({MaxTransitionDepth}) exceeded. Possible infinite loop detected.");
+                nextKey = _pendingKey;
             }
-
-            var previousKey = _currentKey;
-            var previousState = _currentState!;
-
-            _isTransitioning = true;
-            previousState.OnExit();
-
-            var nextState = _states[key];
-            _currentKey = key;
-            _currentState = nextState;
-
-            nextState.OnEnter();
-            _isTransitioning = false;
-
-            StateChanged?.Invoke(previousKey, key);
-
-            ProcessPendingTransition();
-        }
-
-        private void ProcessPendingTransition()
-        {
-            if (!_hasPendingTransition)
-            {
-                _transitionDepth = 0;
-                return;
-            }
-
-            _hasPendingTransition = false;
-            var pendingKey = _pendingKey;
-            PerformTransition(pendingKey);
         }
     }
 }

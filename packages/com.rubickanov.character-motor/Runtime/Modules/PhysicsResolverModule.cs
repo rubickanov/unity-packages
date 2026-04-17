@@ -67,8 +67,13 @@ namespace Rubickanov.Motor.Modules
                 Vector3 currentOnGround = Vector3.ProjectOnPlane(Body.Velocity, State.GroundNormal);
                 Vector3 diff = target - currentOnGround;
 
-                // Counter-movement: brake aggressively when no input
-                float accel = State.MoveInput.sqrMagnitude < 0.01f
+                // Decel when no input OR when target reduces speed along current velocity direction
+                // (reversal). Accel when starting or pushing further in current direction.
+                float currentSpeed = currentOnGround.magnitude;
+                bool noInput = State.MoveInput.sqrMagnitude < 0.01f;
+                bool targetReducesSpeed = currentSpeed > 0.001f
+                    && Vector3.Dot(target, currentOnGround) / currentSpeed < currentSpeed;
+                float accel = (noInput || targetReducesSpeed)
                     ? _deceleration
                     : _acceleration;
 

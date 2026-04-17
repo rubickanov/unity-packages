@@ -12,5 +12,6 @@ namespace Rubickanov.Storage
         UniTask SetString(string key, string value);
         bool HasKey(string key);
         UniTask DeleteKey(string key);
+        UniTask Clear();
     }
 }

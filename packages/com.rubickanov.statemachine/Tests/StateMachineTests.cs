@@ -100,9 +100,21 @@ namespace Rubickanov.StateMachine.Tests
         }
 
         [Test]
-        public void CurrentKey_BeforeStart_Throws()
+        public void CurrentKey_BeforeStart_ReturnsDefault()
         {
-            Assert.Throws<InvalidOperationException>(() => { var _ = _fsm.CurrentKey; });
+            Assert.AreEqual(default(Key), _fsm.CurrentKey);
+            Assert.IsNull(_fsm.CurrentState);
+        }
+
+        [Test]
+        public void CurrentKey_AfterStop_ReturnsDefault()
+        {
+            _fsm.AddState(Key.A, NewState("A"));
+            _fsm.Start(Key.A);
+            _fsm.Stop();
+
+            Assert.AreEqual(default(Key), _fsm.CurrentKey);
+            Assert.IsNull(_fsm.CurrentState);
         }
 
         [Test]
@@ -343,11 +355,8 @@ namespace Rubickanov.StateMachine.Tests
         }
 
         [Test]
-        public void CustomComparer_IsUsedForStateLookup()
+        public void CustomComparer_IsUsedForStateLookupAndIsInState()
         {
-            // Note: the custom comparer affects dictionary lookups (AddState/Start/SetState)
-            // only — IsInState uses EqualityComparer<TKey>.Default (StateMachine.cs:59), so
-            // this test pins the lookup behavior by checking CurrentState identity, not IsInState.
             var fsm = new StateMachine<string>(StringComparer.OrdinalIgnoreCase);
             var state = new RecordingState("S", new List<string>());
             fsm.AddState("State", state);
@@ -356,6 +365,113 @@ namespace Rubickanov.StateMachine.Tests
 
             Assert.IsTrue(fsm.IsStarted);
             Assert.AreSame(state, fsm.CurrentState);
+            Assert.IsTrue(fsm.IsInState("state"));
+            Assert.IsTrue(fsm.IsInState("State"));
+            Assert.IsTrue(fsm.IsInState("STATE"));
+        }
+
+        [Test]
+        public void SetState_ToCurrentKey_IsNoOp()
+        {
+            var a = NewState("A");
+            _fsm.AddState(Key.A, a);
+            _fsm.Start(Key.A);
+            _log.Clear();
+
+            _fsm.SetState(Key.A);
+
+            CollectionAssert.IsEmpty(_log);
+            Assert.AreEqual(Key.A, _fsm.CurrentKey);
+            Assert.AreEqual(1, a.EnterCount);
+            Assert.AreEqual(0, a.ExitCount);
+        }
+
+        [Test]
+        public void SetState_MultipleCallsDuringOnEnter_LastWriteWins()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            var c = NewState("C");
+            var d = NewState("D");
+            b.OnEnterHook = () =>
+            {
+                _fsm.SetState(Key.C);
+                _fsm.SetState(Key.D);
+            };
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+            _fsm.AddState(Key.C, c);
+            _fsm.AddState(Key.D, d);
+            _fsm.Start(Key.A);
+            _log.Clear();
+
+            _fsm.SetState(Key.B);
+
+            CollectionAssert.AreEqual(
+                new[] { "A:Exit", "B:Enter", "B:Exit", "D:Enter" },
+                _log);
+            Assert.AreEqual(Key.D, _fsm.CurrentKey);
+            Assert.AreEqual(0, c.EnterCount);
+        }
+
+        [Test]
+        public void Update_CalledDuringOnEnter_TicksNewState()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            b.OnEnterHook = () => _fsm.Update(0.016f);
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+            _fsm.Start(Key.A);
+            _log.Clear();
+
+            _fsm.SetState(Key.B);
+
+            CollectionAssert.AreEqual(
+                new[] { "A:Exit", "B:Enter", "B:Update" },
+                _log);
+            Assert.AreEqual(1, b.UpdateCount);
+            Assert.AreEqual(0, a.UpdateCount);
+        }
+
+        [Test]
+        public void HasPendingTransition_DuringOnEnter_ReflectsQueuedKey()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            var c = NewState("C");
+            bool pendingDuringEnter = false;
+            Key pendingKeyDuringEnter = default;
+            b.OnEnterHook = () =>
+            {
+                _fsm.SetState(Key.C);
+                pendingDuringEnter = _fsm.HasPendingTransition;
+                pendingKeyDuringEnter = _fsm.PendingKey;
+            };
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+            _fsm.AddState(Key.C, c);
+            _fsm.Start(Key.A);
+
+            _fsm.SetState(Key.B);
+
+            Assert.IsTrue(pendingDuringEnter);
+            Assert.AreEqual(Key.C, pendingKeyDuringEnter);
+            Assert.IsFalse(_fsm.HasPendingTransition);
+        }
+
+        [Test]
+        public void GetCurrentState_ReturnsCurrentStateAsType()
+        {
+            var a = NewState("A");
+            _fsm.AddState(Key.A, a);
+            _fsm.Start(Key.A);
+
+            Assert.AreSame(a, _fsm.GetCurrentState<RecordingState>());
+            Assert.IsNull(_fsm.GetCurrentState<OtherState>());
         }
 
         private class RecordingState : StateBase

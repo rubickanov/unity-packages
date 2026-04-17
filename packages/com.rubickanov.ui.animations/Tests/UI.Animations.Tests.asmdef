@@ -1,0 +1,25 @@
+{
+    "name": "UI.Animations.Tests",
+    "rootNamespace": "Rubickanov.UI.Animations.Tests",
+    "references": [
+        "GUID:9b0a6dbecb870fbc6bd3416eec435188",
+        "GUID:83ac5b117fcc42099f5c21210c1a4a4e",
+        "GUID:f51ebe6a0ceec4240a699833d6309b23",
+        "GUID:3b570a5146f9d4f0fa107ed4559471a3"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -121,6 +122,37 @@ namespace Rubickanov.StateMachine.Tests
 
             Assert.AreEqual(Combat.Aiming, combatSub.CurrentKey);
             CollectionAssert.AreEqual(new[] { "Menu:Exit", "Aim:Enter" }, _log);
+        }
+
+        [Test]
+        public async Task ParentTransitionIntoSub_CancellingTokenAbortsChildEnter()
+        {
+            var cts = new CancellationTokenSource();
+            var childStarted = false;
+            var childCompleted = false;
+
+            var slowChild = new AsyncCallbackState(onEnterAsync: async ct =>
+            {
+                childStarted = true;
+                var tcs = new UniTaskCompletionSource();
+                ct.Register(() => tcs.TrySetCanceled());
+                await tcs.Task;
+                childCompleted = true;
+            });
+
+            var parent = new AsyncStateMachine<Parent>();
+            var sub = new AsyncSubStateMachine<Combat>(Combat.Aiming);
+            sub.AddState(Combat.Aiming, slowChild);
+            parent.AddState(Parent.Menu, new AsyncCallbackState());
+            parent.AddState(Parent.Combat, sub);
+            await parent.StartAsync(Parent.Menu);
+
+            var go = parent.SetStateAsync(Parent.Combat, cts.Token);
+            cts.Cancel();
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await go);
+            Assert.IsTrue(childStarted);
+            Assert.IsFalse(childCompleted);
         }
 
         [Test]

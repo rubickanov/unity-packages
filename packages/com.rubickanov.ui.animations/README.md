@@ -25,9 +25,13 @@ public class PausePopup : UIToolkitView<PauseViewModel>
 
 Animations trigger automatically when `UIService` calls `ShowAsync()` / `HideAsync()`.
 
+> **Important:** `PlayShowAsync` / `PlayHideAsync` return `UniTask` — you must `return`, `await`, or forget (`.Forget()`) the result. A bare call like `ViewAnimations.Fade.PlayShowAsync(target, 0.3f);` compiles but is dropped silently and the animation never plays.
+
 ## Usage
 
 ### Built-in Animations
+
+All factory properties return cached singleton instances — safe to call from hot paths without per-access allocations.
 
 | Factory Property | Animation | Show Ease | Hide Ease |
 |------------------|-----------|-----------|-----------|

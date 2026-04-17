@@ -5,5 +5,8 @@
   "description": "LitMotion-based view animations for UI Framework.",
   "unity": "2022.3",
   "author": { "name": "rubickanov" },
-  "keywords": [ "ui", "animation", "litmotion" ]
+  "keywords": [ "ui", "animation", "litmotion" ],
+  "dependencies": {
+    "com.rubickanov.ui": "1.0.0"
+  }
 }

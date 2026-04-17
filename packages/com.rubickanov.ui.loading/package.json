@@ -5,5 +5,9 @@
   "description": "Bridge between UI Framework and Loading pipeline — registers views as loading operations.",
   "unity": "2022.3",
   "author": { "name": "rubickanov" },
-  "keywords": [ "ui", "loading" ]
+  "keywords": [ "ui", "loading" ],
+  "dependencies": {
+    "com.rubickanov.ui": "1.0.0",
+    "com.rubickanov.loading": "1.1.0"
+  }
 }

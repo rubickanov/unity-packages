@@ -42,5 +42,11 @@ namespace Rubickanov.Audio.Tests
             _values.Remove(key);
             return UniTask.CompletedTask;
         }
+
+        public UniTask Clear()
+        {
+            _values.Clear();
+            return UniTask.CompletedTask;
+        }
     }
 }

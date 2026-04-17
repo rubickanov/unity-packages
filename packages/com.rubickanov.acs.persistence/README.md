@@ -213,6 +213,58 @@ foreach (var entity in world.PersistedEntities())
 }
 ```
 
+### Enum fields
+
+Enums are opt-in — the scanner rejects `ReactiveProperty<MyEnum>` unless the field also carries `[PersistedEnum]`. The encoding choice has save-stability implications and must be explicit:
+
+```csharp
+public enum Stance { Neutral, Aggressive, Defensive }
+
+public sealed class CombatAspect : IEntityAspect
+{
+    [PersistedState] [PersistedEnum]                              // ByName (default) — stored as "Aggressive"
+    public readonly ReactiveProperty<Stance> Stance = new(Stance.Neutral);
+
+    [PersistedState] [PersistedEnum(PersistedEnumMode.ByValue)]   // stored as the underlying int
+    public readonly ReactiveProperty<Stance> Preferred = new(Stance.Neutral);
+}
+```
+
+- **ByName (default)** — snapshot stores the member name. Safe against reorders and inserts; a rename requires an `IAspectMigrator`. Unknown names on restore log a warning and keep the field at its current value.
+- **ByValue** — snapshot stores the underlying numeric. Compact; reorders or new members inserted before existing ones break old saves. Undefined values on restore log a warning and keep the current value.
+
+Enum elements inside collections (`ObservableList<MyEnum>` etc.) are rejected in the current iteration — wrap the enum in a plain `int` or `string` on the aspect, or file an issue with the use case.
+
+### Nullable value types
+
+`ReactiveProperty<int?>` and similar nullable shapes are allowed. They forward to the underlying serializer; `null` survives the round-trip as long as the serializer preserves it (JsonUtility does not — Newtonsoft / MsgPack do). Aspect migrators can freely read and write `null` into the `AspectData.Fields` dictionary.
+
+### Diagnostics — `PersistenceDebug`
+
+Bootstrap validation and inspector-style dumps live on `PersistenceDebug`:
+
+```csharp
+// Fail fast in a bootstrap assertion.
+PersistenceDebug.ValidateAspect<HeroAspect>();
+
+// Scan a whole assembly — returns the full list of scanner rejections.
+IReadOnlyList<string> errors = PersistenceDebug.ValidateAllAspects(typeof(HeroAspect).Assembly);
+if (errors.Count > 0) throw new InvalidOperationException(string.Join("\n", errors));
+
+// Dump the resolved reverse index (key → type, version, aliases).
+foreach (var entry in PersistenceDebug.ListPersistedKeys())
+    Debug.Log($"{entry.Key} → {entry.Type.FullName} v{entry.Version}");
+
+// Catch key collisions before they surface at restore.
+foreach (var c in PersistenceDebug.FindKeyCollisions())
+    Debug.LogError($"key '{c.Key}' is claimed by {string.Join(", ", c.Claimants.Select(t => t.Name))}");
+
+// Human-readable per-aspect dump for inspector previews / crash payloads.
+Debug.Log(PersistenceDebug.DumpAspect(typeof(HeroAspect)));
+```
+
+None of these mutate the scanner cache or the reverse index — safe to call from editor tooling, unit tests, or dev-build overlays.
+
 ## Integration
 
 A save layer owns the remaining concerns. `com.rubickanov.acs.persistence` exposes snapshots; the game layer supplies identity, prefab resolution, and storage.
@@ -249,3 +301,4 @@ public sealed class SaveService
 - **Schema migration is opt-in, in two layers** — `IAspectMigrator` evolves one aspect's fields across a `[PersistedVersion]` bump; `IAspectSnapshotMigrator` restructures whole `AspectSnapshot` instances (split, merge, delete) keyed by `WorldSnapshot.FormatVersion`. Both are configured through a `PersistenceMigrationRegistry` owned by the save layer. The package ships the mechanism; the save layer supplies policy and concrete migrators. Collection-element CLR-shape drift stays with the save-layer serializer — ACS receives already-deserialized `List<T>` and cannot patch elements it never saw unboxed.
 - **Restore writes through `ReactiveProperty.Value`** — no suppress flag. A restore is supposed to look like a normal write so netcode replication, UI bindings, and gameplay rules respond exactly as they do during live play.
 - **Snapshot iteration is deterministic** — `AspectSnapshot.Aspects` and `AspectData.Fields` are backed by a `SortedDictionary<string, …>` with `StringComparer.Ordinal`. Identical state produces identical key ordering across runtimes and cultures, which is what autosave dedup (hash the serialized blob, skip the write if unchanged) and byte-wise save-file equality require. Determinism of the final serialized bytes is still the save layer's concern — a serializer that walks `IDictionary` in key order (Newtonsoft, MsgPack) inherits it for free; one that doesn't (`JsonUtility` via a wrapper, custom binary) must preserve it itself.
+- **Aspect keys are CLR-type-specific, not polymorphic** — the registry resolves a snapshot key to exactly one concrete `Type`. A derived aspect with its own `[PersistedKey]` is a different save slot from its base; a shared key across a base/derived pair is a collision, not an inheritance chain. Polymorphism is not supported by design — if two aspect shapes need to coexist in the same save, give them distinct keys and pick between them in the save layer.

@@ -11,6 +11,13 @@ namespace Rubickanov.ACS.Runtime.Persistence
     /// Migrators advance state one version at a time. The registry resolves a linear
     /// chain for a given <c>from → to</c> gap and rejects duplicate registrations at
     /// the same step (a duplicate is a save-layer bug, not a runtime data condition).
+    /// <para/>
+    /// <b>Thread safety:</b> build-once, read-many. Register every <see cref="AddAspect"/>
+    /// / <see cref="AddSnapshot"/> on bootstrap (Unity main thread) before any
+    /// <c>Restore</c> / <c>RestoreAll</c> fires; the resolve paths
+    /// (<see cref="TryGetAspectChain"/>, <see cref="TryGetSnapshotChain"/>,
+    /// <see cref="CurrentFormatVersion"/>) are lock-free reads and safe from any thread
+    /// after registration is done. Registering concurrently with a restore is a data race.
     /// </summary>
     public sealed class PersistenceMigrationRegistry
     {

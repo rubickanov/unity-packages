@@ -5,5 +5,9 @@
   "description": "Localization binding helpers for UI views.",
   "unity": "2022.3",
   "author": { "name": "rubickanov" },
-  "keywords": ["ui", "localization", "binding"]
+  "keywords": ["ui", "localization", "binding"],
+  "dependencies": {
+    "com.rubickanov.ui": "1.0.0",
+    "com.rubickanov.localization": "1.0.0"
+  }
 }

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using ObservableCollections;
+using UnityEngine;
 
 namespace Rubickanov.ACS.Runtime.Persistence
 {
@@ -9,6 +10,7 @@ namespace Rubickanov.ACS.Runtime.Persistence
 
         public PersistedDictionaryBinding(ObservableDictionary<TKey, TValue> collection)
         {
+            Debug.Assert(collection != null, "PersistedDictionaryBinding: collection is null — factory must reject uninitialized [PersistedState] fields.");
             _collection = collection;
         }
 

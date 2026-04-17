@@ -103,9 +103,21 @@ namespace Rubickanov.StateMachine.Tests
         }
 
         [Test]
-        public void CurrentKey_BeforeStart_Throws()
+        public void CurrentKey_BeforeStart_ReturnsDefault()
         {
-            Assert.Throws<InvalidOperationException>(() => { var _ = _fsm.CurrentKey; });
+            Assert.AreEqual(default(Key), _fsm.CurrentKey);
+            Assert.IsNull(_fsm.CurrentState);
+        }
+
+        [Test]
+        public async Task CurrentKey_AfterStop_ReturnsDefault()
+        {
+            _fsm.AddState(Key.A, NewState("A"));
+            await _fsm.StartAsync(Key.A);
+            await _fsm.StopAsync();
+
+            Assert.AreEqual(default(Key), _fsm.CurrentKey);
+            Assert.IsNull(_fsm.CurrentState);
         }
 
         [Test]
@@ -374,11 +386,8 @@ namespace Rubickanov.StateMachine.Tests
         }
 
         [Test]
-        public async Task CustomComparer_IsUsedForStateLookup()
+        public async Task CustomComparer_IsUsedForStateLookupAndIsInState()
         {
-            // Custom comparer affects dictionary lookups only — IsInState uses
-            // EqualityComparer<TKey>.Default (AsyncStateMachine.cs:61). This test pins the
-            // lookup behavior by checking CurrentState identity, not IsInState.
             var fsm = new AsyncStateMachine<string>(StringComparer.OrdinalIgnoreCase);
             var state = new AsyncRecordingState("S", new List<string>());
             fsm.AddState("State", state);
@@ -387,6 +396,179 @@ namespace Rubickanov.StateMachine.Tests
 
             Assert.IsTrue(fsm.IsStarted);
             Assert.AreSame(state, fsm.CurrentState);
+            Assert.IsTrue(fsm.IsInState("state"));
+            Assert.IsTrue(fsm.IsInState("State"));
+            Assert.IsTrue(fsm.IsInState("STATE"));
+        }
+
+        [Test]
+        public async Task SetStateAsync_ToCurrentKey_IsNoOp()
+        {
+            var a = NewState("A");
+            _fsm.AddState(Key.A, a);
+            await _fsm.StartAsync(Key.A);
+            _log.Clear();
+
+            await _fsm.SetStateAsync(Key.A);
+
+            CollectionAssert.IsEmpty(_log);
+            Assert.AreEqual(Key.A, _fsm.CurrentKey);
+            Assert.AreEqual(1, a.EnterCount);
+            Assert.AreEqual(0, a.ExitCount);
+        }
+
+        [Test]
+        public async Task SetStateAsync_MultipleCallsDuringOnEnter_LastWriteWins()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            var c = NewState("C");
+            var d = NewState("D");
+            b.OnEnterHook = ct =>
+            {
+                _ = _fsm.SetStateAsync(Key.C, ct);
+                _ = _fsm.SetStateAsync(Key.D, ct);
+                return UniTask.CompletedTask;
+            };
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+            _fsm.AddState(Key.C, c);
+            _fsm.AddState(Key.D, d);
+            await _fsm.StartAsync(Key.A);
+            _log.Clear();
+
+            await _fsm.SetStateAsync(Key.B);
+
+            CollectionAssert.AreEqual(
+                new[] { "A:Exit", "B:Enter", "B:Exit", "D:Enter" },
+                _log);
+            Assert.AreEqual(Key.D, _fsm.CurrentKey);
+            Assert.AreEqual(0, c.EnterCount);
+        }
+
+        [Test]
+        public async Task SetStateAsync_CalledDuringOnEnter_UsesDeferredCallerToken()
+        {
+            var cts1 = new CancellationTokenSource();
+            var cts2 = new CancellationTokenSource();
+            CancellationToken receivedAtC = default;
+
+            _fsm.AddState(Key.A, NewState("A"));
+            _fsm.AddState(Key.B, new AsyncCallbackState(onEnterAsync: ct =>
+            {
+                _ = _fsm.SetStateAsync(Key.C, cts2.Token);
+                return UniTask.CompletedTask;
+            }));
+            _fsm.AddState(Key.C, new AsyncCallbackState(onEnterAsync: ct =>
+            {
+                receivedAtC = ct;
+                return UniTask.CompletedTask;
+            }));
+
+            await _fsm.StartAsync(Key.A);
+            await _fsm.SetStateAsync(Key.B, cts1.Token);
+
+            Assert.AreEqual(cts2.Token, receivedAtC);
+            Assert.AreNotEqual(cts1.Token, receivedAtC);
+        }
+
+        [Test]
+        public async Task SetStateAsync_CancelledDuringOnEnterAwait_ThrowsOperationCanceledException()
+        {
+            var cts = new CancellationTokenSource();
+
+            _fsm.AddState(Key.A, NewState("A"));
+            _fsm.AddState(Key.B, new AsyncCallbackState(onEnterAsync: ct =>
+            {
+                var tcs = new UniTaskCompletionSource();
+                ct.Register(() => tcs.TrySetCanceled());
+                return tcs.Task;
+            }));
+            await _fsm.StartAsync(Key.A);
+
+            var transition = _fsm.SetStateAsync(Key.B, cts.Token);
+            cts.Cancel();
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await transition);
+        }
+
+        [Test]
+        public async Task SetStateAsync_CancelledDuringOnExitAwait_ThrowsOperationCanceledException()
+        {
+            var cts = new CancellationTokenSource();
+
+            _fsm.AddState(Key.A, new AsyncCallbackState(onExitAsync: ct =>
+            {
+                var tcs = new UniTaskCompletionSource();
+                ct.Register(() => tcs.TrySetCanceled());
+                return tcs.Task;
+            }));
+            _fsm.AddState(Key.B, NewState("B"));
+            await _fsm.StartAsync(Key.A);
+
+            var transition = _fsm.SetStateAsync(Key.B, cts.Token);
+            cts.Cancel();
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await transition);
+        }
+
+        [Test]
+        public async Task StopAsync_CancelledDuringOnExitAwait_PropagatesCancellation()
+        {
+            var cts = new CancellationTokenSource();
+
+            _fsm.AddState(Key.A, new AsyncCallbackState(onExitAsync: ct =>
+            {
+                var tcs = new UniTaskCompletionSource();
+                ct.Register(() => tcs.TrySetCanceled());
+                return tcs.Task;
+            }));
+            await _fsm.StartAsync(Key.A);
+
+            var stop = _fsm.StopAsync(cts.Token);
+            cts.Cancel();
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await stop);
+        }
+
+        [Test]
+        public async Task HasPendingTransition_DuringOnEnter_ReflectsQueuedKey()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            var c = NewState("C");
+            bool pendingDuringEnter = false;
+            Key pendingKeyDuringEnter = default;
+            b.OnEnterHook = ct =>
+            {
+                _ = _fsm.SetStateAsync(Key.C, ct);
+                pendingDuringEnter = _fsm.HasPendingTransition;
+                pendingKeyDuringEnter = _fsm.PendingKey;
+                return UniTask.CompletedTask;
+            };
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+            _fsm.AddState(Key.C, c);
+            await _fsm.StartAsync(Key.A);
+
+            await _fsm.SetStateAsync(Key.B);
+
+            Assert.IsTrue(pendingDuringEnter);
+            Assert.AreEqual(Key.C, pendingKeyDuringEnter);
+            Assert.IsFalse(_fsm.HasPendingTransition);
+        }
+
+        [Test]
+        public async Task GetCurrentState_ReturnsCurrentStateAsType()
+        {
+            var a = NewState("A");
+            _fsm.AddState(Key.A, a);
+            await _fsm.StartAsync(Key.A);
+
+            Assert.AreSame(a, _fsm.GetCurrentState<AsyncRecordingState>());
+            Assert.IsNull(_fsm.GetCurrentState<OtherAsyncState>());
         }
 
         private class AsyncRecordingState : AsyncStateBase

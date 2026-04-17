@@ -70,6 +70,22 @@ namespace Rubickanov.Motor.Tests
         }
 
         [Test]
+        public void Simulate_GroundedInputOpposingVelocity_ClampsByDeceleration()
+        {
+            _state.IsGrounded = true;
+            _state.GroundNormal = Vector3.up;
+            _state.MoveInput = new Vector2(-1f, 0f);
+            _state.DesiredVelocity = new Vector3(-6f, 0f, 0f);
+            _body.Velocity = new Vector3(6f, 0f, 0f);
+
+            _module.Simulate(Dt);
+
+            Assert.AreEqual(1, _body.ForcesAdded.Count);
+            Assert.AreEqual(ForceMode.VelocityChange, _body.ForcesAdded[0].mode);
+            Assert.AreEqual(new Vector3(-Decel * Dt, 0f, 0f), _body.ForcesAdded[0].force);
+        }
+
+        [Test]
         public void Simulate_GroundedOnSlope_ProjectsDesiredVelocityOntoGroundPlane()
         {
             // Slope normal tilts forward: (0, 0.707, 0.707). Projecting desired (0,0,10)
