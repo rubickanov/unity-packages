@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
+using UnityEngine;
 
 namespace Rubickanov.GameplayTags
 {
@@ -18,6 +19,9 @@ namespace Rubickanov.GameplayTags
             new(@"^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)*$", RegexOptions.Compiled);
 
         private static GameplayTagRegistry? _instance;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => _instance = null;
 
         /// <summary>Current installed registry. Throws if not installed. Main thread only.</summary>
         public static GameplayTagRegistry Instance =>
