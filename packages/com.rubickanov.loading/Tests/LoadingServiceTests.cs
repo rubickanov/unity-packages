@@ -13,36 +13,24 @@ namespace Rubickanov.Loading.Tests
     {
         private RecordingPresenter _presenter = null!;
         private LoadingService _service = null!;
-        private SynchronizationContext? _previousContext;
 
         [SetUp]
         public void SetUp()
         {
-            // Force synchronous progress dispatch: System.Progress<T> captures
-            // SynchronizationContext.Current in its ctor and posts callbacks through it.
-            // Under an arbitrary/default context those posts can run on the ThreadPool,
-            // which would make SetProgress assertions racy.
-            _previousContext = SynchronizationContext.Current;
-            SynchronizationContext.SetSynchronizationContext(new SynchronousContext());
-
             _presenter = new RecordingPresenter();
             _service = new LoadingService(_presenter, NullLoggerFactory.Instance);
         }
 
-        [TearDown]
-        public void TearDown()
-        {
-            SynchronizationContext.SetSynchronizationContext(_previousContext);
-        }
-
         [Test]
-        public async Task Load_EmptyOperations_ReturnsOkAndSetsFinalProgressToOne()
+        public async Task Load_EmptyOperations_ReturnsOkWithoutTouchingPresenter()
         {
             var result = await _service.Load(Array.Empty<ILoadingOperation>());
 
             Assert.IsTrue(result.Success);
             Assert.IsNull(result.Error);
-            Assert.AreEqual(1f, _presenter.ProgressValues[^1]);
+            Assert.AreEqual(0, _presenter.ShowCount);
+            Assert.AreEqual(0, _presenter.HideCount);
+            Assert.IsEmpty(_presenter.ProgressValues);
         }
 
         [Test]
@@ -83,9 +71,9 @@ namespace Rubickanov.Loading.Tests
         [Test]
         public async Task Load_HappyPath_CallsShowOnceAndHideTwice()
         {
-            // Pins down the current contract: Hide fires once at the start
-            // (LoadingService.cs:40) and once in the finally (LoadingService.cs:69).
-            await _service.Load(Array.Empty<ILoadingOperation>());
+            // Contract: Hide fires once at the start (guards against a stale leftover UI from a
+            // prior aborted Load) and once in the finally block after the pipeline completes.
+            await _service.Load(new ILoadingOperation[] { new FakeOperation() });
 
             Assert.AreEqual(1, _presenter.ShowCount);
             Assert.AreEqual(2, _presenter.HideCount);
@@ -222,7 +210,7 @@ namespace Rubickanov.Loading.Tests
         }
 
         [Test]
-        public async Task Load_PreCancelledToken_ReturnsOk()
+        public async Task Load_PreCancelledToken_ReturnsCancelled()
         {
             using var cts = new CancellationTokenSource();
             cts.Cancel();
@@ -231,13 +219,12 @@ namespace Rubickanov.Loading.Tests
                 new ILoadingOperation[] { new FakeOperation() },
                 ct: cts.Token);
 
-            // Cancellation is treated as success (LoadingService.cs:57-59).
-            Assert.IsTrue(result.Success);
+            Assert.IsTrue(result.Cancelled);
             Assert.IsNull(result.Error);
         }
 
         [Test]
-        public async Task Load_TokenCancelledDuringExecute_ReturnsOkAndSkipsRemainingOperations()
+        public async Task Load_TokenCancelledDuringExecute_ReturnsCancelledAndSkipsRemainingOperations()
         {
             using var cts = new CancellationTokenSource();
             var blocker = FakeOperation.WaitingForever("blocker");
@@ -253,7 +240,7 @@ namespace Rubickanov.Loading.Tests
             cts.Cancel();
             var result = await loadTask;
 
-            Assert.IsTrue(result.Success);
+            Assert.IsTrue(result.Cancelled);
             Assert.IsFalse(after.Executed);
         }
 
@@ -309,6 +296,17 @@ namespace Rubickanov.Loading.Tests
         }
 
         [Test]
+        public async Task Load_OperationThrows_CallsSetErrorOnPresenter()
+        {
+            var ex = new InvalidOperationException("boom");
+            var throwing = FakeOperation.Throwing("bad", ex);
+
+            await _service.Load(new ILoadingOperation[] { throwing });
+
+            Assert.Contains("boom", _presenter.Errors);
+        }
+
+        [Test]
         public async Task Load_OperationThrows_StillHidesPresenter()
         {
             var throwing = FakeOperation.Throwing("bad", new Exception("x"));
@@ -327,12 +325,31 @@ namespace Rubickanov.Loading.Tests
 
             Assert.IsTrue(blocker.Executed, "first load should have entered its first operation.");
 
-            var secondResult = await _service.Load(Array.Empty<ILoadingOperation>());
+            var secondResult = await _service.Load(new ILoadingOperation[] { new FakeOperation("second") });
             var firstResult = await firstTask;
 
-            Assert.IsTrue(firstResult.Success, "first load's cancellation must surface as Ok.");
+            // Reentry cancel (first load was cancelled by second, not by external ct) is Ok, not Cancelled.
+            Assert.IsTrue(firstResult.Success, "reentry-cancelled first load must return Ok.");
             Assert.IsTrue(secondResult.Success);
             Assert.AreEqual(2, _presenter.ShowCount);
+        }
+
+        [Test]
+        public async Task Load_OperationReportsProgressAfterItCompletes_LateReportIsIgnored()
+        {
+            IProgress<float>? capturedFromFirst = null;
+            var first = FakeOperation.CapturingProgress("first", p => capturedFromFirst = p);
+            var second = FakeOperation.ReportingProgress("second", 0f);
+
+            await _service.Load(new ILoadingOperation[] { first, second });
+            var lengthAfterRun = _presenter.ProgressValues.Count;
+
+            capturedFromFirst!.Report(1f);
+
+            Assert.AreEqual(
+                lengthAfterRun,
+                _presenter.ProgressValues.Count,
+                "Late progress.Report from a completed operation must not reach the presenter.");
         }
 
         private static void AssertContainsApprox(
@@ -349,12 +366,6 @@ namespace Rubickanov.Loading.Tests
             Assert.Fail(
                 $"Expected progress stream to contain a value ≈ {expected}. "
                 + $"Actual: [{string.Join(", ", values)}]");
-        }
-
-        private sealed class SynchronousContext : SynchronizationContext
-        {
-            public override void Post(SendOrPostCallback d, object? state) => d(state);
-            public override void Send(SendOrPostCallback d, object? state) => d(state);
         }
     }
 }

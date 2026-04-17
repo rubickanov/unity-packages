@@ -83,6 +83,8 @@ public class ConnectToServerOperation : ILoadingOperation
 
 ```csharp
 new LoadSceneOperation("Gameplay")
+new LoadSceneOperation("Hub", LoadSceneMode.Additive)
+new LoadSceneOperation("Arena", description: "Preparing the arena...")
 ```
 
 ### Implementing a Presenter
@@ -102,16 +104,26 @@ public class UILoadingPresenter : ILoadingPresenter
 }
 ```
 
-### Handling Errors
+### Handling Errors and Cancellation
 
-`Load()` returns a `LoadResult` — the caller decides how to handle failures:
+`Load()` returns a `LoadResult` with three states: `Ok`, `Cancelled`, or `Failed`.
 
 ```csharp
-var result = await loadingService.Load(operations);
-if (!result.Success)
+var result = await loadingService.Load(operations, ct: cancellationToken);
+switch (result.Status)
 {
-    ShowErrorPopup($"Loading failed: {result.Error?.Message}");
+    case LoadStatus.Ok:        break;
+    case LoadStatus.Cancelled: break; // caller's token was cancelled
+    case LoadStatus.Failed:    ShowErrorPopup($"Loading failed: {result.Error?.Message}"); break;
 }
+```
+
+> A second `Load()` started while an earlier one is still running cancels the earlier load and the earlier call resolves as `Ok` (reentry cancel is intentional, not a failure). External `CancellationToken` cancellation resolves as `Cancelled`.
+
+### Customizing the default description
+
+```csharp
+new LoadingService(presenter, loggerFactory, defaultDescription: "Загрузка...");
 ```
 
 ## Design Decisions
@@ -120,3 +132,6 @@ if (!result.Success)
 - **Uniform progress distribution** — each operation gets an equal slice of the progress bar (1/N). Individual operations report 0-1 within their slice.
 - **Caller controls order** — operations execute in array order. No priority system or `RunBefore`/`RunAfter` attributes.
 - **LoadResult instead of fallback/callbacks** — the caller owns error recovery, not the loading service. This avoids ownership issues where a fallback scene load destroys the caller.
+- **Distinct `Cancelled` state** — external cancellation is semantically different from success; the caller can decide whether to navigate back, retry, or leave the UI alone.
+- **Late progress reports are dropped** — once an operation completes, any stale `IProgress<float>.Report` call it emits afterwards is ignored (epoch-based guard) to prevent overwriting progress of the next operation.
+- **Not thread-safe** — `LoadingService` state (`CancellationTokenSource`, generation counter) is not synchronized; call `Load` from a single thread (typically Unity's main thread).

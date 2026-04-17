@@ -1,6 +1,6 @@
 {
   "name": "com.rubickanov.loading",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Loading",
   "description": "Generic loading pipeline with sequential operations, progress tracking, and loading presenter abstraction.",
   "unity": "2022.3",

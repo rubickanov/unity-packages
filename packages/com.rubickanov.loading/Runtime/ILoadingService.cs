@@ -12,7 +12,13 @@ namespace Rubickanov.Loading
     {
         /// <summary>
         /// Executes a sequence of loading operations, reporting progress via the presenter.
-        /// Returns <see cref="LoadResult"/> indicating success or failure with the exception.
+        /// Returns <see cref="LoadResult"/> indicating success, cancellation, or failure.
+        /// <para>
+        /// Operations run in list order. If any <see cref="ILoadingOperation.Execute"/> or
+        /// <see cref="IDeferrableOperation.Activate"/> throws, the pipeline aborts at that
+        /// point — deferred activations that already ran are NOT rolled back; callers and
+        /// operation authors must keep activations safe against this partial-state scenario.
+        /// </para>
         /// </summary>
         /// <param name="operations">Ordered list of operations to execute sequentially.</param>
         /// <param name="waitForInput">When true, waits for user input before activating deferred operations.</param>

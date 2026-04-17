@@ -12,20 +12,30 @@ namespace Rubickanov.Loading
     public class LoadSceneOperation : ILoadingOperation, IDeferrableOperation
     {
         private readonly string _sceneName;
+        private readonly LoadSceneMode _mode;
+        private readonly string? _description;
         private AsyncOperation? _asyncOp;
+        private bool _readyToActivate;
 
-        public string Description => $"Loading {_sceneName}...";
+        public string Description => _description ?? $"Loading {_sceneName}...";
 
-        public LoadSceneOperation(string sceneName)
+        public LoadSceneOperation(string sceneName, LoadSceneMode mode = LoadSceneMode.Single, string? description = null)
         {
             _sceneName = sceneName;
+            _mode = mode;
+            _description = description;
         }
 
         public async UniTask Execute(IProgress<float> progress, CancellationToken ct)
         {
+            _readyToActivate = false;
             progress.Report(0f);
 
-            _asyncOp = SceneManager.LoadSceneAsync(_sceneName, LoadSceneMode.Single);
+            _asyncOp = SceneManager.LoadSceneAsync(_sceneName, _mode);
+            if (_asyncOp == null)
+                throw new InvalidOperationException(
+                    $"Scene '{_sceneName}' could not be loaded. Is it listed in Build Settings?");
+
             _asyncOp.allowSceneActivation = false;
 
             while (_asyncOp.progress < 0.9f)
@@ -36,15 +46,17 @@ namespace Rubickanov.Loading
             }
 
             progress.Report(1f);
+            _readyToActivate = true;
         }
 
         public async UniTask Activate(CancellationToken ct)
         {
-            if (_asyncOp == null)
+            if (!_readyToActivate || _asyncOp == null)
                 return;
 
             _asyncOp.allowSceneActivation = true;
             await UniTask.WaitUntil(() => _asyncOp.isDone, cancellationToken: ct);
+            _readyToActivate = false;
         }
     }
 }
