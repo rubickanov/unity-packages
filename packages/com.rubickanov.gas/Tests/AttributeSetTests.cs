@@ -1,4 +1,6 @@
+using System;
 using NUnit.Framework;
+using Rubickanov.GameplayTags;
 
 namespace Rubickanov.GAS.Tests
 {
@@ -31,23 +33,12 @@ namespace Rubickanov.GAS.Tests
         }
 
         [Test]
-        public void Define_SameTagTwice_ReturnsSameInstance()
+        public void Define_SameTagTwice_Throws()
         {
             var health = GasTestFixtures.Tag("Attribute.Health");
-            var first = _attributes.Define(health, 100f);
-            var second = _attributes.Define(health, 50f);
+            _attributes.Define(health, 100f);
 
-            Assert.AreSame(first, second);
-        }
-
-        [Test]
-        public void Define_SameTagDifferentBaseValue_IgnoresSecondBaseValue()
-        {
-            var health = GasTestFixtures.Tag("Attribute.Health");
-            var first = _attributes.Define(health, 100f);
-            _attributes.Define(health, 999f);
-
-            Assert.AreEqual(100f, first.BaseValue, GasTestFixtures.FloatTolerance);
+            Assert.Throws<InvalidOperationException>(() => _attributes.Define(health, 50f));
         }
 
         [Test]
@@ -88,6 +79,37 @@ namespace Rubickanov.GAS.Tests
 
             Assert.IsFalse(found);
             Assert.IsNull(attribute);
+        }
+
+        [Test]
+        public void SetBaseValue_DefinedTag_UpdatesBaseValueAndFiresEvent()
+        {
+            var health = GasTestFixtures.Tag("Attribute.Health");
+            var attribute = _attributes.Define(health, 100f);
+
+            GameplayTag eventTag = default;
+            float eventValue = 0f;
+            int callCount = 0;
+            _attributes.BaseValueChanged += (tag, value) =>
+            {
+                eventTag = tag;
+                eventValue = value;
+                callCount++;
+            };
+
+            _attributes.SetBaseValue(health, 250f);
+
+            Assert.AreEqual(250f, attribute.BaseValue, GasTestFixtures.FloatTolerance);
+            Assert.AreEqual(1, callCount);
+            Assert.AreEqual(health, eventTag);
+            Assert.AreEqual(250f, eventValue, GasTestFixtures.FloatTolerance);
+        }
+
+        [Test]
+        public void SetBaseValue_UndefinedTag_Throws()
+        {
+            Assert.Throws<InvalidOperationException>(
+                () => _attributes.SetBaseValue(GasTestFixtures.Tag("Attribute.Speed"), 10f));
         }
     }
 }

@@ -46,6 +46,16 @@ GameplayEffectAsset (ScriptableObject)
 
 ## Quick Start
 
+Define your attribute / effect / status tags as constants via `com.rubickanov.gameplaytags` (the `Attribute.*`, `Status.*`, `Effect.*` identifiers used throughout this README are project-defined tags, not types the package exports):
+
+```csharp
+public static class Attribute
+{
+    public static readonly GameplayTag Health = GameplayTagRegistry.Instance.Get("Attribute.Health");
+    public static readonly GameplayTag MoveSpeed = GameplayTagRegistry.Instance.Get("Attribute.MoveSpeed");
+}
+```
+
 1. Define attributes and create a controller:
 
 ```csharp
@@ -80,8 +90,10 @@ var attributes = new AttributeSet();
 var health = attributes.Define(Attribute.Health, 100f);
 var moveSpeed = attributes.Define(Attribute.MoveSpeed, 5f);
 
-health.ValueChanged += value => Debug.Log($"Health: {value}");
+health.ValueChanged += (oldValue, newValue) => Debug.Log($"Health: {oldValue} -> {newValue}");
 ```
+
+Writing `BaseValue` directly is not allowed; use `AttributeSet.SetBaseValue(tag, value)` so the controller recalculates dependent attributes and raises `BaseValueChanged`.
 
 ### Creating Effects in Inspector
 
@@ -141,10 +153,10 @@ controller.RemoveAllEffects();
 ### Reacting to Changes
 
 ```csharp
-// Attribute value changes
-health.ValueChanged += value => _healthBar.SetValue(value);
+// Attribute value changes (oldValue, newValue)
+health.ValueChanged += (_, newValue) => _healthBar.SetValue(newValue);
 
-// Effect lifecycle
+// Effect lifecycle — both fire AFTER the list and tags are updated, attributes recalculated
 controller.EffectApplied += effect => ShowBuffIcon(effect);
 controller.EffectRemoved += effect => HideBuffIcon(effect);
 
@@ -178,9 +190,19 @@ result = hasOverride ? overrideValue : (BaseValue + addSum) * mulProduct
 
 - `Add` — summed into `addSum`
 - `Multiply` — multiplied into `mulProduct` (starts at 1)
-- `Override` — wins over everything
+- `Override` — wins over `Add`/`Multiply`. Across multiple `Override` modifiers, the one with the highest `Modifier.Priority` wins; ties resolve to the last applied. Useful for immunity overriding debuff, god-mode overriding anything, etc.
 
-Instant effects modify `BaseValue` directly.
+Instant effects modify `BaseValue` directly. Periodic modifiers on `Duration`/`Infinite` effects also apply to `BaseValue` each tick (like "damage over time permanently reduces the base") — model a separate `MaxHealth` attribute if you need a cap.
+
+### Magnitude
+
+`EffectSpec.Magnitude` multiplies the stored `Value` of every modifier in the effect. It scales the input to the aggregator, not the result:
+
+- `Add 10` with `Magnitude 2` → contributes `+20` to `addSum`
+- `Multiply 2` with `Magnitude 0.5` → contributes `*1.0` (effectively disables the multiplier)
+- `Override 42` with `Magnitude 3` → overrides to `126`
+
+For `Multiply`, think of magnitude as scaling the modifier's strength, not the final multiplier.
 
 ### Tag Conditions
 

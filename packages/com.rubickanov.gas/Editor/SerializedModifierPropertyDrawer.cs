@@ -17,24 +17,35 @@ namespace Rubickanov.GAS.Editor
             var attributeProp = property.FindPropertyRelative("_attribute").FindPropertyRelative("_path");
             var operationProp = property.FindPropertyRelative("_operation");
             var valueProp = property.FindPropertyRelative("_value");
+            var priorityProp = property.FindPropertyRelative("_priority");
 
             var lineHeight = EditorGUIUtility.singleLineHeight;
 
-            // Split into 3 columns: [Attribute tag dropdown] [Operation dropdown] [Value field]
-            float totalWidth = position.width;
-            float tagWidth = totalWidth * 0.45f;
-            float opWidth = totalWidth * 0.25f;
-            float valueWidth = totalWidth - tagWidth - opWidth - Spacing * 2;
+            // Layout: [Tag 40%] [Op 20%] [Value 25%] [Priority 15%] with 3 spacings
+            float totalWidth = position.width - Spacing * 3;
+            float tagWidth = totalWidth * 0.40f;
+            float opWidth = totalWidth * 0.20f;
+            float valueWidth = totalWidth * 0.25f;
+            float priorityWidth = totalWidth * 0.15f;
 
-            var tagRect = new Rect(position.x, position.y, tagWidth, lineHeight);
-            var opRect = new Rect(position.x + tagWidth + Spacing, position.y, opWidth, lineHeight);
-            var valueRect = new Rect(position.x + tagWidth + opWidth + Spacing * 2, position.y, valueWidth, lineHeight);
+            float x = position.x;
+            var tagRect = new Rect(x, position.y, tagWidth, lineHeight);
+            x += tagWidth + Spacing;
+            var opRect = new Rect(x, position.y, opWidth, lineHeight);
+            x += opWidth + Spacing;
+            var valueRect = new Rect(x, position.y, valueWidth, lineHeight);
+            x += valueWidth + Spacing;
+            var priorityRect = new Rect(x, position.y, priorityWidth, lineHeight);
 
             // Attribute tag dropdown
             var currentPath = attributeProp.stringValue;
             var displayText = string.IsNullOrEmpty(currentPath) ? "Select Attribute..." : currentPath;
+            var tagContent = new GUIContent(displayText);
+            var prevColor = GUI.color;
+            if (string.IsNullOrEmpty(currentPath))
+                GUI.color = new Color(1f, 0.6f, 0.6f);
 
-            if (EditorGUI.DropdownButton(tagRect, new GUIContent(displayText), FocusType.Keyboard))
+            if (EditorGUI.DropdownButton(tagRect, tagContent, FocusType.Keyboard))
             {
                 var dropdown = new GameplayTagDropdown(new AdvancedDropdownState(), path =>
                 {
@@ -44,12 +55,15 @@ namespace Rubickanov.GAS.Editor
 
                 dropdown.Show(tagRect);
             }
+            GUI.color = prevColor;
 
-            // Operation enum
             EditorGUI.PropertyField(opRect, operationProp, GUIContent.none);
-
-            // Value
             EditorGUI.PropertyField(valueRect, valueProp, GUIContent.none);
+
+            var priorityLabel = new GUIContent("Pri", "Override priority. Only used by Override operation — max priority wins, ties go to last applied.");
+            EditorGUIUtility.labelWidth = 24f;
+            EditorGUI.PropertyField(priorityRect, priorityProp, priorityLabel);
+            EditorGUIUtility.labelWidth = 0f;
 
             EditorGUI.EndProperty();
         }

@@ -10,12 +10,12 @@ namespace Rubickanov.GAS
             float addSum = 0f;
             float mulProduct = 1f;
             float overrideValue = 0f;
+            int overridePriority = 0;
             bool hasOverride = false;
 
             for (int i = 0; i < effects.Count; i++)
             {
                 var effect = effects[i];
-                // Only persistent effects (Duration/Infinite) contribute to aggregation
                 if (effect.Def.Duration == DurationPolicy.Instant) continue;
 
                 var modifiers = effect.Def.Modifiers;
@@ -35,8 +35,12 @@ namespace Rubickanov.GAS
                             mulProduct *= scaledValue;
                             break;
                         case ModifierOp.Override:
-                            overrideValue = scaledValue;
-                            hasOverride = true;
+                            if (!hasOverride || mod.Priority >= overridePriority)
+                            {
+                                overrideValue = scaledValue;
+                                overridePriority = mod.Priority;
+                                hasOverride = true;
+                            }
                             break;
                     }
                 }
@@ -48,7 +52,12 @@ namespace Rubickanov.GAS
         public static void ApplyInstant(AttributeSet attributes, Modifier modifier, float magnitude)
         {
             var attribute = attributes.Get(modifier.Attribute);
-            if (attribute == null) return;
+            if (attribute == null)
+            {
+                GasDiagnostics.EmitWarning(
+                    $"GAS: instant modifier targets undefined attribute '{modifier.Attribute}'. Skipped.");
+                return;
+            }
 
             float scaledValue = modifier.Value * magnitude;
 

@@ -24,18 +24,6 @@ namespace Rubickanov.GAS.Tests
         }
 
         [Test]
-        public void BaseValue_SetValue_DoesNotAutoUpdateCurrent()
-        {
-            var attribute = new GameplayAttribute(100f);
-
-            attribute.BaseValue = 200f;
-
-            Assert.AreEqual(200f, attribute.BaseValue, GasTestFixtures.FloatTolerance);
-            // CurrentValue is only recalculated via EffectController; setter does not push.
-            Assert.AreEqual(100f, attribute.CurrentValue, GasTestFixtures.FloatTolerance);
-        }
-
-        [Test]
         public void CurrentValue_InitiallyEqualsBaseValue()
         {
             var attribute = new GameplayAttribute(42f);

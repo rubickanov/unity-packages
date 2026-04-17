@@ -9,52 +9,67 @@ namespace Rubickanov.GAS
         private readonly AttributeSet _attributes;
         private readonly GameplayTagContainer _tags;
         private readonly List<ActiveEffect> _activeEffects = new();
-        private readonly List<ActiveEffect> _activeEffectsReadOnly;
+        private readonly HashSet<GameplayTag> _dirtyAttributes = new();
         private int _nextHandleId = 1;
 
-        public IReadOnlyList<ActiveEffect> ActiveEffects => _activeEffectsReadOnly;
+        public IReadOnlyList<ActiveEffect> ActiveEffects => _activeEffects;
 
+        /// <summary>
+        /// Fires AFTER the effect is inserted into <see cref="ActiveEffects"/>, its granted tags are
+        /// added, and attributes are recalculated. Safe to call <see cref="ApplyEffect"/> or
+        /// <see cref="RemoveEffect"/> from a handler; those operations take effect immediately.
+        /// Not fired for Instant effects.
+        /// </summary>
         public event Action<ActiveEffect>? EffectApplied;
+
+        /// <summary>
+        /// Fires AFTER the effect is removed from <see cref="ActiveEffects"/>, its granted tags are
+        /// revoked (unless granted by another active effect), and attributes are recalculated.
+        /// Safe to call <see cref="ApplyEffect"/> or <see cref="RemoveEffect"/> from a handler.
+        /// </summary>
         public event Action<ActiveEffect>? EffectRemoved;
 
         public EffectController(AttributeSet attributes, GameplayTagContainer tags)
         {
             _attributes = attributes;
             _tags = tags;
-            _activeEffectsReadOnly = _activeEffects;
+            _attributes.BaseValueChanged += OnBaseValueChanged;
         }
 
         public ActiveEffectHandle ApplyEffect(EffectSpec spec)
         {
             var def = spec.Def;
 
-            // Check application conditions
             if (!CheckApplicationConditions(def)) return ActiveEffectHandle.Invalid;
 
-            // Remove effects with specified tags
+            _dirtyAttributes.Clear();
+            var removedDuringApply = _pendingRemoved;
+            removedDuringApply.Clear();
+
             if (!def.RemoveEffectsWithTags.IsEmpty)
             {
                 for (int i = _activeEffects.Count - 1; i >= 0; i--)
                 {
                     var existing = _activeEffects[i];
-                    if (existing.Def.EffectTag.IsValid &&
-                        def.RemoveEffectsWithTags.HasTag(existing.Def.EffectTag))
+                    if (MatchesAnyRemoveTag(existing.Def.EffectTag, def.RemoveEffectsWithTags))
                     {
-                        RemoveEffectInternal(existing);
+                        CollectModifierAttributes(existing.Def.Modifiers, _dirtyAttributes);
+                        RevokeGrantedTags(existing);
                         _activeEffects.RemoveAt(i);
+                        removedDuringApply.Add(existing);
                     }
                 }
             }
 
-            // Handle instant effects
             if (def.Duration == DurationPolicy.Instant)
             {
                 ApplyInstantModifiers(spec);
-                RecalculateAttributes();
+                CollectModifierAttributes(def.Modifiers, _dirtyAttributes);
+                RecalculateAttributes(_dirtyAttributes);
+                FireRemovedBatch(removedDuringApply);
                 return ActiveEffectHandle.Invalid;
             }
 
-            // Handle stacking
             if (def.Stacking == StackingPolicy.Replace && def.EffectTag.IsValid)
             {
                 for (int i = _activeEffects.Count - 1; i >= 0; i--)
@@ -62,124 +77,178 @@ namespace Rubickanov.GAS
                     var existing = _activeEffects[i];
                     if (existing.Def.EffectTag == def.EffectTag)
                     {
-                        RemoveEffectInternal(existing);
+                        CollectModifierAttributes(existing.Def.Modifiers, _dirtyAttributes);
+                        RevokeGrantedTags(existing);
                         _activeEffects.RemoveAt(i);
+                        removedDuringApply.Add(existing);
                     }
                 }
             }
 
-            // Create active effect
             var handle = new ActiveEffectHandle(_nextHandleId++);
             var activeEffect = new ActiveEffect(handle, spec);
 
             _activeEffects.Add(activeEffect);
 
-            // Grant tags
             foreach (var tag in def.GrantedTags)
                 _tags.AddTag(tag);
 
-            RecalculateAttributes();
+            CollectModifierAttributes(def.Modifiers, _dirtyAttributes);
+            RecalculateAttributes(_dirtyAttributes);
 
+            FireRemovedBatch(removedDuringApply);
             EffectApplied?.Invoke(activeEffect);
 
             return handle;
         }
 
-        public bool RemoveEffect(ActiveEffectHandle handle)
+        public int RemoveEffect(ActiveEffectHandle handle)
         {
-            if (!handle.IsValid) return false;
+            if (!handle.IsValid) return 0;
 
-            for (int i = 0; i < _activeEffects.Count; i++)
+            for (int i = _activeEffects.Count - 1; i >= 0; i--)
             {
                 if (_activeEffects[i].Handle == handle)
                 {
                     var effect = _activeEffects[i];
-                    RemoveEffectInternal(effect);
+                    _dirtyAttributes.Clear();
+                    CollectModifierAttributes(effect.Def.Modifiers, _dirtyAttributes);
+                    RevokeGrantedTags(effect);
                     _activeEffects.RemoveAt(i);
-                    RecalculateAttributes();
-                    return true;
+                    RecalculateAttributes(_dirtyAttributes);
+                    EffectRemoved?.Invoke(effect);
+                    return 1;
                 }
             }
 
-            return false;
+            return 0;
         }
 
         public int RemoveEffectsWithTag(GameplayTag tag)
         {
             if (!tag.IsValid) return 0;
 
-            int removed = 0;
+            var removedEffects = _pendingRemoved;
+            removedEffects.Clear();
+            _dirtyAttributes.Clear();
+
             for (int i = _activeEffects.Count - 1; i >= 0; i--)
             {
                 var effect = _activeEffects[i];
                 if (effect.Def.EffectTag.IsValid && effect.Def.EffectTag.Matches(tag))
                 {
-                    RemoveEffectInternal(effect);
+                    CollectModifierAttributes(effect.Def.Modifiers, _dirtyAttributes);
+                    RevokeGrantedTags(effect);
                     _activeEffects.RemoveAt(i);
-                    removed++;
+                    removedEffects.Add(effect);
                 }
             }
 
-            if (removed > 0) RecalculateAttributes();
-            return removed;
+            int removedCount = removedEffects.Count;
+            if (removedCount == 0) return 0;
+
+            RecalculateAttributes(_dirtyAttributes);
+            FireRemovedBatch(removedEffects);
+            return removedCount;
         }
 
-        public void RemoveAllEffects()
+        public int RemoveAllEffects()
         {
+            int count = _activeEffects.Count;
+            if (count == 0) return 0;
+
+            var removedEffects = _pendingRemoved;
+            removedEffects.Clear();
+            _dirtyAttributes.Clear();
+
             for (int i = _activeEffects.Count - 1; i >= 0; i--)
-                RemoveEffectInternal(_activeEffects[i]);
+            {
+                var effect = _activeEffects[i];
+                CollectModifierAttributes(effect.Def.Modifiers, _dirtyAttributes);
+                RevokeGrantedTags(effect);
+                removedEffects.Add(effect);
+            }
 
             _activeEffects.Clear();
-            RecalculateAttributes();
+            RecalculateAttributes(_dirtyAttributes);
+            FireRemovedBatch(removedEffects);
+            return count;
         }
 
+        /// <summary>
+        /// Advances durations, applies periodic modifiers, and removes expired effects.
+        /// Effects applied from an <see cref="EffectRemoved"/> handler during this call begin
+        /// ticking on the next frame, not the current one.
+        /// </summary>
         public void Tick(float deltaTime)
         {
             bool dirty = false;
+            var expired = _pendingRemoved;
+            expired.Clear();
 
             for (int i = _activeEffects.Count - 1; i >= 0; i--)
             {
                 var effect = _activeEffects[i];
 
-                // Handle periodic effects
+                bool willExpire = effect.Def.Duration == DurationPolicy.Duration;
+                float remainingLifetime = willExpire
+                    ? Math.Max(0f, effect.RemainingDuration)
+                    : float.PositiveInfinity;
+
                 if (effect.Def.Period > 0f)
                 {
-                    effect.PeriodTimer += deltaTime;
-                    while (effect.PeriodTimer >= effect.Def.Period)
+                    float periodicWindow = Math.Min(deltaTime, remainingLifetime);
+                    if (periodicWindow > 0f)
                     {
-                        effect.PeriodTimer -= effect.Def.Period;
-                        ApplyPeriodicModifiers(effect);
-                        dirty = true;
+                        effect.AdvancePeriod(periodicWindow);
+                        while (effect.PeriodTimer >= effect.Def.Period)
+                        {
+                            effect.ConsumePeriod(effect.Def.Period);
+                            ApplyPeriodicModifiers(effect);
+                            dirty = true;
+                        }
                     }
                 }
 
-                // Handle duration
-                if (effect.Def.Duration == DurationPolicy.Duration)
+                if (willExpire)
                 {
-                    effect.RemainingDuration -= deltaTime;
+                    effect.DecrementDuration(deltaTime);
                     if (effect.RemainingDuration <= 0f)
                     {
-                        RemoveEffectInternal(effect);
+                        RevokeGrantedTags(effect);
                         _activeEffects.RemoveAt(i);
+                        expired.Add(effect);
                         dirty = true;
                     }
                 }
             }
 
-            if (dirty) RecalculateAttributes();
+            if (dirty) RecalculateAllAttributes();
+            FireRemovedBatch(expired);
         }
 
         private bool CheckApplicationConditions(EffectDef def)
         {
-            // Required tags: target must have all of them
             if (!def.ApplicationRequiredTags.IsEmpty && !_tags.HasAll(def.ApplicationRequiredTags))
                 return false;
 
-            // Blocked tags: target must have none of them
             if (!def.ApplicationBlockedTags.IsEmpty && _tags.HasAny(def.ApplicationBlockedTags))
                 return false;
 
             return true;
+        }
+
+        private static bool MatchesAnyRemoveTag(GameplayTag effectTag, ReadOnlyGameplayTagContainer removeTags)
+        {
+            if (!effectTag.IsValid) return false;
+
+            foreach (var removeTag in removeTags)
+            {
+                if (effectTag.Matches(removeTag))
+                    return true;
+            }
+
+            return false;
         }
 
         private void ApplyInstantModifiers(EffectSpec spec)
@@ -196,16 +265,13 @@ namespace Rubickanov.GAS
                 ModifierAggregator.ApplyInstant(_attributes, modifiers[i], effect.Magnitude);
         }
 
-        private void RemoveEffectInternal(ActiveEffect effect)
+        private void RevokeGrantedTags(ActiveEffect effect)
         {
-            // Remove granted tags (only if no other active effect grants the same tag)
             foreach (var tag in effect.Def.GrantedTags)
             {
                 if (!IsTagGrantedByOtherEffect(tag, effect))
                     _tags.RemoveTag(tag);
             }
-
-            EffectRemoved?.Invoke(effect);
         }
 
         private bool IsTagGrantedByOtherEffect(GameplayTag tag, ActiveEffect excludeEffect)
@@ -219,7 +285,35 @@ namespace Rubickanov.GAS
             return false;
         }
 
-        private void RecalculateAttributes()
+        private void OnBaseValueChanged(GameplayTag tag, float newBaseValue)
+        {
+            RecalculateAttribute(tag);
+        }
+
+        private static void CollectModifierAttributes(IReadOnlyList<Modifier> modifiers, HashSet<GameplayTag> buffer)
+        {
+            for (int i = 0; i < modifiers.Count; i++)
+            {
+                var tag = modifiers[i].Attribute;
+                if (tag.IsValid) buffer.Add(tag);
+            }
+        }
+
+        private void RecalculateAttributes(HashSet<GameplayTag> tags)
+        {
+            foreach (var tag in tags)
+                RecalculateAttribute(tag);
+        }
+
+        private void RecalculateAttribute(GameplayTag tag)
+        {
+            var attribute = _attributes.Get(tag);
+            if (attribute == null) return;
+            float newValue = ModifierAggregator.Aggregate(attribute.BaseValue, tag, _activeEffects);
+            attribute.SetCurrentValue(newValue);
+        }
+
+        private void RecalculateAllAttributes()
         {
             foreach (var kvp in _attributes.All)
             {
@@ -228,5 +322,16 @@ namespace Rubickanov.GAS
                 attribute.SetCurrentValue(newValue);
             }
         }
+
+        private void FireRemovedBatch(List<ActiveEffect> removed)
+        {
+            if (removed.Count == 0) return;
+            var snapshot = removed.ToArray();
+            removed.Clear();
+            for (int i = 0; i < snapshot.Length; i++)
+                EffectRemoved?.Invoke(snapshot[i]);
+        }
+
+        private readonly List<ActiveEffect> _pendingRemoved = new();
     }
 }

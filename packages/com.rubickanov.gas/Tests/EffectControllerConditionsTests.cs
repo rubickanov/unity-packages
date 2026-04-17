@@ -206,15 +206,32 @@ namespace Rubickanov.GAS.Tests
         }
 
         [Test]
-        public void ApplyEffect_RemoveEffectsWithTags_MatchesWhenRemoveSetContainsDescendantOfExisting()
+        public void ApplyEffect_RemoveEffectsWithTags_RemovesExistingWhenEffectTagIsDescendantOfQuery()
         {
-            // ApplyEffect's removal path uses container.HasTag(existingEffectTag), which means:
-            // an existing effect is removed when the RemoveEffectsWithTags container contains
-            // the existing EffectTag OR any descendant of it. So a cleanser carrying the more
-            // specific "Debuff.Burn" tag removes a broader "Debuff" effect.
-            // Note: this is the OPPOSITE direction from the single-tag RemoveEffectsWithTag() method,
-            // which uses EffectTag.Matches(tag) to remove effects whose EffectTag is a descendant
-            // of the query.
+            // Hierarchy-aware: existing.EffectTag.Matches(queryTag) — existing is removed when its
+            // EffectTag is equal to or a descendant of any tag in RemoveEffectsWithTags.
+            // Cleanser with broad "Debuff" removes the more specific "Debuff.Burn" effect.
+            var existing = GasTestFixtures.MakeEffect(
+                DurationPolicy.Duration, 5f,
+                effectTag: "Debuff.Burn");
+            _controller.ApplyEffect(new EffectSpec(existing));
+
+            var cleanser = GasTestFixtures.MakeEffect(
+                DurationPolicy.Duration, 5f,
+                removeEffectsWithTags: new[] { "Debuff" },
+                effectTag: "Effect.Heal");
+            _controller.ApplyEffect(new EffectSpec(cleanser));
+
+            Assert.AreEqual(1, _controller.ActiveEffects.Count);
+            Assert.AreEqual(GasTestFixtures.Tag("Effect.Heal"),
+                _controller.ActiveEffects[0].Def.EffectTag);
+        }
+
+        [Test]
+        public void ApplyEffect_RemoveEffectsWithTags_DoesNotRemoveWhenExistingIsAncestorOfQuery()
+        {
+            // Hierarchy-aware: a cleanser with specific "Debuff.Burn" does NOT remove broader "Debuff"
+            // (Debuff.Matches(Debuff.Burn) is false — Debuff is an ancestor, not a descendant).
             var existing = GasTestFixtures.MakeEffect(
                 DurationPolicy.Duration, 5f,
                 effectTag: "Debuff");
@@ -226,9 +243,7 @@ namespace Rubickanov.GAS.Tests
                 effectTag: "Effect.Heal");
             _controller.ApplyEffect(new EffectSpec(cleanser));
 
-            Assert.AreEqual(1, _controller.ActiveEffects.Count);
-            Assert.AreEqual(GasTestFixtures.Tag("Effect.Heal"),
-                _controller.ActiveEffects[0].Def.EffectTag);
+            Assert.AreEqual(2, _controller.ActiveEffects.Count);
         }
 
         [Test]

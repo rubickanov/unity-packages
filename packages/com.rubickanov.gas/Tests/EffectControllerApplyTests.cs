@@ -40,7 +40,7 @@ namespace Rubickanov.GAS.Tests
 
         private void OnApplied(ActiveEffect e) => _applied.Add(e);
         private void OnRemoved(ActiveEffect e) => _removed.Add(e);
-        private void OnHealthChanged(float v) => _healthChanged.Add(v);
+        private void OnHealthChanged(float oldValue, float newValue) => _healthChanged.Add(newValue);
 
         [Test]
         public void ApplyEffect_InstantAddHealth_ModifiesBaseValue()
@@ -159,14 +159,15 @@ namespace Rubickanov.GAS.Tests
         }
 
         [Test]
-        public void ApplyEffect_InfiniteEffect_RemainingDurationNegative()
+        public void ApplyEffect_InfiniteEffect_DoesNotExpireOnLongTick()
         {
             var def = GasTestFixtures.MakeEffect(DurationPolicy.Infinite);
 
             var handle = _controller.ApplyEffect(new EffectSpec(def));
+            _controller.Tick(9999f);
 
             Assert.IsTrue(handle.IsValid);
-            Assert.Less(_controller.ActiveEffects[0].RemainingDuration, 0f);
+            Assert.AreEqual(1, _controller.ActiveEffects.Count);
         }
 
         [Test]
