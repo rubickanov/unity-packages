@@ -40,7 +40,7 @@ namespace Rubickanov.GAS.Tests
 
             var removed = _controller.RemoveEffect(handle);
 
-            Assert.IsTrue(removed);
+            Assert.AreEqual(1, removed);
             Assert.AreEqual(0, _controller.ActiveEffects.Count);
         }
 
@@ -58,24 +58,23 @@ namespace Rubickanov.GAS.Tests
         }
 
         [Test]
-        public void RemoveEffect_InvalidHandle_ReturnsFalse()
+        public void RemoveEffect_InvalidHandle_ReturnsZero()
         {
             var removed = _controller.RemoveEffect(ActiveEffectHandle.Invalid);
 
-            Assert.IsFalse(removed);
+            Assert.AreEqual(0, removed);
         }
 
         [Test]
-        public void RemoveEffect_UnknownHandle_ReturnsFalse()
+        public void RemoveEffect_UnknownHandle_ReturnsZero()
         {
             var def = GasTestFixtures.MakeEffect(DurationPolicy.Duration, durationSeconds: 5f);
             var knownHandle = _controller.ApplyEffect(new EffectSpec(def));
             _controller.RemoveEffect(knownHandle);
 
-            // Re-using a previously valid handle that no longer corresponds to any active effect.
             var removed = _controller.RemoveEffect(knownHandle);
 
-            Assert.IsFalse(removed);
+            Assert.AreEqual(0, removed);
         }
 
         [Test]

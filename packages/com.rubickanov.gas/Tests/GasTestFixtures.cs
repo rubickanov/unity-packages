@@ -55,8 +55,8 @@ namespace Rubickanov.GAS.Tests
             return container;
         }
 
-        public static Modifier Mod(string attributePath, ModifierOp op, float value)
-            => new Modifier(Tag(attributePath), op, value);
+        public static Modifier Mod(string attributePath, ModifierOp op, float value, int priority = 0)
+            => new Modifier(Tag(attributePath), op, value, priority);
 
         public static EffectDef MakeEffect(
             DurationPolicy duration = DurationPolicy.Instant,
