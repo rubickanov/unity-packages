@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using R3;
@@ -21,14 +22,18 @@ namespace Rubickanov.Localization
             "ar", "he", "fa", "ur", "yi", "ps", "sd", "ug"
         };
 
-        private const string StorageKey = "locale";
+        private const string StorageKey = "localization.locale";
 
         private readonly ILogger<LocalizationService> _logger;
+        private readonly ILogger<LocalizedValue> _localizedValueLogger;
         private readonly IStorageService? _storage;
         private readonly Dictionary<LocalizationKey, LocalizedString> _cache = new();
         private readonly ReactiveProperty<LangLocale> _currentLocale;
         private readonly ReactiveProperty<bool> _isRtl;
         private readonly Subject<Locale> _onLocaleChanged;
+
+        private LangLocale[] _cachedAvailableLocales = Array.Empty<LangLocale>();
+        private UniTask _pendingSave = UniTask.CompletedTask;
         private bool _disposed;
 
         public ReadOnlyReactiveProperty<LangLocale> CurrentLocale => _currentLocale;
@@ -40,6 +45,7 @@ namespace Rubickanov.Localization
             IStorageService? storage = null)
         {
             _logger = loggerFactory.CreateLogger<LocalizationService>();
+            _localizedValueLogger = loggerFactory.CreateLogger<LocalizedValue>();
             _storage = storage;
 
             _currentLocale = new ReactiveProperty<LangLocale>(LangLocale.Empty);
@@ -49,11 +55,24 @@ namespace Rubickanov.Localization
             LocalizationSettings.SelectedLocaleChanged += OnSelectedLocaleChanged;
         }
 
-        public async UniTask InitializeAsync()
+        public async UniTask InitializeAsync(CancellationToken cancellationToken = default)
         {
             await LocalizationSettings.InitializationOperation;
+            cancellationToken.ThrowIfCancellationRequested();
+
             _logger.ZLogDebug($"LocalizationService initialized");
+            CacheAvailableLocales();
             RestoreSavedLocale();
+        }
+
+        private void CacheAvailableLocales()
+        {
+            var locales = LocalizationSettings.AvailableLocales.Locales;
+            _cachedAvailableLocales = new LangLocale[locales.Count];
+            for (var i = 0; i < locales.Count; i++)
+            {
+                _cachedAvailableLocales[i] = new LangLocale(locales[i].Identifier.Code);
+            }
         }
 
         private void RestoreSavedLocale()
@@ -76,9 +95,17 @@ namespace Rubickanov.Localization
             {
                 if (locale.Identifier.Code == savedLocaleCode)
                 {
-                    LocalizationSettings.SelectedLocale = locale;
-                    _currentLocale.Value = new LangLocale(savedLocaleCode);
-                    _isRtl.Value = IsRtlLocale(savedLocaleCode);
+                    if (LocalizationSettings.SelectedLocale != locale)
+                    {
+                        LocalizationSettings.SelectedLocale = locale;
+                        // OnSelectedLocaleChanged will populate _currentLocale / _isRtl.
+                    }
+                    else
+                    {
+                        // Already selected — Unity will not fire the event, set manually.
+                        _currentLocale.Value = new LangLocale(savedLocaleCode);
+                        _isRtl.Value = IsRtlLocale(savedLocaleCode);
+                    }
                     _logger.ZLogDebug($"Restored saved locale: {savedLocaleCode}");
                     return;
                 }
@@ -88,7 +115,9 @@ namespace Rubickanov.Localization
             var defaultCode = defaultLocale?.Identifier.Code ?? string.Empty;
             _currentLocale.Value = new LangLocale(defaultCode);
             _isRtl.Value = IsRtlLocale(defaultCode);
-            _logger.ZLogWarning($"Saved locale '{savedLocaleCode}' not found, using default");
+            _logger.ZLogWarning($"Saved locale '{savedLocaleCode}' not found, clearing.");
+
+            ChainSave(string.Empty);
         }
 
         private static bool IsRtlLocale(string localeCode)
@@ -96,7 +125,8 @@ namespace Rubickanov.Localization
             if (string.IsNullOrEmpty(localeCode))
                 return false;
 
-            var primaryCode = localeCode.Split('-')[0];
+            var dash = localeCode.IndexOf('-');
+            var primaryCode = dash < 0 ? localeCode : localeCode.Substring(0, dash);
             return RtlLocaleCodes.Contains(primaryCode);
         }
 
@@ -129,15 +159,15 @@ namespace Rubickanov.Localization
 
         public LocalizedValue Localize(LocalizationKey key)
         {
-            return new LocalizedValue(GetOrCreateLocalizedString(key), _onLocaleChanged, ResolveLocalizedString);
+            return new LocalizedValue(GetOrCreateLocalizedString(key), _onLocaleChanged, ResolveLocalizedString, logger: _localizedValueLogger);
         }
 
         public LocalizedValue Localize(LocalizationKey key, params object[] arguments)
         {
-            return new LocalizedValue(GetOrCreateLocalizedString(key), _onLocaleChanged, ResolveLocalizedString, arguments);
+            return new LocalizedValue(GetOrCreateLocalizedString(key), _onLocaleChanged, ResolveLocalizedString, arguments, _localizedValueLogger);
         }
 
-        public UniTask SetLocaleAsync(string localeCode)
+        public async UniTask SetLocaleAsync(string localeCode, CancellationToken cancellationToken = default)
         {
             _logger.ZLogDebug($"Setting locale to: {localeCode}");
 
@@ -156,36 +186,48 @@ namespace Rubickanov.Localization
             if (targetLocale == null)
             {
                 _logger.ZLogWarning($"Locale not found: {localeCode}");
-                return UniTask.CompletedTask;
+                return;
             }
 
-            LocalizationSettings.SelectedLocale = targetLocale;
+            if (LocalizationSettings.SelectedLocale == targetLocale)
+                return;
 
-            _logger.ZLogInformation($"Locale changed to: {localeCode}");
-            return UniTask.CompletedTask;
-        }
+            var tcs = new UniTaskCompletionSource();
+            IDisposable? subscription = null;
+            subscription = _onLocaleChanged
+                .Where(localeCode, static (l, code) => l.Identifier.Code == code)
+                .Take(1)
+                .Subscribe(tcs, static (_, t) => t.TrySetResult());
 
-        public UniTask SetLocaleAsync(LangLocale locale)
-        {
-            return SetLocaleAsync(locale.Code);
-        }
-
-        public LangLocale[] GetAvailableLocales()
-        {
-            var locales = LocalizationSettings.AvailableLocales.Locales;
-            var result = new LangLocale[locales.Count];
-
-            for (var i = 0; i < locales.Count; i++)
+            using var ctRegistration = cancellationToken.Register(() =>
             {
-                var code = locales[i].Identifier.Code;
-                result[i] = new LangLocale(code);
-            }
+                subscription?.Dispose();
+                tcs.TrySetCanceled(cancellationToken);
+            });
 
-            return result;
+            try
+            {
+                LocalizationSettings.SelectedLocale = targetLocale;
+                await tcs.Task;
+            }
+            finally
+            {
+                subscription?.Dispose();
+            }
         }
+
+        public UniTask SetLocaleAsync(LangLocale locale, CancellationToken cancellationToken = default)
+        {
+            return SetLocaleAsync(locale.Code, cancellationToken);
+        }
+
+        public LangLocale[] GetAvailableLocales() => _cachedAvailableLocales;
 
         private LocalizedString GetOrCreateLocalizedString(LocalizationKey key)
         {
+            if (!key.IsValid)
+                throw new ArgumentException("LocalizationKey is not valid (default or empty).", nameof(key));
+
             if (_cache.TryGetValue(key, out var cached))
                 return cached;
 
@@ -204,13 +246,41 @@ namespace Rubickanov.Localization
             var code = locale.Identifier.Code;
             var isRtl = IsRtlLocale(code);
 
-            _logger.ZLogDebug($"Locale changed event: {code}, RTL: {isRtl}");
+            _logger.ZLogInformation($"Locale changed: {code}, RTL: {isRtl}");
 
             _currentLocale.Value = new LangLocale(code);
             _isRtl.Value = isRtl;
             _onLocaleChanged.OnNext(locale);
 
-            _storage?.SetString(StorageKey, code).Forget();
+            ChainSave(code);
+        }
+
+        private void ChainSave(string code)
+        {
+            if (_storage == null) return;
+
+            _pendingSave = SaveSerialized(_pendingSave, code);
+        }
+
+        private async UniTask SaveSerialized(UniTask previous, string code)
+        {
+            try
+            {
+                await previous;
+            }
+            catch
+            {
+                // previous save already logged its own error
+            }
+
+            try
+            {
+                await _storage!.SetString(StorageKey, code);
+            }
+            catch (Exception ex)
+            {
+                _logger.ZLogError(ex, $"Failed to save locale '{code}' to storage");
+            }
         }
 
         public void Dispose()

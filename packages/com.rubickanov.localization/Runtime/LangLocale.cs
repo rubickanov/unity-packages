@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Rubickanov.Localization
 {
@@ -37,7 +38,7 @@ namespace Rubickanov.Localization
         /// <summary>
         /// Empty locale representing no selection.
         /// </summary>
-        public static LangLocale Empty => new(string.Empty, string.Empty, string.Empty);
+        public static readonly LangLocale Empty = new(string.Empty, string.Empty, string.Empty);
 
         public bool IsEmpty => string.IsNullOrEmpty(Code);
 
@@ -90,32 +91,63 @@ namespace Rubickanov.Localization
 
         /// <summary>
         /// Gets the English name for a language code.
+        /// Overrides from the built-in 28-language table take precedence;
+        /// unknown codes fall back to <see cref="CultureInfo"/>, then to uppercase code.
         /// </summary>
         public static string GetNameForCode(string code)
         {
             if (string.IsNullOrEmpty(code))
                 return string.Empty;
 
-            var primaryCode = code.Split('-')[0];
+            var primaryCode = GetPrimaryCode(code);
 
-            return LanguageNames.TryGetValue(primaryCode, out var names)
-                ? names.Name
+            if (LanguageNames.TryGetValue(primaryCode, out var names))
+                return names.Name;
+
+            return TryGetCultureDisplayName(code, native: false, out var cultureName)
+                ? cultureName
                 : code.ToUpperInvariant();
         }
 
         /// <summary>
         /// Gets the native name for a language code.
+        /// Overrides from the built-in 28-language table take precedence;
+        /// unknown codes fall back to <see cref="CultureInfo"/>, then to uppercase code.
         /// </summary>
         public static string GetNativeNameForCode(string code)
         {
             if (string.IsNullOrEmpty(code))
                 return string.Empty;
 
-            var primaryCode = code.Split('-')[0];
+            var primaryCode = GetPrimaryCode(code);
 
-            return LanguageNames.TryGetValue(primaryCode, out var names)
-                ? names.NativeName
+            if (LanguageNames.TryGetValue(primaryCode, out var names))
+                return names.NativeName;
+
+            return TryGetCultureDisplayName(code, native: true, out var cultureName)
+                ? cultureName
                 : code.ToUpperInvariant();
+        }
+
+        private static string GetPrimaryCode(string code)
+        {
+            var dash = code.IndexOf('-');
+            return dash < 0 ? code : code.Substring(0, dash);
+        }
+
+        private static bool TryGetCultureDisplayName(string code, bool native, out string result)
+        {
+            try
+            {
+                var culture = CultureInfo.GetCultureInfo(code);
+                result = native ? culture.NativeName : culture.EnglishName;
+                return !string.IsNullOrEmpty(result);
+            }
+            catch (CultureNotFoundException)
+            {
+                result = string.Empty;
+                return false;
+            }
         }
     }
 }
