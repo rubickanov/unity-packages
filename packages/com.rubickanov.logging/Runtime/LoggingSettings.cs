@@ -36,5 +36,13 @@ namespace Rubickanov.Logging
                 return _instance;
             }
         }
+
+        // Reset on Play Mode enter so stale cache from a previous session
+        // doesn't survive when Enter Play Mode > Reload Domain is disabled.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            _instance = null;
+        }
     }
 }

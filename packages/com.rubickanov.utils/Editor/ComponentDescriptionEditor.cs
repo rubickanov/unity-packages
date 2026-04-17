@@ -14,6 +14,8 @@ namespace Rubickanov.Utils.Editor
     [CanEditMultipleObjects]
     public class ComponentDescriptionEditor : UnityEditor.Editor
     {
+        private static GUIStyle? _style;
+
         private string? _description;
 
         private void OnEnable()
@@ -25,17 +27,18 @@ namespace Rubickanov.Utils.Editor
         {
             if (_description != null)
             {
-                var style = new GUIStyle(EditorStyles.miniLabel)
-                {
-                    wordWrap = true,
-                    fontStyle = FontStyle.Italic,
-                    normal = { textColor = new Color(1f, 1f, 1f, 0.35f) }
-                };
-                EditorGUILayout.LabelField(_description, style);
+                EditorGUILayout.LabelField(_description, GetStyle());
                 EditorGUILayout.Space(2);
             }
 
             DrawDefaultInspector();
         }
+
+        private static GUIStyle GetStyle() => _style ??= new GUIStyle(EditorStyles.miniLabel)
+        {
+            wordWrap = true,
+            fontStyle = FontStyle.Italic,
+            normal = { textColor = new Color(1f, 1f, 1f, 0.35f) }
+        };
     }
 }

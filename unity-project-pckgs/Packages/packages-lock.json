@@ -100,7 +100,18 @@
       "version": "file:../../packages/com.rubickanov.devconsole",
       "depth": 0,
       "source": "local",
-      "dependencies": {}
+      "dependencies": {
+        "com.unity.inputsystem": "1.7.0"
+      }
+    },
+    "com.rubickanov.devconsole.config": {
+      "version": "file:../../packages/com.rubickanov.devconsole.config",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.rubickanov.devconsole": "1.0.0",
+        "com.rubickanov.config": "1.0.0"
+      }
     },
     "com.rubickanov.devconsole.netcode": {
       "version": "file:../../packages/com.rubickanov.devconsole.netcode",

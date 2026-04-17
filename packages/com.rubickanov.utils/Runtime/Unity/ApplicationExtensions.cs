@@ -1,4 +1,7 @@
+#nullable enable
+#if UNITY_EDITOR
 using UnityEditor;
+#endif
 
 namespace Rubickanov.Utils
 {

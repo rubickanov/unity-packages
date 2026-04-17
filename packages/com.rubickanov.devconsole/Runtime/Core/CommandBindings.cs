@@ -81,6 +81,14 @@ namespace Rubickanov.DevConsole
             return removed;
         }
 
+        /// <summary>Removes all bindings and clears persisted storage.</summary>
+        public void Clear()
+        {
+            _bindings.Clear();
+            PlayerPrefs.DeleteKey(PrefsKey);
+            PlayerPrefs.Save();
+        }
+
         /// <summary>Parses a key name string to a Key enum value.</summary>
         public static bool TryParseKey(string keyName, out Key key)
         {

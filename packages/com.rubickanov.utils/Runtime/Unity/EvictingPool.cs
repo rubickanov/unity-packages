@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -14,13 +15,14 @@ namespace Rubickanov.Utils
     /// pool immediately. Use the callback for fade-out or other deferred release — call
     /// <see cref="Release"/> when done.
     /// </remarks>
-    public class EvictingPool<T> : IDisposable where T : Component
+    public sealed class EvictingPool<T> : IDisposable where T : Component
     {
         private readonly ObjectPool<T> _pool;
         private readonly LinkedList<T> _active = new();
         private readonly Dictionary<T, LinkedListNode<T>> _nodeMap = new();
         private readonly int _maxActive;
         private readonly Action<T, Action<T>>? _onEvict;
+        private bool _disposed;
 
         /// <summary>Number of items currently in active use (not counting items being evicted).</summary>
         public int ActiveCount => _active.Count;
@@ -57,6 +59,7 @@ namespace Rubickanov.Utils
         /// </summary>
         public T Get()
         {
+            ThrowIfDisposed();
             if (_active.Count >= _maxActive)
                 EvictOldest();
 
@@ -71,6 +74,7 @@ namespace Rubickanov.Utils
         /// </summary>
         public T Get(Vector3 position, Quaternion rotation)
         {
+            ThrowIfDisposed();
             if (_active.Count >= _maxActive)
                 EvictOldest();
 
@@ -85,14 +89,31 @@ namespace Rubickanov.Utils
         /// </summary>
         public void Release(T item)
         {
+            ThrowIfDisposed();
             if (_nodeMap.Remove(item, out var node))
                 _active.Remove(node);
             _pool.Release(item);
         }
 
+        /// <summary>
+        /// Returns all active items to the pool immediately. Bypasses the <c>onEvict</c> callback —
+        /// intended for scene teardown or bulk clear.
+        /// </summary>
+        public void ReleaseAll()
+        {
+            ThrowIfDisposed();
+            foreach (var kvp in _nodeMap)
+                _pool.Release(kvp.Key);
+            _active.Clear();
+            _nodeMap.Clear();
+        }
+
         /// <summary>Disposes the pool and all tracked items.</summary>
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
+
             _active.Clear();
             _nodeMap.Clear();
             _pool.Dispose();
@@ -108,6 +129,12 @@ namespace Rubickanov.Utils
                 _onEvict(oldest, _pool.Release);
             else
                 _pool.Release(oldest);
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(EvictingPool<T>));
         }
     }
 }

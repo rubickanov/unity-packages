@@ -15,6 +15,9 @@ namespace Rubickanov.DevConsole
         /// <summary>The most recently created CommandHistory instance.</summary>
         public static CommandHistory? Current { get; private set; }
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => Current = null;
+
         /// <summary>Read-only view of all history entries (oldest first).</summary>
         public IReadOnlyList<string> Entries => _history;
 
@@ -47,6 +50,15 @@ namespace Rubickanov.DevConsole
         }
 
         public void ResetCursor() { _cursor = -1; _savedInput = null; }
+
+        /// <summary>Removes all history entries and clears persisted storage.</summary>
+        public void Clear()
+        {
+            _history.Clear();
+            ResetCursor();
+            PlayerPrefs.DeleteKey(PrefsKey);
+            PlayerPrefs.Save();
+        }
 
         private void Save()
         {

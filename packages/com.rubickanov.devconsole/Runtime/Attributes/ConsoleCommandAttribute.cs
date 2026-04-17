@@ -2,7 +2,10 @@ using System;
 
 namespace Rubickanov.DevConsole
 {
-    /// <summary>Marks a static method as a console command. Discovered automatically at startup.</summary>
+    /// <summary>
+    /// Marks a method as a console command. Static methods are discovered automatically at startup;
+    /// instance methods must be registered explicitly via <see cref="CommandRegistry.RegisterTarget(object)"/>.
+    /// </summary>
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
     public class ConsoleCommandAttribute : Attribute
     {

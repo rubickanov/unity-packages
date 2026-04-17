@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 using Rubickanov.Utils;
 
@@ -111,6 +112,30 @@ namespace Rubickanov.Utils.Tests
         }
 
         [Test]
+        public void Int_MaxEqualsMin_ThrowsArgumentException()
+        {
+            Assert.Throws<ArgumentException>(() => DeterministicRandom.Int(1u, 2u, 5, 5));
+        }
+
+        [Test]
+        public void Int_MaxLessThanMin_ThrowsArgumentException()
+        {
+            Assert.Throws<ArgumentException>(() => DeterministicRandom.Int(1u, 2u, 10, 5));
+        }
+
+        [Test]
+        public void Int3_MaxEqualsMin_ThrowsArgumentException()
+        {
+            Assert.Throws<ArgumentException>(() => DeterministicRandom.Int(1u, 2u, 3u, 5, 5));
+        }
+
+        [Test]
+        public void Int3_MaxLessThanMin_ThrowsArgumentException()
+        {
+            Assert.Throws<ArgumentException>(() => DeterministicRandom.Int(1u, 2u, 3u, 10, 5));
+        }
+
+        [Test]
         public void Int_AlwaysInBounds([Range(0u, 100u, 1u)] uint a)
         {
             int value = DeterministicRandom.Int(a, 7, 5, 15);
@@ -153,9 +178,41 @@ namespace Rubickanov.Utils.Tests
         }
 
         [Test]
+        public void Bool3_SameInputs_ReturnsSameResult()
+        {
+            bool a = DeterministicRandom.Bool(1u, 2u, 3u);
+            bool b = DeterministicRandom.Bool(1u, 2u, 3u);
+
+            Assert.AreEqual(a, b);
+        }
+
+        [Test]
+        public void Bool3_NotAlwaysSame()
+        {
+            bool foundTrue = false;
+            bool foundFalse = false;
+            for (uint i = 0; i < 100; i++)
+            {
+                if (DeterministicRandom.Bool(i, 0u, 7u)) foundTrue = true;
+                else foundFalse = true;
+            }
+
+            Assert.IsTrue(foundTrue, "Bool3 never returned true");
+            Assert.IsTrue(foundFalse, "Bool3 never returned false");
+        }
+
+        [Test]
         public void Sign_ReturnsOnlyMinusOneOrPlusOne([Range(0u, 50u, 1u)] uint a)
         {
             float value = DeterministicRandom.Sign(a, 42);
+
+            Assert.That(value == -1f || value == 1f);
+        }
+
+        [Test]
+        public void Sign3_ReturnsOnlyMinusOneOrPlusOne([Range(0u, 50u, 1u)] uint a)
+        {
+            float value = DeterministicRandom.Sign(a, 42u, 7u);
 
             Assert.That(value == -1f || value == 1f);
         }

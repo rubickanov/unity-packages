@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -85,9 +84,20 @@ namespace Rubickanov.DevConsole.Commands
             Type? foundType = null;
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                foundType = assembly.GetTypes().FirstOrDefault(t =>
-                    string.Equals(t.Name, type, StringComparison.OrdinalIgnoreCase) &&
-                    typeof(Component).IsAssignableFrom(t));
+                Type[] types;
+                try { types = assembly.GetTypes(); }
+                catch { continue; }
+
+                for (int i = 0; i < types.Length; i++)
+                {
+                    var t = types[i];
+                    if (string.Equals(t.Name, type, StringComparison.OrdinalIgnoreCase) &&
+                        typeof(Component).IsAssignableFrom(t))
+                    {
+                        foundType = t;
+                        break;
+                    }
+                }
                 if (foundType != null) break;
             }
 
