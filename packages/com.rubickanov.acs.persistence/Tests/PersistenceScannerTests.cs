@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using ObservableCollections;
 using R3;
@@ -11,6 +13,21 @@ namespace Rubickanov.ACS.Tests.Persistence
     [TestFixture]
     public class PersistenceScannerTests
     {
+        // PersistenceScanner keeps a static per-Type Cache that lives for the whole Unity
+        // domain. A second test run without a domain reload sees the previous run's cache,
+        // and negative tests that expect a LogError on the first scan stop seeing it
+        // (cache hit → early return before the Debug.LogError line). Clear the cache via
+        // reflection so every test starts against a cold scanner.
+        [SetUp]
+        public void ClearScannerStaticCache()
+        {
+            var field = typeof(PersistenceScanner).GetField("Cache",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.IsNotNull(field,
+                "PersistenceScanner must have a private static field 'Cache' — rename detected?");
+            ((IDictionary)field.GetValue(null)).Clear();
+        }
+
         private sealed class PlainAspect : IEntityAspect
         {
             public readonly ReactiveProperty<int> Untagged = new(0);
