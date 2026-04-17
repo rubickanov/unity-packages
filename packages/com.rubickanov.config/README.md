@@ -1,12 +1,12 @@
 # Config
 
-Type-safe config loading via Addressables with caching, validation, and catalog refresh for remote content updates.
+Type-safe config loading with caching, validation, and catalog refresh for remote content updates. Backed by Unity Addressables by default; swap the loader to test without the Addressables runtime.
 
 ## Dependencies
 
 - `UniTask` — async operation execution
-- `Unity.Addressables` — asset loading
-- `ZLogger` — structured logging
+- `Unity.Addressables` — default asset loader backend
+- `Microsoft.Extensions.Logging.Abstractions` — logging abstraction (plug in any backend: ZLogger, Serilog, etc.)
 
 ## Architecture
 
@@ -14,13 +14,16 @@ Type-safe config loading via Addressables with caching, validation, and catalog 
 IConfigService ──► [RegisterConfig("address")]
        │                    │
        ▼                    ▼
- ConfigService         ConfigBase (ScriptableObject)
- (cache + handles)          │
-                            ├── ConfigDatabase<T>
-                            └── (game configs)
+ ConfigService ──► IAssetLoader ──► AddressablesAssetLoader (default)
+ (cache + pending)                  FakeAssetLoader (tests)
+       │
+       ▼
+ ConfigBase (ScriptableObject)
+       ├── ConfigDatabase<T>
+       └── (game configs)
 ```
 
-**ConfigService** loads configs by type, resolving addresses from `[RegisterConfig]` attributes. Loaded assets are cached with Addressable handle tracking. `ReleaseAll()` frees all handles for clean scene transitions.
+**ConfigService** loads configs by type, resolving addresses from `[RegisterConfig]` attributes via a pluggable `IAssetLoader`. Concurrent `LoadAsync<T>()` calls for the same type are coalesced — the asset is fetched once. `ReleaseAll()` frees all tracked handles for clean scene transitions.
 
 ## Quick Start
 
@@ -39,6 +42,8 @@ public class GameSettings : ConfigBase
 2. Register in your LifetimeScope:
 
 ```csharp
+builder.Register<ILoggerFactory>(_ => NullLoggerFactory.Instance, Lifetime.Singleton);
+builder.Register<IAssetLoader, AddressablesAssetLoader>(Lifetime.Singleton);
 builder.Register<IConfigService, ConfigService>(Lifetime.Singleton);
 ```
 
@@ -47,8 +52,11 @@ builder.Register<IConfigService, ConfigService>(Lifetime.Singleton);
 ```csharp
 var config = await configService.LoadAsync<GameSettings>();
 
-// Later, synchronous access (throws if not loaded):
-var config = configService.Get<GameSettings>();
+// Synchronous access after load (throws if not loaded):
+var same = configService.Get<GameSettings>();
+
+// Non-throwing lookup:
+if (configService.TryGet<GameSettings>(out var maybe)) { /* ... */ }
 ```
 
 ## Usage
@@ -56,17 +64,20 @@ var config = configService.Get<GameSettings>();
 ### Loading Configs
 
 ```csharp
-// Async load (caches automatically):
 var settings = await configService.LoadAsync<GameSettings>();
+var again = configService.Get<GameSettings>();
+```
 
-// Synchronous access to already-loaded config:
-var settings = configService.Get<GameSettings>();
+### Cancellation
+
+```csharp
+var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+var settings = await configService.LoadAsync<GameSettings>(cts.Token);
 ```
 
 ### Remote Content Updates
 
 ```csharp
-// Between scenes:
 configService.ReleaseAll();
 await configService.RefreshCatalogIfNeededAsync();
 var freshConfig = await configService.LoadAsync<GameSettings>();
@@ -81,7 +92,7 @@ public class ItemDatabase : ConfigDatabase<ItemData>
 }
 
 [Serializable]
-public class ItemData : IIdentifiable
+public class ItemData : ConfigBase, IIdentifiable
 {
     [SerializeField] private string _id;
     [SerializeField] private int _price;
@@ -90,11 +101,12 @@ public class ItemData : IIdentifiable
     public int Price => _price;
 }
 
-// Usage:
 var db = configService.Get<ItemDatabase>();
 var sword = db.Get("sword");       // O(1) lookup
 var allItems = db.All;             // IReadOnlyList<ItemData>
 ```
+
+`ConfigDatabase<T>.Validate()` flags duplicate or empty `Id` values. With the default fail-fast policy, invalid databases throw at `LoadAsync` time instead of being silently cached.
 
 ### Validation
 
@@ -116,19 +128,26 @@ public class BalanceConfig : ConfigBase
 }
 ```
 
+`LoadAsync<T>()` throws `InvalidOperationException` and releases the handle when `Validate()` returns `false` — the invalid config never enters the cache.
+
 ### Cleanup
 
 ```csharp
-// Release all cached configs and Addressable handles:
 configService.ReleaseAll();
-
-// Or via IDisposable:
 configService.Dispose();
 ```
+
+After `Dispose()` every method on the service throws `ObjectDisposedException`.
+
+### Testing
+
+Provide a custom `IAssetLoader` (e.g. a fake backed by a `Dictionary<string, ScriptableObject>`) to test code that depends on `IConfigService` without bringing up the Addressables runtime.
 
 ## Design Decisions
 
 - **Attribute-based addresses** — each config type declares its own Addressable address via `[RegisterConfig]`. No centralized path registry.
-- **Caching with handle tracking** — loaded configs are cached by type. Addressable handles are tracked for proper release.
-- **No hot reload** — config updates happen between scenes via `ReleaseAll()` + `RefreshCatalog` + `LoadAsync`. Simpler than reactive in-place reload.
-- **ConfigDatabase O(1) lookup** — lazy `Dictionary` built on first `Get()` call.
+- **Pluggable loader** — `IAssetLoader` decouples the service from Addressables, keeping EditMode tests fast and the production path simple.
+- **Fail-fast validation** — invalid configs never reach the consumer; the service throws and releases the handle.
+- **Coalesced concurrent loads** — duplicate `LoadAsync<T>()` calls for the same type share a single underlying load.
+- **No hot reload** — config updates happen between scenes via `ReleaseAll()` + `RefreshCatalogIfNeededAsync()` + `LoadAsync()`. Simpler than reactive in-place reload.
+- **ConfigDatabase O(1) lookup** — lazy `Dictionary` built on first `Get()` call; rebuilt in the editor after inspector changes.

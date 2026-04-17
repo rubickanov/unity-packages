@@ -3,7 +3,9 @@
     "rootNamespace": "Rubickanov.Config.Tests",
     "references": [
         "Config.Runtime",
-        "UniTask"
+        "UniTask",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
     ],
     "includePlatforms": [
         "Editor"
