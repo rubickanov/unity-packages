@@ -69,5 +69,15 @@ namespace Rubickanov.Loading.Tests
         {
             return new FakeOperation(description, (_, _, ct) => UniTask.Never(ct));
         }
+
+        /// <summary>Captures the progress reporter into <paramref name="captured"/> and completes immediately.</summary>
+        public static FakeOperation CapturingProgress(string description, Action<IProgress<float>> captured)
+        {
+            return new FakeOperation(description, (_, progress, _) =>
+            {
+                captured(progress);
+                return UniTask.CompletedTask;
+            });
+        }
     }
 }
