@@ -188,7 +188,22 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 // GetOrCreate returns null when TickRate == 0. Cast through the shared
                 // interface — PredictionManager<TInput> implements IAspectPredictionHook
                 // so this is a plain reference conversion.
-                return (IAspectPredictionHook?)mi.Invoke(null, new object?[] { nm });
+                try
+                {
+                    return (IAspectPredictionHook?)mi.Invoke(null, new object?[] { nm });
+                }
+                catch (TargetInvocationException ex) when (ex.InnerException is NotSupportedException or MissingMethodException or TypeLoadException)
+                {
+                    // IL2CPP strip hit: the closed generic PredictionManager<TInput> was not
+                    // preserved. Surface a targeted error rather than letting an opaque
+                    // TargetInvocationException bubble up — the user's fix is to add TInput
+                    // to Assets/link.xml (see package README "IL2CPP" section).
+                    Debug.LogError(
+                        $"[PredictionBinder] Failed to construct PredictionManager<{tInput.FullName}>. " +
+                        $"Most likely IL2CPP stripped the closed generic — add the type carrying this " +
+                        $"input to Assets/link.xml with preserve=\"all\". Inner: {ex.InnerException}");
+                    return null;
+                }
             }
         }
     }

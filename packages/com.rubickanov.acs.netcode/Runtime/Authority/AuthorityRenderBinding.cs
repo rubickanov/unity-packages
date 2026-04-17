@@ -35,8 +35,11 @@ namespace Rubickanov.ACS.Runtime.Netcode
         where T : unmanaged
     {
         // Injectable clock. Production: wall-clock (Time.unscaledTimeAsDouble). Tests swap this
-        // out for deterministic time control via a fake provider. Static per-closed-generic-type,
-        // so test setup needs to assign it for every T used in the fixture.
+        // out for deterministic time control via a fake provider. Static per-closed-generic-type —
+        // two independent AuthorityRenderBinding<T> instances of the same T share this clock.
+        // In practice fine (all authority writes of a given T want the same wall-clock anyway),
+        // but tests that mutate Clock MUST restore the default in TearDown to avoid leaking a
+        // stale test clock into sibling fixtures that use the same T.
         internal static Func<double> Clock = () => Time.unscaledTimeAsDouble;
 
         // Writes within this wall-clock window are coalesced into _curr without sliding _prev.
@@ -195,10 +198,21 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _prevTime = 0;
             _currTime = 0;
             // Reset so ApplyFromNetwork is free to sample again after a lifecycle
-            // event that tore down the subscribe handler (e.g. OnLostOwnership
-            // disposes _ownerDisposables, removing the Subscribe-side sampler).
-            // Without this, a former owner's InterpolatedValue freezes on the
-            // last local write even as the new owner's writes relay in.
+            // event that tore down the subscribe handler. Without this, a binding that
+            // previously ran on the authority path would keep ignoring incoming network
+            // samples even after the Subscribe-side sampler was disposed.
+            _samplesFromSubscribe = false;
+        }
+
+        /// <summary>
+        /// Ownership-transfer hook. Unlike <see cref="ClearInterpolationState"/>, this preserves
+        /// <c>_prev/_curr/_currTime/_prevTime</c> so the first post-transfer render still has
+        /// a valid render-pair to lerp between. Only drops <c>_samplesFromSubscribe</c> so the
+        /// next <see cref="ApplyFromNetwork"/> (now the sampling path, since the subscribe-sampler
+        /// was just disposed in <c>OnLostOwnership</c>) starts producing samples again.
+        /// </summary>
+        public override void OnAuthorityLost()
+        {
             _samplesFromSubscribe = false;
         }
 

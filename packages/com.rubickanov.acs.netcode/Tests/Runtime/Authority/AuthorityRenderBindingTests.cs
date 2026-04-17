@@ -618,5 +618,94 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             PushSample(binding, 42f);
             Assert.AreEqual(42f, binding.InterpolatedValue, 1e-5f);
         }
+
+        [Test]
+        public void OnAuthorityLost_AfterSubscribeAsAuthority_ApplyFromNetworkSamplesAgain()
+        {
+            _fakeNow = 0.0;
+            var (binding, _) = CreateBinding<float>(initial: 0f);
+            var bag = new DisposableBag();
+            binding.SubscribeAsAuthority(ref bag);
+
+            bag.Dispose();
+            binding.OnAuthorityLost();
+
+            _fakeNow = 1.000;
+            PushSample(binding, 10f);
+            _fakeNow = 1.030;
+            PushSample(binding, 20f);
+
+            _fakeNow = 1.045;
+            binding.TickRender(0.0);
+
+            Assert.AreEqual(15f, binding.InterpolatedValue, 1e-5f);
+        }
+
+        [Test]
+        public void OnAuthorityLost_PreservesPrevCurrAndInterpolatedValue()
+        {
+            var (binding, reactive) = CreateBinding<float>();
+
+            _fakeNow = 1.000;
+            PushSample(binding, 5f);
+            _fakeNow = 1.030;
+            PushSample(binding, 15f);
+            _fakeNow = 1.045;
+            binding.TickRender(0.0);
+            Assert.AreEqual(10f, binding.InterpolatedValue, 1e-5f);
+
+            binding.OnAuthorityLost();
+
+            // Unlike ClearInterpolationState, OnAuthorityLost keeps the render pair live
+            // so the wall-clock smoothing bridges across the ownership transfer instead
+            // of snapping to default.
+            Assert.AreEqual(10f, binding.InterpolatedValue, 1e-5f);
+            Assert.AreEqual(15f, reactive.Value, 1e-5f);
+        }
+
+        [Test]
+        public void OnAuthorityLost_AfterSubscribeAsAuthorityWithPriorSamples_NextNetworkSampleSlidesPair()
+        {
+            _fakeNow = 1.000;
+            var (binding, _) = CreateBinding<float>(initial: 5f);
+            var bag = new DisposableBag();
+
+            // SubscribeAsAuthority replays the current reactive value synchronously as the
+            // bootstrap sample, so _curr = 5 @ 1.000 and _samplesFromSubscribe = true.
+            binding.SubscribeAsAuthority(ref bag);
+
+            // Ownership is taken away: dispose subscription, call OnAuthorityLost.
+            bag.Dispose();
+            binding.OnAuthorityLost();
+
+            // Incoming relayed snapshot lands one tick later. With the pair preserved, this
+            // slides _prev ← 5 @1.000 and _curr ← 20 @1.030 — rendered span is one real tick.
+            _fakeNow = 1.030;
+            PushSample(binding, 20f);
+
+            _fakeNow = 1.045;
+            binding.TickRender(0.0);
+
+            // Midpoint = (5 + 20) / 2 = 12.5 because now=1.045 is exactly halfway through the
+            // 1.000..1.030 span. If OnAuthorityLost had wiped _curr like ClearInterpolationState,
+            // the single 20f sample would bootstrap InterpolatedValue at 20 with no lerp.
+            Assert.AreEqual(12.5f, binding.InterpolatedValue, 1e-5f);
+        }
+
+        [Test]
+        public void OnAuthorityLost_DefaultImpl_NoOpOnPassiveBinding()
+        {
+            // Default OnAuthorityLost on the base ReplicatedFieldBinding is a no-op — only
+            // AuthorityRenderBinding overrides it. A PassiveInterpolated binding MUST NOT
+            // drop interpolation state when called: interpolation continues uninterrupted
+            // on a peer that was never the authority.
+            var reactive = new ReactiveProperty<float>(0f);
+            var binding = (ReplicatedFieldBinding)
+                ReplicatedFieldBindingFactory.Create(reactive, typeof(float), FieldBindingKind.PassiveInterpolated);
+
+            Assert.DoesNotThrow(() => binding.OnAuthorityLost());
+
+            binding.OnDespawn();
+        }
     }
 }

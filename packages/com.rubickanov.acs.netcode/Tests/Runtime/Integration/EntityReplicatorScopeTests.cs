@@ -159,6 +159,28 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         }
 
         [UnityTest]
+        public IEnumerator NestedNetworkObject_ScopeMarkedInsideNestedNO_LogsWarning()
+        {
+            // The nested prefab puts a ServerOnlyMarkerComponent on the child NO. The parent's
+            // NetworkScopeController walks the hierarchy and MUST NOT apply scope to components
+            // under a nested NetworkObject — but if it stays silent, a user mistakenly attaching
+            // [NetworkScope] to a nested-NO component will never learn the attribute was ignored.
+            // The controller logs one warning per such component per peer. Spawning on host +
+            // two pure clients drives ApplyInitial three times, so three warnings are expected.
+            LogAssert.Expect(LogType.Error,
+                "Spawning NetworkObjects with nested NetworkObjects is only supported for scene objects. " +
+                "Child NetworkObjects will not be spawned over the network!");
+            var warningRegex = new System.Text.RegularExpressions.Regex(
+                @"\[NetworkScopeController\] ServerOnlyMarkerComponent on '.*' is marked \[NetworkScope\(ServerOnly\)\] but sits under a nested NetworkObject");
+            for (int i = 0; i < m_NetworkManagers.Length; i++)
+                LogAssert.Expect(LogType.Warning, warningRegex);
+
+            var serverInstance = SpawnObject(_nestedScopePrefab, m_ServerNetworkManager);
+            var networkObjectId = serverInstance.GetComponent<NetworkObject>().NetworkObjectId;
+            yield return WaitForSpawnOnAllClients(networkObjectId);
+        }
+
+        [UnityTest]
         public IEnumerator ServerOnlyComponent_OnPureClient_NeverSubscribes_RegressionSixteen()
         {
             // Regression #16: a scope-disabled EntityNetworkComponent must

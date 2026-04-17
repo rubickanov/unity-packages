@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using R3;
 using Unity.Collections;
 using Unity.Netcode;
@@ -47,6 +48,14 @@ namespace Rubickanov.ACS.Runtime.Netcode
         public abstract void ClearDirty();
         public virtual void OnDespawn() { }
         public virtual void ClearInterpolationState() { }
+        // Ownership-transfer hook. Called on owner-auth bindings when this peer gains OR
+        // loses ownership. Default no-op — most bindings have no authority-specific state.
+        // Authority-sampled bindings (AuthorityRenderBinding) override this to flip off their
+        // subscribe-sampler flag WITHOUT wiping the _prev/_curr render-pair: if the buffer is
+        // cleared, the first post-transfer render falls into the stale-bootstrap branch and
+        // visibly snaps. Keeping the buffer lets the wall-clock smoothing carry the viewer
+        // from the last sample into the first incoming network snapshot.
+        public virtual void OnAuthorityLost() { }
 
         public void MarkDirty() => IsDirty = true;
     }
@@ -248,6 +257,27 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // is IL2CPP-safe for closed generic types whose ctors are preserved either by
         // AotHints.UsedOnlyForAOTCodeGeneration or by user link.xml entries; Expression
         // .Lambda.Compile() is not (no runtime IL emitter on IL2CPP).
+        //
+        // Wraps ConstructorInfo.Invoke and translates the opaque TargetInvocationException
+        // that IL2CPP throws for stripped generic specializations into a targeted error
+        // pointing the user at link.xml. Rethrows unrecognised exceptions so real bugs
+        // inside the ctor still surface.
+        private static ReplicatedFieldBinding InvokeCtorSafe(ConstructorInfo ctor, object[] args, Type bindingType)
+        {
+            try
+            {
+                return (ReplicatedFieldBinding)ctor.Invoke(args);
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException is NotSupportedException or MissingMethodException or TypeLoadException)
+            {
+                Debug.LogError(
+                    $"[ReplicatedFieldBindingFactory] Failed to construct {bindingType.FullName}. " +
+                    $"Most likely IL2CPP stripped the closed generic — add the element / value type " +
+                    $"to Assets/link.xml with preserve=\"all\". Inner: {ex.InnerException}");
+                throw;
+            }
+        }
+
         private static Func<object, object, ReplicatedFieldBinding> BuildFieldFactory(Type valueType)
         {
             var bindingType = typeof(ReplicatedFieldBinding<>).MakeGenericType(valueType);
@@ -255,7 +285,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var codecType = typeof(IFieldCodec<>).MakeGenericType(valueType);
             var ctor = bindingType.GetConstructor(new[] { reactiveType, codecType })
                 ?? throw new InvalidOperationException($"No (ReactiveProperty<T>, IFieldCodec<T>) ctor on {bindingType}.");
-            return (reactive, codec) => (ReplicatedFieldBinding)ctor.Invoke(new[] { reactive, codec });
+            return (reactive, codec) => InvokeCtorSafe(ctor, new[] { reactive, codec }, bindingType);
         }
 
         private static Func<object, object, object, ReplicatedFieldBinding> BuildInterpFactory(Type valueType)
@@ -266,7 +296,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var codecType = typeof(IFieldCodec<>).MakeGenericType(valueType);
             var ctor = bindingType.GetConstructor(new[] { reactiveType, lerpType, codecType })
                 ?? throw new InvalidOperationException($"No (ReactiveProperty<T>, Lerp<T>, IFieldCodec<T>) ctor on {bindingType}.");
-            return (reactive, lerper, codec) => (ReplicatedFieldBinding)ctor.Invoke(new[] { reactive, lerper, codec });
+            return (reactive, lerper, codec) => InvokeCtorSafe(ctor, new[] { reactive, lerper, codec }, bindingType);
         }
 
         // Collection factory. Mirrors the plain-scalar path — same ConstructorInfo.Invoke
@@ -308,7 +338,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var codecType = typeof(IFieldCodec<>).MakeGenericType(elementType);
             var ctor = bindingType.GetConstructor(new[] { listType, codecType })
                 ?? throw new InvalidOperationException($"No (ObservableList<T>, IFieldCodec<T>) ctor on {bindingType}.");
-            return (list, codec) => (ReplicatedFieldBinding)ctor.Invoke(new[] { list, codec });
+            return (list, codec) => InvokeCtorSafe(ctor, new[] { list, codec }, bindingType);
         }
 
         // Dictionary factory. Parallel to CreateObservableList — resolves key codec
@@ -371,7 +401,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var valueCodecType = typeof(IFieldCodec<>).MakeGenericType(valueType);
             var ctor = bindingType.GetConstructor(new[] { dictType, keyCodecType, valueCodecType })
                 ?? throw new InvalidOperationException($"No (ObservableDictionary<K,V>, IObservableDictionaryKeyCodec<K>, IFieldCodec<V>) ctor on {bindingType}.");
-            return (dict, keyCodec, valueCodec) => (ReplicatedFieldBinding)ctor.Invoke(new[] { dict, keyCodec, valueCodec });
+            return (dict, keyCodec, valueCodec) => InvokeCtorSafe(ctor, new[] { dict, keyCodec, valueCodec }, bindingType);
         }
 
         // HashSet factory — mirrors CreateObservableList. Same codec resolution rules
@@ -412,7 +442,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var codecType = typeof(IFieldCodec<>).MakeGenericType(elementType);
             var ctor = bindingType.GetConstructor(new[] { setType, codecType })
                 ?? throw new InvalidOperationException($"No (ObservableHashSet<T>, IFieldCodec<T>) ctor on {bindingType}.");
-            return (set, codec) => (ReplicatedFieldBinding)ctor.Invoke(new[] { set, codec });
+            return (set, codec) => InvokeCtorSafe(ctor, new[] { set, codec }, bindingType);
         }
 
         // Ring-buffer factory — fixed-size variant only. Plain ObservableRingBuffer<T>
@@ -452,7 +482,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var codecType = typeof(IFieldCodec<>).MakeGenericType(elementType);
             var ctor = bindingType.GetConstructor(new[] { bufferType, codecType })
                 ?? throw new InvalidOperationException($"No (ObservableFixedSizeRingBuffer<T>, IFieldCodec<T>) ctor on {bindingType}.");
-            return (buffer, codec) => (ReplicatedFieldBinding)ctor.Invoke(new[] { buffer, codec });
+            return (buffer, codec) => InvokeCtorSafe(ctor, new[] { buffer, codec }, bindingType);
         }
 
         private static Func<object, object, double, object, ReplicatedFieldBinding> BuildAuthorityRenderFactory(Type valueType)
@@ -463,7 +493,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             var codecType = typeof(IFieldCodec<>).MakeGenericType(valueType);
             var ctor = bindingType.GetConstructor(new[] { reactiveType, lerpType, typeof(double), codecType })
                 ?? throw new InvalidOperationException($"No (ReactiveProperty<T>, Lerp<T>, double, IFieldCodec<T>) ctor on {bindingType}.");
-            return (reactive, lerper, tickDelta, codec) => (ReplicatedFieldBinding)ctor.Invoke(new object[] { reactive, lerper, tickDelta, codec });
+            return (reactive, lerper, tickDelta, codec) => InvokeCtorSafe(ctor, new object[] { reactive, lerper, tickDelta, codec }, bindingType);
         }
     }
 }
