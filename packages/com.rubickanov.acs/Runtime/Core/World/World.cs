@@ -20,11 +20,34 @@ namespace Rubickanov.ACS.Runtime
     /// <see cref="Require{T}()"/> and <see cref="Query{T}()"/>. It is assigned via
     /// <see cref="SetCurrent"/> (by <c>MonoWorld</c> or headless callers) and cleared via
     /// <see cref="ClearCurrent"/>. Only one world may be active at a time.
+    /// <para/>
+    /// <b>Thread safety:</b> not thread-safe. The embedded <see cref="AspectStore"/> and
+    /// <see cref="EntityRegistry"/> both perform unsynchronized dictionary operations;
+    /// concurrent <c>Require</c>/<c>Register</c>/<c>Query</c> from multiple threads can
+    /// corrupt the registry or produce duplicate/dropped aspects. The static
+    /// <see cref="Current"/> slot is likewise an unprotected field. Headless consumers
+    /// that wish to tick the world from a non-main thread must serialize access
+    /// externally — a single "world lock" covering the tick boundary is the intended
+    /// pattern. A locking variant may be added if a real consumer requires it; the
+    /// default stays lock-free so per-call overhead matches the Unity single-thread case.
     /// </remarks>
     public sealed class World : IEntity, IDisposable
     {
         /// <summary>The currently active world, or <c>null</c> if none is assigned.</summary>
         public static World? Current { get; private set; }
+
+        /// <summary>
+        /// Fires when <see cref="Current"/> transitions from null to a newly-assigned world —
+        /// i.e. on the <see cref="SetCurrent"/> call that actually changes the slot. Used by
+        /// <see cref="MonoEntity"/> to retroactively register itself when it <c>Awoke</c>
+        /// before any world was current (scene spawned without a <c>MonoWorld</c>, then a
+        /// <c>MonoWorld</c> is dropped in later). Does not fire for <see cref="ClearCurrent"/>
+        /// nor for an idempotent <c>SetCurrent</c> with the same instance.
+        /// <para/>
+        /// Cleared each play session via <see cref="ResetStaticEvents"/>, so Domain-Reload-disabled
+        /// runs cannot carry stale subscribers from the previous session into the next.
+        /// </summary>
+        public static event Action<World>? CurrentChanged;
 
         /// <summary>
         /// Assigns <paramref name="world"/> as the <see cref="Current"/> world. Throws if a
@@ -37,7 +60,11 @@ namespace Rubickanov.ACS.Runtime
             if (Current != null && Current != world)
                 throw new InvalidOperationException(
                     "Another World is already set as Current. ClearCurrent the previous world before assigning a new one.");
+            var changed = Current != world;
             Current = world;
+            // Fire after the slot is updated so handlers observing Current see the new value.
+            // Skip the idempotent-reassign case so retroactive-register handlers don't re-run.
+            if (changed) CurrentChanged?.Invoke(world);
         }
 
         /// <summary>
@@ -60,6 +87,15 @@ namespace Rubickanov.ACS.Runtime
         internal static void ForceResetCurrent() => Current = null;
 
         /// <summary>
+        /// Clears <see cref="CurrentChanged"/> subscribers. Paired with <see cref="ForceResetCurrent"/>
+        /// in <c>MonoWorld</c>'s <c>[RuntimeInitializeOnLoadMethod]</c> so Domain-Reload-disabled
+        /// runs start every Play session with an empty subscriber list — otherwise handlers from
+        /// destroyed MonoEntities in the previous session would fire when the new session's first
+        /// MonoWorld assigns Current.
+        /// </summary>
+        internal static void ResetStaticEvents() => CurrentChanged = null;
+
+        /// <summary>
         /// Shorthand for <c>Current.Require&lt;T&gt;()</c> — fetches or creates a world-scoped
         /// aspect on the active world. Throws <see cref="InvalidOperationException"/> if no
         /// <see cref="Current"/> world is assigned, matching the contract of <see cref="Query{T}"/>:
@@ -73,6 +109,13 @@ namespace Rubickanov.ACS.Runtime
         /// <see cref="Current"/>. Throws <see cref="InvalidOperationException"/> if no world is
         /// assigned — matches <see cref="Require{T}"/> so callers cannot silently iterate an
         /// empty set when setup is missing.
+        /// <para/>
+        /// <b>The world itself can appear in results.</b> <see cref="World"/> implements
+        /// <see cref="IEntity"/> and self-registers in both the by-id index and any per-aspect
+        /// bucket it touches via <see cref="Require{T}"/>. A query for a world-scoped aspect will
+        /// therefore yield the world as one of its entities. Filter callers that expect only
+        /// "things in the scene" should gate with <c>if (entity is MonoEntity)</c> or keep
+        /// world-scoped aspects in a separate aspect type from entity-scoped ones.
         /// </summary>
         public static EntityQuery<T> Query<T>() where T : class, IEntityAspect
             => GetCurrentOrThrow(nameof(Query)).QueryLocal<T>();
@@ -195,6 +238,10 @@ namespace Rubickanov.ACS.Runtime
 
         private T RequireAspectInternal<T>() where T : class, IEntityAspect, new()
         {
+            // Guard before the store mutation — if we only relied on Register to throw, the
+            // aspect would already be in _store before the throw, leaving the disposed world
+            // with a partially-created state (store has it, registry doesn't).
+            if (_disposed) throw new ObjectDisposedException(nameof(World));
             var instance = _store.GetOrAdd<T>(out var created);
             // Route through the public Register(IEntity, Type) entry point so world-scoped
             // aspect creation flows through the same AspectCreated fire as entity-scoped —
@@ -228,6 +275,12 @@ namespace Rubickanov.ACS.Runtime
         /// </summary>
         public void Register(IEntity entity, Type aspectType)
         {
+            // A disposed world has had its registry cleared — silently accepting new
+            // registrations would create orphans in the per-aspect index that nothing ever
+            // cleans up, and AspectCreated subscribers would see events from a dead world.
+            // Throw loudly instead so "entity outlives its world" bugs surface at the exact
+            // call site. Unregister stays lenient because teardown must be robust.
+            if (_disposed) throw new ObjectDisposedException(nameof(World));
             _registry.Register(entity, aspectType);
             AspectCreated?.Invoke(entity, aspectType);
         }
@@ -249,7 +302,10 @@ namespace Rubickanov.ACS.Runtime
         /// <see cref="EntityRegistry.RegisterById"/>.
         /// </summary>
         public void Register(IEntity entity)
-            => _registry.RegisterById(entity);
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(World));
+            _registry.RegisterById(entity);
+        }
 
         /// <summary>
         /// Removes <paramref name="entity"/> from the by-id index. Called last during an entity's
@@ -286,6 +342,13 @@ namespace Rubickanov.ACS.Runtime
             Destroyed?.Invoke(this);
             _store.Clear();
             _registry.Clear();
+
+            // A world disposed while still Current would leave the static slot pointing at a
+            // dead instance — the next Require/Query would silently create aspects on it or
+            // iterate an empty registry without any signal that the setup is broken. Clear the
+            // slot so the normal "no Current" guard kicks in. Use ForceResetCurrent rather than
+            // ClearCurrent to avoid a silent no-op if Current was already swapped out.
+            if (Current == this) ForceResetCurrent();
         }
 
         // Instance Query overloads — same functionality as the static Query<...> but scoped to

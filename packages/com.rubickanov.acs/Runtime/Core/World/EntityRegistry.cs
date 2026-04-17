@@ -8,6 +8,12 @@ namespace Rubickanov.ACS.Runtime
     /// Type-erased index of entities keyed by the aspect types they carry.
     /// Owned by <see cref="World"/> via composition so it stays independently testable
     /// without Unity's MonoBehaviour lifecycle.
+    /// <para/>
+    /// <b>Thread safety:</b> not thread-safe. Both internal dictionaries and the
+    /// <see cref="HashSet{T}"/> buckets are unsynchronized; concurrent Register/Unregister
+    /// pairs from multiple threads can leave the index in an inconsistent state or lose
+    /// entries. The expected usage is Unity's main thread (single-threaded) or a headless
+    /// loop that serializes world access externally — see <see cref="World"/>'s remarks.
     /// </summary>
     public sealed class EntityRegistry
     {

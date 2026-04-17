@@ -74,7 +74,11 @@ namespace Rubickanov.ACS.Runtime
                 current = current.BaseType;
             }
 
-            return result.ToArray();
+            // CopyTo onto a pre-sized array avoids the temporary that List.ToArray allocates
+            // internally. Cold path (cached per type), but free savings.
+            var array = new FieldInfo[result.Count];
+            result.CopyTo(array);
+            return array;
         }
     }
 }

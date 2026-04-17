@@ -1,6 +1,8 @@
+using System;
 using NUnit.Framework;
 using Rubickanov.ACS.Runtime;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace Rubickanov.ACS.Tests
 {
@@ -26,7 +28,7 @@ namespace Rubickanov.ACS.Tests
         [TearDown]
         public void TearDown()
         {
-            Object.DestroyImmediate(_gameObject);
+            UnityEngine.Object.DestroyImmediate(_gameObject);
         }
 
         [Test]
@@ -73,6 +75,27 @@ namespace Rubickanov.ACS.Tests
         }
 
         [Test]
+        public void Update_TickableThrows_SubsequentTickablesStillRun()
+        {
+            // A single throwing Tick must not skip the rest of the frame. Before the fix,
+            // one AI entity throwing would drop target-selection / cooldowns for every
+            // remaining tickable in the scene that frame. The exception is logged via
+            // Debug.LogException — LogAssert.Expect consumes it so the test passes cleanly.
+            var bomb = new ThrowingTickable();
+            var after = new RecordingTickable();
+            _runner.Register(bomb);
+            _runner.Register(after);
+            LogAssert.Expect(LogType.Exception, "InvalidOperationException: boom");
+
+            InvokeUpdate();
+
+            Assert.AreEqual(1, bomb.TickCount, "Bomb tickable was invoked and threw.");
+            Assert.AreEqual(1, after.TickCount,
+                "A throwing sibling must not shortcut the rest of the tick list — runner is " +
+                "an aggregator, not a fail-fast loop.");
+        }
+
+        [Test]
         public void Tickable_UnregisteringDuringOwnTick_DoesNotBreakSiblings()
         {
             // A tickable that removes itself mid-tick must not corrupt iteration
@@ -106,6 +129,16 @@ namespace Rubickanov.ACS.Tests
         {
             public int TickCount;
             public void Tick(float dt) => TickCount++;
+        }
+
+        private sealed class ThrowingTickable : ITickable
+        {
+            public int TickCount;
+            public void Tick(float dt)
+            {
+                TickCount++;
+                throw new InvalidOperationException("boom");
+            }
         }
 
         private sealed class SelfUnregisteringTickable : ITickable

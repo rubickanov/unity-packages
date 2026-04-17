@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -58,7 +59,15 @@ namespace Rubickanov.ACS.Runtime
 
             float dt = Time.deltaTime;
             for (int i = 0; i < _scratch.Count; i++)
-                _scratch[i].Tick(dt);
+            {
+                // Isolate each tickable. Without the try/catch a single throwing Tick skips
+                // every subsequent tickable for the current frame — an AI entity drops a
+                // target, a cooldown fails to decrement, all because an unrelated sibling
+                // threw. Runner is an aggregator by design (see class docstring), so loud-
+                // and-continue beats fail-fast here.
+                try { _scratch[i].Tick(dt); }
+                catch (Exception ex) { Debug.LogException(ex); }
+            }
         }
     }
 }

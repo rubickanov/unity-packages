@@ -12,6 +12,12 @@ namespace Rubickanov.ACS.Runtime
     /// <para/>
     /// Callers obtain an aspect via <see cref="GetOrAdd{T}"/> and inspect
     /// <paramref name="created"/> to decide whether to fire their own side-effects.
+    /// <para/>
+    /// <b>Thread safety:</b> not thread-safe. Two threads calling <see cref="GetOrAdd{T}"/>
+    /// concurrently can each construct a fresh <typeparamref name="T"/> and the later
+    /// writer wins in the dictionary — both callers get different instances, but only one
+    /// of them is retained. Callers in multi-threaded contexts (headless simulation,
+    /// background jobs) must serialize access externally.
     /// </summary>
     public sealed class AspectStore
     {

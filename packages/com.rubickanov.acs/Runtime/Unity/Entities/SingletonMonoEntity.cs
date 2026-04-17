@@ -53,7 +53,17 @@ namespace Rubickanov.ACS.Runtime
 
         protected override void OnDestroy()
         {
-            if (_destroyedAsDuplicate) return;
+            if (_destroyedAsDuplicate)
+            {
+                // The duplicate never became Instance, so we must not clear Instance here or
+                // fire Destroyed (no subscriber saw it as alive). But we MUST still scrub any
+                // aspects that a sibling EntityComponent on the same GameObject managed to
+                // register between this.Awake and the deferred Destroy — otherwise those
+                // aspects survive in World._registry's per-aspect index for the rest of the
+                // session, and Query<T> iterates dead references.
+                World.Current?.Unregister(this, AspectTypes);
+                return;
+            }
             if (Instance == this)
                 Instance = null;
             base.OnDestroy();

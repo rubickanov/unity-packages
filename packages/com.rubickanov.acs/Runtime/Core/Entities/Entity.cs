@@ -19,6 +19,12 @@ namespace Rubickanov.ACS.Runtime
     /// The lifetime is managed explicitly via <see cref="Dispose"/>. Dispose is
     /// idempotent: the <see cref="Destroyed"/> event fires at most once, and the
     /// aspect dictionary is cleared so subscribers observe an empty entity.
+    /// <para/>
+    /// <b>Thread safety:</b> not thread-safe. <see cref="Require{T}"/> delegates to
+    /// <see cref="AspectStore"/>, which can drop instances under concurrent access
+    /// (see its remarks). <see cref="Dispose"/> is also unprotected — racing a Dispose
+    /// with a <c>Require</c> can produce an aspect on a dying entity. Callers in
+    /// multi-threaded headless contexts must serialize per-entity access externally.
     /// </summary>
     public sealed class Entity : IEntity, IDisposable
     {

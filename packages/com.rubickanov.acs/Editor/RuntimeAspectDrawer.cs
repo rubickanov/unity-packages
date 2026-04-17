@@ -291,19 +291,30 @@ namespace Rubickanov.ACS.Editor
         private Color GetFlashedColor(SignalKey key, string currentDisplay, Color baseColor)
         {
             double now = EditorApplication.timeSinceStartup;
+            double changeTime;
 
             if (_valueTracker.TryGetValue(key, out var tracked))
             {
                 if (tracked.prev != currentDisplay)
+                {
+                    changeTime = now;
                     _valueTracker[key] = (currentDisplay, now);
+                }
+                else
+                {
+                    // Value unchanged — reuse the existing change time without a second lookup.
+                    changeTime = tracked.changeTime;
+                }
             }
             else
             {
+                // First observation of this field — seed with changeTime=0 so the first repaint
+                // doesn't spuriously flash (any non-trivial timeSinceStartup will exceed FlashDuration).
                 _valueTracker[key] = (currentDisplay, 0);
                 return baseColor;
             }
 
-            double elapsed = now - _valueTracker[key].changeTime;
+            double elapsed = now - changeTime;
             if (elapsed >= FlashDuration) return baseColor;
 
             float t = (float)(elapsed / FlashDuration);

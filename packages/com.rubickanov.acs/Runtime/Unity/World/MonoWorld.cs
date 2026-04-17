@@ -27,12 +27,18 @@ namespace Rubickanov.ACS.Runtime
         /// </summary>
         public World World => _world;
 
-        // Reset the pure World.Current slot at the start of every play session. Mirrors
-        // MonoEntity.ResetStaticEvents — if a prior Play Mode exited with an exception and
-        // Domain Reload is disabled in Project Settings, the static pointer would otherwise
-        // survive into the next session and the first SetCurrent call would throw.
+        // Reset the pure World.Current slot AND the CurrentChanged subscriber list at the start
+        // of every play session. Mirrors MonoEntity.ResetStaticEvents — if a prior Play Mode
+        // exited with an exception and Domain Reload is disabled in Project Settings, the static
+        // pointer would otherwise survive into the next session and the first SetCurrent call
+        // would throw; stale handler subscriptions from the previous session's MonoEntities
+        // would fire when this session's first MonoWorld takes over and poke at destroyed objects.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStaticsOnPlayStart() => World.ForceResetCurrent();
+        private static void ResetStaticsOnPlayStart()
+        {
+            World.ForceResetCurrent();
+            World.ResetStaticEvents();
+        }
 
         protected override void Awake()
         {
@@ -49,19 +55,27 @@ namespace Rubickanov.ACS.Runtime
 
         protected override void OnDestroy()
         {
+            // Detach the forwarder immediately — any AspectCreated fired during base.OnDestroy's
+            // Unregister pass is cleanup noise, not something MonoEntity.OnAspectCreated
+            // subscribers should see. But keep World.Current pointing at _world across
+            // base.OnDestroy so MonoEntity.OnDestroy's Destroyed subscribers on peer entities
+            // (their OnDestroy order is not guaranteed by Unity) can still resolve
+            // World.Current to query or unregister. Tearing Current down before base.OnDestroy
+            // breaks the documented "subscribers can still query the world while unwinding"
+            // contract in Entity.Dispose / MonoEntity.OnDestroy.
             if (Instance == this)
-            {
                 _world.AspectCreated -= ForwardAspectCreated;
+
+            base.OnDestroy();
+
+            if (Instance == this)
                 World.ClearCurrent(_world);
-            }
 
             // Dispose unconditionally — a duplicate MonoWorld still ran its field-initializer
             // and owns a World instance that nothing else will clean up. Skipping this for
             // duplicates would leak the World (silently for now, loudly once World grows
             // external references).
             _world.Dispose();
-
-            base.OnDestroy();
         }
 
         private static void ForwardAspectCreated(IEntity entity, Type aspectType)
