@@ -3,10 +3,11 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Cysharp.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace Rubickanov.Storage
 {
-    public class EncryptedStorageService : IStorageService
+    public sealed class EncryptedStorageService : IStorageService
     {
         private const int KeySize = 32;
         private const int IVSize = 16;
@@ -14,11 +15,20 @@ namespace Rubickanov.Storage
         private const int Iterations = 100_000;
 
         private readonly IStorageService _inner;
+        private readonly ILogger<EncryptedStorageService>? _logger;
         private readonly byte[] _key;
 
-        public EncryptedStorageService(IStorageService inner, string passphrase)
+        public EncryptedStorageService(
+            IStorageService inner,
+            string passphrase,
+            ILogger<EncryptedStorageService>? logger = null)
         {
+            if (inner is null) throw new ArgumentNullException(nameof(inner));
+            if (string.IsNullOrEmpty(passphrase))
+                throw new ArgumentException("Passphrase must be non-empty.", nameof(passphrase));
+
             _inner = inner;
+            _logger = logger;
 
             var salt = DeriveStableSalt(passphrase);
             using var deriveBytes = new Rfc2898DeriveBytes(
@@ -83,6 +93,8 @@ namespace Rubickanov.Storage
 
         public UniTask DeleteKey(string key) => _inner.DeleteKey(key);
 
+        public UniTask Clear() => _inner.Clear();
+
         private string Encrypt(string plainText)
         {
             using var aes = Aes.Create();
@@ -122,12 +134,14 @@ namespace Rubickanov.Storage
                 var plainBytes = decryptor.TransformFinalBlock(data, IVSize, data.Length - IVSize);
                 return Encoding.UTF8.GetString(plainBytes);
             }
-            catch (CryptographicException)
+            catch (CryptographicException ex)
             {
+                _logger?.LogWarning("Decryption failed for stored value: {Message}", ex.Message);
                 return null;
             }
-            catch (FormatException)
+            catch (FormatException ex)
             {
+                _logger?.LogWarning("Base64 decode failed for stored value: {Message}", ex.Message);
                 return null;
             }
         }

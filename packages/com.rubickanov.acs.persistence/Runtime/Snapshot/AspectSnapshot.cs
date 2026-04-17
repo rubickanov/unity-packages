@@ -3,10 +3,12 @@ using System.Collections.Generic;
 namespace Rubickanov.ACS.Runtime.Persistence
 {
     /// <summary>
-    /// Serializable, detachable bag of aspect state. Keyed by <see cref="System.Type.FullName"/>
-    /// so the object survives a trip through any serializer the save layer chooses
-    /// (JsonUtility, Newtonsoft, MsgPack, binary, etc.). ACS itself never writes this
-    /// to disk — the save layer owns the format, the file, the slot, and the timing.
+    /// Serializable, detachable bag of aspect state. Keyed by the stable snapshot key —
+    /// <see cref="PersistedKeyAttribute"/> when present on the aspect type,
+    /// <see cref="System.Type.FullName"/> otherwise. The object survives a trip through
+    /// any serializer the save layer chooses (JsonUtility, Newtonsoft, MsgPack, binary,
+    /// etc.). ACS itself never writes this to disk — the save layer owns the format,
+    /// the file, the slot, and the timing.
     /// <para/>
     /// Iteration order of <see cref="Aspects"/> is ordinal-sorted by key. This is a
     /// hard guarantee from the underlying <see cref="SortedDictionary{TKey,TValue}"/>
@@ -17,9 +19,11 @@ namespace Rubickanov.ACS.Runtime.Persistence
     public sealed class AspectSnapshot
     {
         /// <summary>
-        /// Aspects captured in this snapshot, keyed by <see cref="System.Type.FullName"/>.
-        /// Aspects with no <c>[PersistedState]</c> fields are omitted from the map.
-        /// Iteration is ordinal-sorted.
+        /// Aspects captured in this snapshot, keyed by the stable snapshot key —
+        /// <see cref="PersistedKeyAttribute"/> when present on the aspect type,
+        /// <see cref="System.Type.FullName"/> otherwise. Aspects with no
+        /// <c>[PersistedState]</c> fields are omitted from the map. Iteration is
+        /// ordinal-sorted.
         /// </summary>
         public SortedDictionary<string, AspectData> Aspects { get; }
 

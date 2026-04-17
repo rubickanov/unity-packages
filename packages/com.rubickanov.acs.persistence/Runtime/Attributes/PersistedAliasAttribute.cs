@@ -15,8 +15,9 @@ namespace Rubickanov.ACS.Runtime.Persistence
 
         public PersistedAliasAttribute(string oldKey)
         {
+            oldKey = oldKey?.Trim();
             if (string.IsNullOrEmpty(oldKey))
-                throw new ArgumentException("[PersistedAlias] oldKey must be a non-empty string.", nameof(oldKey));
+                throw new ArgumentException("[PersistedAlias] oldKey must be a non-empty, non-whitespace string.", nameof(oldKey));
             OldKey = oldKey;
         }
     }

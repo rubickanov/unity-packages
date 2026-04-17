@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Rubickanov.Storage
 {
-    public class PlayerPrefsStorageService : IStorageService
+    public sealed class PlayerPrefsStorageService : IStorageService
     {
         public float GetFloat(string key, float defaultValue = 0f)
             => PlayerPrefs.GetFloat(key, defaultValue);
@@ -41,6 +41,13 @@ namespace Rubickanov.Storage
         public UniTask DeleteKey(string key)
         {
             PlayerPrefs.DeleteKey(key);
+            PlayerPrefs.Save();
+            return UniTask.CompletedTask;
+        }
+
+        public UniTask Clear()
+        {
+            PlayerPrefs.DeleteAll();
             PlayerPrefs.Save();
             return UniTask.CompletedTask;
         }

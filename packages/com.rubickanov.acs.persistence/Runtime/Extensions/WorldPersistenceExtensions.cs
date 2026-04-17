@@ -123,7 +123,12 @@ namespace Rubickanov.ACS.Runtime.Persistence
             if (snapshot.World != null)
                 ((IEntity)world).Restore(snapshot.World, registry);
 
-            var restored = new HashSet<IEntity>();
+            // Only materialized when DisposeMissing is active — the other policies never read from it,
+            // and tracking every restored entity on a large world is wasted allocation.
+            HashSet<IEntity> restored = options.Missing == MissingEntityPolicy.DisposeMissing
+                ? new HashSet<IEntity>()
+                : null;
+
             foreach (var pair in snapshot.Entities)
             {
                 var key = pair.Key;
@@ -138,8 +143,17 @@ namespace Rubickanov.ACS.Runtime.Persistence
                     continue;
                 }
 
+                if (ReferenceEquals(entity, world))
+                {
+                    Debug.LogError(
+                        $"[acs.persistence] RestoreAll: resolveOrSpawn returned the World itself for key '{key}'. " +
+                        "Save-layer resolveOrSpawn must never return the World — world-scoped aspects live in snapshot.World " +
+                        "and are restored separately. Entry skipped to avoid double-restoring the world.");
+                    continue;
+                }
+
                 entity.Restore(entitySnap, registry);
-                restored.Add(entity);
+                restored?.Add(entity);
             }
 
             if (options.Missing != MissingEntityPolicy.DisposeMissing) return;
@@ -198,9 +212,12 @@ namespace Rubickanov.ACS.Runtime.Persistence
                         $"Remaining snapshot migrations skipped. {ex}");
                     return;
                 }
-            }
 
-            snapshot.FormatVersion = to;
+                // Advance after every successful step — if the next one throws the snapshot is
+                // mutated up to here, and FormatVersion must reflect that partial progress so
+                // a retry does not re-run migrators already applied.
+                snapshot.FormatVersion = chain[i].FromFormatVersion + 1;
+            }
         }
 
         // IEntity has no Dispose() on the interface — only the pure POCO Entity implements IDisposable,
@@ -222,7 +239,8 @@ namespace Rubickanov.ACS.Runtime.Persistence
 
             Debug.LogError(
                 $"[acs.persistence] RestoreAll: no default teardown for entity of type '{entity.GetType().FullName}'. " +
-                "Supply WorldRestoreOptions.DisposeMissing to handle this case.");
+                "Pass WorldRestoreOptions.DisposeMissing callback to handle this case — the built-in fallback only " +
+                "covers IDisposable and UnityEngine.Component.");
         }
     }
 }

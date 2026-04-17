@@ -3,23 +3,45 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace Rubickanov.Storage
 {
-    public class FileStorageService : IStorageService
+    public sealed class FileStorageService : IStorageService
     {
         private readonly string _filePath;
+        private readonly ILogger<FileStorageService>? _logger;
         private readonly Dictionary<string, string> _data = new();
 
-        public FileStorageService(string filePath)
-        {
-            _filePath = filePath;
+        private Task _pendingSave = Task.CompletedTask;
 
-            if (File.Exists(filePath))
+        public FileStorageService(string filePath, ILogger<FileStorageService>? logger = null)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new ArgumentException("File path must be non-empty.", nameof(filePath));
+
+            _filePath = filePath;
+            _logger = logger;
+
+            if (!File.Exists(filePath)) return;
+
+            try
             {
                 var json = File.ReadAllText(filePath, Encoding.UTF8);
                 Deserialize(json);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or IOException)
+            {
+                var bak = $"{filePath}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}.bak";
+                try { File.Move(filePath, bak); }
+                catch { /* best effort: if move fails, the next Save will overwrite the corrupt file */ }
+
+                _logger?.LogWarning(
+                    "Corrupted storage at {Path}, backed up to {Backup}: {Message}",
+                    filePath, bak, ex.Message);
+                _data.Clear();
             }
         }
 
@@ -75,16 +97,45 @@ namespace Rubickanov.Storage
             return SaveAsync();
         }
 
-        private async UniTask SaveAsync()
+        public UniTask Clear()
+        {
+            _data.Clear();
+            return SaveAsync();
+        }
+
+        private UniTask SaveAsync()
         {
             var json = Serialize();
             var dir = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
-            await UniTask.SwitchToThreadPool();
-            await File.WriteAllTextAsync(_filePath, json, Encoding.UTF8);
-            await UniTask.SwitchToMainThread();
+            _pendingSave = ChainSave(_pendingSave, _filePath, json, _logger);
+            return AwaitTask(_pendingSave);
+        }
+
+        private static async UniTask AwaitTask(Task task)
+        {
+            await task;
+        }
+
+        private static async Task ChainSave(
+            Task previous,
+            string filePath,
+            string json,
+            ILogger<FileStorageService>? logger)
+        {
+            try { await previous.ConfigureAwait(false); } catch { /* previous failure already logged */ }
+
+            try
+            {
+                await File.WriteAllTextAsync(filePath, json, Encoding.UTF8).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Failed to save storage to {Path}", filePath);
+                throw;
+            }
         }
 
         private string Serialize()
@@ -97,9 +148,9 @@ namespace Rubickanov.Storage
                 if (!first) sb.Append(',');
                 first = false;
                 sb.Append('"');
-                sb.Append(EscapeJson(kvp.Key));
+                AppendEscaped(sb, kvp.Key);
                 sb.Append("\":\"");
-                sb.Append(EscapeJson(kvp.Value));
+                AppendEscaped(sb, kvp.Value);
                 sb.Append('"');
             }
             sb.Append('}');
@@ -109,33 +160,37 @@ namespace Rubickanov.Storage
         private void Deserialize(string json)
         {
             _data.Clear();
+            var originalLength = json.Length;
             var span = json.AsSpan().Trim();
-            if (span.Length < 2 || span[0] != '{' || span[^1] != '}') return;
+            if (span.Length < 2 || span[0] != '{' || span[^1] != '}')
+                throw new InvalidDataException($"Expected JSON object at position {originalLength - span.Length}.");
 
             span = span[1..^1].Trim();
             while (span.Length > 0)
             {
-                var key = ReadJsonString(ref span);
-                if (key == null) break;
+                var key = ReadJsonString(ref span, originalLength);
 
                 span = span.TrimStart();
-                if (span.Length == 0 || span[0] != ':') break;
+                if (span.Length == 0 || span[0] != ':')
+                    throw new InvalidDataException($"Expected ':' at position {originalLength - span.Length}.");
                 span = span[1..].TrimStart();
 
-                var value = ReadJsonString(ref span);
-                if (value == null) break;
+                var value = ReadJsonString(ref span, originalLength);
 
                 _data[key] = value;
 
                 span = span.TrimStart();
-                if (span.Length > 0 && span[0] == ',')
-                    span = span[1..].TrimStart();
+                if (span.Length == 0) break;
+                if (span[0] != ',')
+                    throw new InvalidDataException($"Expected ',' or '}}' at position {originalLength - span.Length}.");
+                span = span[1..].TrimStart();
             }
         }
 
-        private static string? ReadJsonString(ref ReadOnlySpan<char> span)
+        private static string ReadJsonString(ref ReadOnlySpan<char> span, int originalLength)
         {
-            if (span.Length == 0 || span[0] != '"') return null;
+            if (span.Length == 0 || span[0] != '"')
+                throw new InvalidDataException($"Expected '\"' at position {originalLength - span.Length}.");
             span = span[1..];
 
             var sb = new StringBuilder();
@@ -166,16 +221,23 @@ namespace Rubickanov.Storage
                     span = span[1..];
                 }
             }
-            return null;
+            throw new InvalidDataException($"Unterminated string at position {originalLength - span.Length}.");
         }
 
-        private static string EscapeJson(string s)
+        private static void AppendEscaped(StringBuilder sb, string s)
         {
-            return s.Replace("\\", "\\\\")
-                    .Replace("\"", "\\\"")
-                    .Replace("\n", "\\n")
-                    .Replace("\r", "\\r")
-                    .Replace("\t", "\\t");
+            foreach (var c in s)
+            {
+                switch (c)
+                {
+                    case '\\': sb.Append("\\\\"); break;
+                    case '"':  sb.Append("\\\""); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:   sb.Append(c); break;
+                }
+            }
         }
     }
 }

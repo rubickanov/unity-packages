@@ -132,7 +132,11 @@ namespace Rubickanov.ACS.Tests
         private sealed class OnAwakeRecordingComponent : EntityComponent
         {
             public int OnAwakeCalls;
-            protected override void OnAwake() => OnAwakeCalls++;
+            protected override void Awake()
+            {
+                base.Awake();
+                OnAwakeCalls++;
+            }
         }
 
         private sealed class ReSubscribingComponent : EntityComponent

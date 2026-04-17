@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -12,10 +13,15 @@ namespace Rubickanov.ACS.Runtime.Persistence
     /// Reflects over an aspect instance and returns the list of <c>[PersistedState]</c>
     /// fields, cached per-type. Mirrors the shape of the netcode package's
     /// ReplicationScanner: BaseType walk, stable field order, fail-fast validation.
+    /// <para/>
+    /// <b>Thread safety:</b> the per-type cache is a <see cref="ConcurrentDictionary{TKey,TValue}"/>
+    /// so concurrent <see cref="Scan"/> calls from different threads (e.g. headless
+    /// simulations running two worlds in parallel) are lock-free on the hit path and
+    /// safe on the miss path.
     /// </summary>
     internal static class PersistenceScanner
     {
-        private static readonly Dictionary<Type, PersistedFieldInfo[]> Cache = new();
+        private static readonly ConcurrentDictionary<Type, PersistedFieldInfo[]> Cache = new();
 
         // Play-Mode-without-Domain-Reload safety: static caches survive domain reload
         // but poison the first scan after a reload if we let them.
@@ -28,11 +34,7 @@ namespace Rubickanov.ACS.Runtime.Persistence
         public static PersistedFieldInfo[] Scan(object aspect)
         {
             var type = aspect.GetType();
-            if (Cache.TryGetValue(type, out var cached)) return cached;
-
-            var fields = Collect(type);
-            Cache[type] = fields;
-            return fields;
+            return Cache.GetOrAdd(type, static t => Collect(t, onError: null));
         }
 
         public static bool HasPersistedFields(object aspect)
@@ -40,8 +42,27 @@ namespace Rubickanov.ACS.Runtime.Persistence
             return Scan(aspect).Length > 0;
         }
 
-        private static PersistedFieldInfo[] Collect(Type aspectType)
+        /// <summary>
+        /// Runs the same classification rules as <see cref="Scan"/> against
+        /// <paramref name="aspectType"/> without consulting or populating the cache, and without
+        /// routing errors through <see cref="Debug.LogError"/>. Collected errors are returned to
+        /// the caller so validation tooling (e.g. <c>PersistenceDebug</c>) can surface them at
+        /// bootstrap time rather than on first snapshot.
+        /// </summary>
+        internal static IReadOnlyList<string> CollectValidationErrors(Type aspectType)
         {
+            var errors = new List<string>();
+            Collect(aspectType, errors.Add);
+            return errors;
+        }
+
+        // Shared walk used by both cached-Scan and validation paths. When onError is null,
+        // misclassified fields are reported via Debug.LogError; when non-null, the caller
+        // collects error strings without logging.
+        private static PersistedFieldInfo[] Collect(Type aspectType, Action<string> onError)
+        {
+            Action<string> reporter = onError ?? (msg => Debug.LogError(msg));
+
             var result = new List<PersistedFieldInfo>();
             var current = aspectType;
 
@@ -56,7 +77,11 @@ namespace Rubickanov.ACS.Runtime.Persistence
                     var attr = field.GetCustomAttribute<PersistedStateAttribute>();
                     if (attr == null) continue;
 
-                    if (!TryClassify(aspectType, field, out var info)) continue;
+                    if (!TryClassify(aspectType, field, out var info, out var error))
+                    {
+                        reporter(error);
+                        continue;
+                    }
                     result.Add(info);
                 }
 
@@ -68,14 +93,15 @@ namespace Rubickanov.ACS.Runtime.Persistence
             return result.OrderBy(f => f.Field.Name).ToArray();
         }
 
-        private static bool TryClassify(Type aspectType, FieldInfo field, out PersistedFieldInfo info)
+        private static bool TryClassify(Type aspectType, FieldInfo field, out PersistedFieldInfo info, out string error)
         {
             info = default;
+            error = null;
             var fieldType = field.FieldType;
 
             if (!fieldType.IsGenericType)
             {
-                LogUnsupportedContainer(aspectType, field);
+                error = BuildUnsupportedContainerMsg(aspectType, field);
                 return false;
             }
 
@@ -85,9 +111,22 @@ namespace Rubickanov.ACS.Runtime.Persistence
             if (generic == typeof(ReactiveProperty<>))
             {
                 var value = args[0];
+                if (value.IsEnum)
+                {
+                    var enumAttr = field.GetCustomAttribute<PersistedEnumAttribute>(inherit: false);
+                    if (enumAttr == null)
+                    {
+                        error = BuildEnumRequiresAttributeMsg(aspectType, field, value);
+                        return false;
+                    }
+
+                    info = new PersistedFieldInfo(field, PersistedFieldKind.Enum, value, null, enumAttr.Mode);
+                    return true;
+                }
+
                 if (!IsAllowedValueType(value))
                 {
-                    LogUnsupportedValueType(aspectType, field, value);
+                    error = BuildUnsupportedValueTypeMsg(aspectType, field, value);
                     return false;
                 }
 
@@ -98,9 +137,10 @@ namespace Rubickanov.ACS.Runtime.Persistence
             if (generic == typeof(ObservableList<>))
             {
                 var value = args[0];
+                if (value.IsEnum) { error = BuildEnumInCollectionMsg(aspectType, field, value); return false; }
                 if (!IsAllowedValueType(value))
                 {
-                    LogUnsupportedValueType(aspectType, field, value);
+                    error = BuildUnsupportedValueTypeMsg(aspectType, field, value);
                     return false;
                 }
 
@@ -111,9 +151,10 @@ namespace Rubickanov.ACS.Runtime.Persistence
             if (generic == typeof(ObservableHashSet<>))
             {
                 var value = args[0];
+                if (value.IsEnum) { error = BuildEnumInCollectionMsg(aspectType, field, value); return false; }
                 if (!IsAllowedValueType(value))
                 {
-                    LogUnsupportedValueType(aspectType, field, value);
+                    error = BuildUnsupportedValueTypeMsg(aspectType, field, value);
                     return false;
                 }
 
@@ -125,14 +166,16 @@ namespace Rubickanov.ACS.Runtime.Persistence
             {
                 var key = args[0];
                 var value = args[1];
+                if (key.IsEnum) { error = BuildEnumInCollectionMsg(aspectType, field, key, role: "key"); return false; }
+                if (value.IsEnum) { error = BuildEnumInCollectionMsg(aspectType, field, value, role: "value"); return false; }
                 if (!IsAllowedValueType(key))
                 {
-                    LogUnsupportedValueType(aspectType, field, key, role: "key");
+                    error = BuildUnsupportedValueTypeMsg(aspectType, field, key, role: "key");
                     return false;
                 }
                 if (!IsAllowedValueType(value))
                 {
-                    LogUnsupportedValueType(aspectType, field, value, role: "value");
+                    error = BuildUnsupportedValueTypeMsg(aspectType, field, value, role: "value");
                     return false;
                 }
 
@@ -140,35 +183,42 @@ namespace Rubickanov.ACS.Runtime.Persistence
                 return true;
             }
 
-            LogUnsupportedContainer(aspectType, field);
+            error = BuildUnsupportedContainerMsg(aspectType, field);
             return false;
         }
 
         /// <summary>
         /// Project rule for ReactiveProperty wrapping carried over to persisted collections:
-        /// only value types and <see cref="string"/>. Anything else (classes, interfaces,
-        /// arrays, collections) is forbidden — serialization of reference graphs is a
+        /// only non-enum value types and <see cref="string"/>. Enums take a separate path
+        /// via <see cref="PersistedEnumAttribute"/> — encoding choice (name vs value) has
+        /// save-stability implications and must be explicit. Reference graphs are a
         /// save-layer concern, not ACS's.
         /// </summary>
         internal static bool IsAllowedValueType(Type t)
         {
+            if (t.IsEnum) return false;
             return t.IsValueType || t == typeof(string);
         }
 
-        private static void LogUnsupportedContainer(Type aspectType, FieldInfo field)
-        {
-            Debug.LogError(
-                $"[PersistenceScanner] Aspect '{aspectType.Name}' field '{field.Name}' has [PersistedState] but its type " +
-                $"'{field.FieldType.Name}' is not supported. Supported: ReactiveProperty<T>, ObservableList<T>, " +
-                $"ObservableHashSet<T>, ObservableDictionary<K,V>. Field is skipped.");
-        }
+        private static string BuildUnsupportedContainerMsg(Type aspectType, FieldInfo field) =>
+            $"[PersistenceScanner] Aspect '{aspectType.Name}' field '{field.Name}' has [PersistedState] but its type " +
+            $"'{field.FieldType.Name}' is not supported. Supported: ReactiveProperty<T>, ObservableList<T>, " +
+            $"ObservableHashSet<T>, ObservableDictionary<K,V>. Field is skipped.";
 
-        private static void LogUnsupportedValueType(Type aspectType, FieldInfo field, Type bad, string role = "value")
-        {
-            Debug.LogError(
-                $"[PersistenceScanner] Aspect '{aspectType.Name}' field '{field.Name}' has [PersistedState] but its {role} " +
-                $"type '{bad.Name}' is neither a value type nor string. Persisted state must stay primitive; wrap reference " +
-                $"graphs on the save layer. Field is skipped.");
-        }
+        private static string BuildUnsupportedValueTypeMsg(Type aspectType, FieldInfo field, Type bad, string role = "value") =>
+            $"[PersistenceScanner] Aspect '{aspectType.Name}' field '{field.Name}' has [PersistedState] but its {role} " +
+            $"type '{bad.Name}' is neither a value type nor string. Persisted state must stay primitive; wrap reference " +
+            $"graphs on the save layer. Field is skipped.";
+
+        private static string BuildEnumRequiresAttributeMsg(Type aspectType, FieldInfo field, Type enumType) =>
+            $"[PersistenceScanner] Aspect '{aspectType.Name}' field '{field.Name}' has [PersistedState] but its enum " +
+            $"type '{enumType.Name}' has no [PersistedEnum] attribute. Decide explicitly: [PersistedEnum(PersistedEnumMode.ByName)] " +
+            $"(default, safe for reorder) or [PersistedEnum(PersistedEnumMode.ByValue)] (compact, reorder breaks old saves). " +
+            $"Field is skipped.";
+
+        private static string BuildEnumInCollectionMsg(Type aspectType, FieldInfo field, Type enumType, string role = "value") =>
+            $"[PersistenceScanner] Aspect '{aspectType.Name}' field '{field.Name}' has [PersistedState] but its {role} " +
+            $"type '{enumType.Name}' is an enum inside a collection — not supported in the current iteration. Wrap the enum " +
+            $"in a plain int / string on the aspect, or open an issue with the use case. Field is skipped.";
     }
 }

@@ -1,8 +1,10 @@
+using System;
 using Cysharp.Threading.Tasks;
 using LitMotion;
 
 namespace Rubickanov.UI.Animations
 {
+    /// <summary>Direction from which a view slides in (and out, in reverse).</summary>
     public enum SlideDirection
     {
         Left,
@@ -11,19 +13,30 @@ namespace Rubickanov.UI.Animations
         Bottom
     }
 
+    /// <summary>
+    /// Translates the view along a single axis. On show, slides from the direction's
+    /// edge to the origin; on hide, back out to the edge.
+    /// </summary>
     public sealed class SlideAnimation : IViewAnimation
     {
         private readonly SlideDirection _direction;
         private readonly float _offset;
 
+        /// <param name="direction">Edge to slide from on show.</param>
+        /// <param name="offset">Non-negative distance in translate units. Default 100.</param>
         public SlideAnimation(SlideDirection direction, float offset = 100f)
         {
+            if (offset < 0f)
+                throw new ArgumentOutOfRangeException(nameof(offset), "Offset must be non-negative.");
+
             _direction = direction;
             _offset = offset;
         }
 
         public async UniTask PlayShowAsync(IAnimationTarget target, float duration)
         {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
             var (startX, startY) = GetOffset();
             target.TranslateX = startX;
             target.TranslateY = startY;
@@ -44,6 +57,8 @@ namespace Rubickanov.UI.Animations
 
         public async UniTask PlayHideAsync(IAnimationTarget target, float duration)
         {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
             var (endX, endY) = GetOffset();
 
             if (endX != 0f)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -7,8 +8,9 @@ namespace Rubickanov.ACS.Runtime.Persistence
 {
     public static class EntityPersistenceExtensions
     {
-        // Cached Require<T> generic method — one MethodInfo per aspect type.
-        private static readonly Dictionary<Type, MethodInfo> RequireMethods = new();
+        // Cached Require<T> generic method — one MethodInfo per aspect type. ConcurrentDictionary
+        // so concurrent Restore() calls from different threads share a lock-free hit path.
+        private static readonly ConcurrentDictionary<Type, MethodInfo> RequireMethods = new();
         private static readonly MethodInfo RequireOpen = typeof(IEntity).GetMethod(nameof(IEntity.Require))
             ?? throw new InvalidOperationException("IEntity.Require<T>() not found via reflection.");
 
@@ -76,6 +78,11 @@ namespace Rubickanov.ACS.Runtime.Persistence
         /// <see cref="IAspectMigrator"/> chain runs before field writes. Writes go through
         /// <c>ReactiveProperty.Value = ...</c> without any suppress, so UI, rules, and
         /// netcode replication see restoration as a normal write.
+        /// <para/>
+        /// When migrations run, the snapshot is mutated in place — <see cref="AspectData.Fields"/>
+        /// is rewritten by each <see cref="IAspectMigrator"/> step and <see cref="AspectData.Version"/>
+        /// is advanced as steps succeed. Do not reuse the same <see cref="AspectSnapshot"/> instance
+        /// for a second restore; take a fresh copy if the save layer needs to replay it.
         /// </summary>
         public static void Restore(this IEntity entity, AspectSnapshot snapshot, PersistenceMigrationRegistry registry)
         {
@@ -113,11 +120,12 @@ namespace Rubickanov.ACS.Runtime.Persistence
                     {
                         binding.WriteValue(value);
                     }
-                    catch (InvalidCastException ex)
+                    catch (Exception ex) when (ex is InvalidCastException || ex is NullReferenceException)
                     {
-                        // Save format drift, e.g. an int stored back into a float field.
-                        // Save layer owns serializer-level type handling; we surface the
-                        // mismatch and keep going so one bad field doesn't poison the whole restore.
+                        // Save format drift, e.g. an int stored back into a float field or a null
+                        // unboxed into a non-nullable value type. Save layer owns serializer-level
+                        // type handling; we surface the mismatch and keep going so one bad field
+                        // doesn't poison the whole restore.
                         Debug.LogError(
                             $"[acs.persistence] Restore: aspect '{aspectKey}' field '{fieldName}' — type mismatch " +
                             $"writing {value?.GetType().Name ?? "null"}. {ex.Message}");
@@ -189,18 +197,14 @@ namespace Rubickanov.ACS.Runtime.Persistence
 
         private static object RequireAspect(IEntity entity, Type aspectType)
         {
-            if (!RequireMethods.TryGetValue(aspectType, out var method))
+            if (!typeof(IEntityAspect).IsAssignableFrom(aspectType))
             {
-                if (!typeof(IEntityAspect).IsAssignableFrom(aspectType))
-                {
-                    Debug.LogWarning(
-                        $"[acs.persistence] Restore: type '{aspectType.FullName}' is not an IEntityAspect. Skipping.");
-                    return null;
-                }
-
-                method = RequireOpen.MakeGenericMethod(aspectType);
-                RequireMethods[aspectType] = method;
+                Debug.LogWarning(
+                    $"[acs.persistence] Restore: type '{aspectType.FullName}' is not an IEntityAspect. Skipping.");
+                return null;
             }
+
+            var method = RequireMethods.GetOrAdd(aspectType, static t => RequireOpen.MakeGenericMethod(t));
 
             try
             {

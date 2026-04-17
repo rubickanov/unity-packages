@@ -38,20 +38,11 @@ namespace Rubickanov.ACS.Runtime
         // on any subclass — use OnAwake for custom init instead. Unity's magic-method
         // reflection still picks this up because access modifier does not matter to the
         // lifecycle dispatcher.
-        protected void Awake()
+        protected virtual void Awake()
         {
             EntityInjector.Invoke(gameObject);
             AspectInjector.Inject(Context, this);
-            OnAwake();
         }
-
-        /// <summary>
-        /// Extension point invoked after <see cref="AspectAttribute"/> injection completes,
-        /// so <c>[Aspect]</c> fields are already populated. Override instead of <c>Awake</c>
-        /// to avoid the "forgot <c>base.Awake()</c>" class of bugs — the compiler will not
-        /// let you override <see cref="Awake"/> directly.
-        /// </summary>
-        protected virtual void OnAwake() { }
 
         /// <summary>
         /// Override to subscribe to aspect events. All subscriptions added to <paramref name="disposables"/>

@@ -1,10 +1,11 @@
 # State Machine
 
-Generic finite state machine with hierarchical support, deferred transitions, and zero-allocation runtime. Pure C#, no engine references.
+Generic finite state machine with hierarchical support, deferred transitions, and a sync/async pair of runtimes. Pure C#, no engine references. Zero allocations per update and transition; setup allocates a backing dictionary once.
 
 ## Dependencies
 
-None.
+- Sync runtime: none.
+- Async runtime: [UniTask](https://github.com/Cysharp/UniTask).
 
 ## Architecture
 
@@ -15,15 +16,22 @@ IState { OnEnter, OnUpdate, OnExit }
 └── SubStateMachine<TKey> — nested FSM that implements IState
         │
         └── StateMachine<TKey> — dictionary lookup, deferred transitions
+
+IAsyncState { OnEnterAsync(ct), OnUpdate, OnExitAsync(ct) }
+├── AsyncStateBase           — abstract, virtual no-op defaults
+├── AsyncCallbackState       — lambda-based
+└── AsyncSubStateMachine<TKey> — nested async FSM
+        │
+        └── AsyncStateMachine<TKey> — UniTask-based transitions, CancellationToken propagation
 ```
 
 ## Core Concepts
 
-**IState** — Interface with three lifecycle methods: `OnEnter()`, `OnUpdate(float deltaTime)`, `OnExit()`.
+**IState / IAsyncState** — three lifecycle methods: `OnEnter()`, `OnUpdate(float)`, `OnExit()`. In the async variant, `Enter`/`Exit` are awaitable and receive a `CancellationToken`; `OnUpdate` remains synchronous because it runs per frame.
 
-**StateMachine\<TKey\>** — Generic FSM keyed by any type (enum, string, int). Dictionary-based state lookup. Deferred transitions when `SetState()` is called during `OnEnter`/`OnExit` (re-entrancy safe, max depth 16).
+**StateMachine\<TKey\> / AsyncStateMachine\<TKey\>** — generic FSM keyed by any type (enum, string, int). Dictionary-based lookup. Deferred transitions when `SetState()` is called during `OnEnter`/`OnExit` (re-entrancy safe, max depth 16).
 
-**SubStateMachine\<TKey\>** — A **StateMachine\<TKey\>** that also implements **IState**, enabling hierarchical state machines. Automatically starts/stops the sub-FSM on enter/exit.
+**SubStateMachine\<TKey\> / AsyncSubStateMachine\<TKey\>** — FSMs that also implement the state interface, enabling hierarchical state machines. Automatically starts/stops the sub-FSM on parent enter/exit.
 
 ## Quick Start
 
@@ -70,7 +78,11 @@ public class PlayingState : StateBase
 fsm.SetState(GamePhase.Playing);
 ```
 
-Transitions are deferred if called during `OnEnter()` or `OnExit()` to prevent re-entrancy issues. The pending transition executes after the current one completes.
+Transitions are deferred if called during `OnEnter()` or `OnExit()` to prevent re-entrancy issues. The pending transition executes after the current one completes. Max chained depth of 16 guards against infinite transition loops.
+
+Calling `SetState(CurrentKey)` — a self-transition — is a no-op; the state is not re-entered.
+
+If multiple `SetState` calls happen during `OnEnter`/`OnExit`, only the last one executes — earlier queued keys are overwritten (last-write-wins).
 
 ### Updating
 
@@ -86,9 +98,13 @@ void Update()
 ### Querying State
 
 ```csharp
-GamePhase current = fsm.CurrentKey;
-bool isPlaying = fsm.IsInState(GamePhase.Playing);
-bool isRunning = fsm.IsStarted;
+GamePhase current = fsm.CurrentKey;      // returns default before Start / after Stop
+IState? state   = fsm.CurrentState;      // null before Start / after Stop
+bool isPlaying  = fsm.IsInState(GamePhase.Playing);
+bool isRunning  = fsm.IsStarted;
+
+bool hasQueued  = fsm.HasPendingTransition;
+GamePhase next  = fsm.PendingKey;        // default if nothing pending
 ```
 
 ### State Change Events
@@ -99,6 +115,8 @@ fsm.StateChanged += (previous, next) =>
     Debug.Log($"Transition: {previous} -> {next}");
 };
 ```
+
+The event fires after the new state's `OnEnter` completes. For chained deferred transitions, it fires once per hop (A→B→C fires `StateChanged(A, B)` then `StateChanged(B, C)`). The initial `Start()` does not fire `StateChanged`.
 
 ### Lambda States
 
@@ -125,9 +143,11 @@ The extension method returns the state machine for chaining `AddState` calls.
 fsm.Stop();  // calls OnExit on current state, resets the FSM
 ```
 
+After `Stop()`, `CurrentKey` returns `default(TKey)` and `CurrentState` returns `null`.
+
 ### Hierarchical State Machines
 
-**SubStateMachine\<TKey\>** nests a full FSM inside a parent state. It starts on enter and stops on exit:
+**SubStateMachine\<TKey\>** nests a full FSM inside a parent state. It starts at its configured initial state on enter and stops on exit:
 
 ```csharp
 enum CombatPhase { Aiming, Firing, Reloading }
@@ -137,7 +157,6 @@ combatSub.AddState(CombatPhase.Aiming, new AimingState());
 combatSub.AddState(CombatPhase.Firing, new FiringState());
 combatSub.AddState(CombatPhase.Reloading, new ReloadingState());
 
-// Use as a regular state in the parent FSM
 var fsm = new StateMachine<GamePhase>();
 fsm.AddState(GamePhase.Playing, combatSub);
 fsm.AddState(GamePhase.Paused, new PausedState());
@@ -149,12 +168,69 @@ When the parent enters `GamePhase.Playing`, the sub-machine starts at `CombatPha
 
 ```csharp
 var playing = fsm.GetState<PlayingState>(GamePhase.Playing);
+var current = fsm.GetCurrentState<PlayingState>();
 ```
 
-Returns `null` if the key is not registered or the type does not match.
+Both return `null` if the key is missing or the type does not match.
+
+### Custom Key Comparer
+
+```csharp
+var fsm = new StateMachine<string>(StringComparer.OrdinalIgnoreCase);
+```
+
+The comparer is used for both dictionary lookups and `IsInState`.
+
+## Async State Machines
+
+For states with long-running `Enter`/`Exit` — asset loading, scene warmup, network handshake, teardown with awaitable cleanup — use `AsyncStateMachine<TKey>` and `IAsyncState`.
+
+### Differences from the Sync Runtime
+
+- `OnEnterAsync(CancellationToken)` and `OnExitAsync(CancellationToken)` return `UniTask` and can await.
+- `OnUpdate(float)` remains synchronous — it runs per frame.
+- `StartAsync`, `SetStateAsync`, `StopAsync` all return `UniTask` and accept an optional `CancellationToken`.
+
+### Example
+
+```csharp
+public class LoadingState : AsyncStateBase
+{
+    public override async UniTask OnEnterAsync(CancellationToken ct)
+    {
+        await LoadAssets(ct);
+    }
+
+    public override async UniTask OnExitAsync(CancellationToken ct)
+    {
+        await UnloadAssets(ct);
+    }
+}
+
+var fsm = new AsyncStateMachine<GamePhase>();
+fsm.AddState(GamePhase.Loading, new LoadingState());
+
+using var cts = new CancellationTokenSource();
+await fsm.StartAsync(GamePhase.Loading, cts.Token);
+```
+
+Lambda form via the extension:
+
+```csharp
+fsm.AddState(GamePhase.Loading,
+    onEnterAsync: ct => LoadAssets(ct),
+    onExitAsync:  ct => UnloadAssets(ct));
+```
+
+### CancellationToken Semantics
+
+- The token passed to `StartAsync`/`SetStateAsync`/`StopAsync` is forwarded to the state's `OnEnterAsync`/`OnExitAsync`.
+- For deferred transitions (a `SetStateAsync` call issued during another transition), the token from the deferred call is preserved and used when the queued transition executes — not the token from the outer transition.
+- The FSM does **not** create per-state tokens. If your state spawns fire-and-forget background work, manage its lifecycle explicitly in `OnExitAsync`.
 
 ## Design Decisions
 
 - **Deferred transitions** — calling `SetState()` inside `OnEnter()`/`OnExit()` queues the transition instead of executing immediately. Prevents stack overflow and ensures each state completes its lifecycle. Max depth of 16 catches infinite loops.
-- **No engine references** — pure C# with `noEngineReferences: true`. Usable in server builds, tests, or non-Unity contexts.
+- **No engine references** — pure C# with `noEngineReferences: true`. Usable in server builds, tests, or non-Unity contexts. The async assembly adds UniTask as the only dependency.
 - **Generic TKey** — enum, string, or any type that implements equality. No boxing when using value types with the default comparer.
+- **Not thread-safe** — designed for single-threaded access (game main loop). Do not call concurrently from multiple threads.

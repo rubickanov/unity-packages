@@ -2,7 +2,7 @@ using Cysharp.Threading.Tasks;
 
 namespace Rubickanov.Storage
 {
-    public class NullStorageService : IStorageService
+    public sealed class NullStorageService : IStorageService
     {
         public float GetFloat(string key, float defaultValue = 0f)
             => defaultValue;
@@ -26,6 +26,9 @@ namespace Rubickanov.Storage
             => false;
 
         public UniTask DeleteKey(string key)
+            => UniTask.CompletedTask;
+
+        public UniTask Clear()
             => UniTask.CompletedTask;
     }
 }

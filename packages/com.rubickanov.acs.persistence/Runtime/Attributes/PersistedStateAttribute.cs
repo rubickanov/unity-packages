@@ -16,6 +16,11 @@ namespace Rubickanov.ACS.Runtime.Persistence
     /// </list>
     /// A field marked with both <c>[PersistedState]</c> and <c>[Replicated]</c> is
     /// fine — the two pipelines are independent.
+    /// <para/>
+    /// <c>[PersistedState]</c> does not inherit through CLR attribute reflection
+    /// (<see cref="AttributeUsageAttribute.Inherited"/> is <c>false</c>), but the
+    /// scanner walks the aspect's type hierarchy explicitly, so fields declared on
+    /// a base aspect class are always included in its derived aspects' snapshots.
     /// </summary>
     [AttributeUsage(AttributeTargets.Field, Inherited = false)]
     public sealed class PersistedStateAttribute : Attribute
