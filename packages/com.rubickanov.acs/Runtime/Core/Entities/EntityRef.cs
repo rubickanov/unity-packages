@@ -70,6 +70,13 @@ namespace Rubickanov.ACS.Runtime
         /// different world, and for entities that have been destroyed. The ref is intentionally
         /// allowed to outlive the entity it points to (dangling ref); callers check this result
         /// instead of getting a stale cached reference.
+        /// <para/>
+        /// <b>Cross-world note:</b> <see cref="EntityId"/> is unique process-wide (see
+        /// <see cref="EntityId.Allocate"/>), not scoped to a single world. Resolving an id that
+        /// was allocated against a different world returns false because that world's by-id
+        /// index doesn't contain the slot — the id itself is unique, but its registration lives
+        /// in the owner world. Example: a pocket world running a mini-game cannot resolve main-world
+        /// entity ids through its own <see cref="TryResolve"/> call; pass the correct owning world.
         /// </summary>
         public bool TryResolve(World world, [NotNullWhen(true)] out IEntity? entity)
         {

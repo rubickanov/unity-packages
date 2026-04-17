@@ -339,6 +339,32 @@ namespace Rubickanov.ACS.Tests
         }
 
         [Test]
+        public void OnDestroy_WorldCurrentStaysValidUntilBaseOnDestroyCompletes()
+        {
+            // Peer MonoEntities whose OnDestroy fires AFTER MonoWorld's (Unity doesn't order
+            // OnDestroy between GameObjects) rely on MonoWorld's own OnDestroy leaving World.Current
+            // alive while base.OnDestroy runs — so the MonoEntity.OnDestroy path can still resolve
+            // World.Current to unregister peer aspects. The fix moved ClearCurrent/Dispose to
+            // after base.OnDestroy; this test pins the ordering by observing Destroyed, which
+            // fires from base.OnDestroy of the MonoWorld itself.
+            var world = NewMonoWorld();
+            var pureWorld = world.World;
+            var go = world.gameObject;
+            World observedCurrent = null;
+            pureWorld.Destroyed += _ => observedCurrent = World.Current;
+
+            DestroyWithLifecycle(go);
+            _spawned.Remove(go);
+
+            Assert.AreSame(pureWorld, observedCurrent,
+                "While base.OnDestroy is running (Destroyed is fired from there), World.Current " +
+                "must still point at the world being torn down — peer MonoEntities destroyed later " +
+                "rely on this invariant when they unregister their aspects.");
+            Assert.IsNull(World.Current,
+                "After OnDestroy completes, Current must be cleared.");
+        }
+
+        [Test]
         public void DuplicateMonoWorld_DisposesItsEmbeddedWorld()
         {
             // A duplicate MonoWorld self-destroys in Awake before it can become Instance,

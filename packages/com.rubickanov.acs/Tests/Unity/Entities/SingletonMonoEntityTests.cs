@@ -98,6 +98,62 @@ namespace Rubickanov.ACS.Tests
         }
 
         [Test]
+        public void OnDestroy_DuplicateWithRegisteredAspect_UnregistersFromWorld()
+        {
+            // Production scenario: two SingletonMonoEntity GameObjects enter the scene;
+            // the second is a duplicate. Destroy(gameObject) is deferred to end-of-frame,
+            // so a sibling EntityComponent on the duplicate's GameObject can still run
+            // Awake and call Context.Require<T>() — registering the duplicate's aspect in
+            // World._registry's per-aspect index. If OnDestroy early-returns without
+            // unregistering, the duplicate stays in the registry forever and Query<T>
+            // iterates a dead reference.
+            var worldGo = new GameObject(nameof(MonoWorld));
+            var firstGo = new GameObject("first");
+            var dupGo = new GameObject("dup");
+            try
+            {
+                var world = worldGo.AddComponent<MonoWorld>();
+                InvokeMonoWorldAwake(world);
+
+                var first = firstGo.AddComponent<TestSingleton>();
+                InvokeAwake(first);
+
+                var dup = dupGo.AddComponent<TestSingleton>();
+                LogAssert.Expect(LogType.Error, EditModeDestroyError);
+                InvokeAwake(dup);
+                // Mimic the sibling-EntityComponent's Awake: request an aspect on the duplicate
+                // while it's still alive. This mirrors what Context.Require<T>() would do on a
+                // child GameObject whose Awake runs in the frame before Destroy lands.
+                dup.Require<TestAspect>();
+
+                CollectionAssert.Contains(
+                    MonoWorld.Instance!.World.Registry.GetAllWith(typeof(TestAspect)),
+                    dup,
+                    "Precondition: the duplicate registered its aspect in World before OnDestroy.");
+
+                InvokeOnDestroy(dup);
+
+                CollectionAssert.DoesNotContain(
+                    MonoWorld.Instance!.World.Registry.GetAllWith(typeof(TestAspect)),
+                    dup,
+                    "Duplicate must unregister its aspects in OnDestroy — otherwise the registry " +
+                    "holds a reference to a destroyed entity for the rest of the session.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(dupGo);
+                UnityEngine.Object.DestroyImmediate(firstGo);
+                UnityEngine.Object.DestroyImmediate(worldGo);
+                typeof(SingletonMonoEntity<MonoWorld>)
+                    .GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)!
+                    .SetValue(null, null);
+                typeof(World)
+                    .GetMethod("ForceResetCurrent", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .Invoke(null, null);
+            }
+        }
+
+        [Test]
         public void OnDestroy_OriginalInstance_StillFiresDestroyed()
         {
             var go = new GameObject("original");
@@ -128,6 +184,15 @@ namespace Rubickanov.ACS.Tests
                 .Invoke(entity, null);
         }
 
+        private static void InvokeMonoWorldAwake(MonoWorld world)
+        {
+            typeof(MonoWorld)
+                .GetMethod("Awake", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy)!
+                .Invoke(world, null);
+        }
+
         private class TestSingleton : SingletonMonoEntity<TestSingleton> { }
+
+        private class TestAspect : IEntityAspect { }
     }
 }

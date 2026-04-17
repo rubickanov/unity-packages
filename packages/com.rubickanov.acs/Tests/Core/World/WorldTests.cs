@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using NUnit.Framework;
 using Rubickanov.ACS.Runtime;
@@ -155,6 +156,166 @@ namespace Rubickanov.ACS.Tests
                 "World.Dispose must clear the by-id index — otherwise a torn-down world keeps references to its entities alive.");
             Assert.IsFalse(world.TryFindById(world.Id, out _),
                 "The world's own self-registration must also be cleared.");
+        }
+
+        [Test]
+        public void Dispose_WhileCurrent_ClearsCurrent()
+        {
+            // A world disposed while still Current would leave the static slot pointing at a
+            // dead instance — the next World.Require/Query would silently operate on an empty
+            // registry with no signal that setup is broken. Dispose must drop the slot.
+            var world = new World();
+            World.SetCurrent(world);
+
+            try
+            {
+                world.Dispose();
+
+                Assert.IsNull(World.Current,
+                    "Disposing the Current world must null the static slot so callers don't " +
+                    "silently operate on a dead instance.");
+            }
+            finally
+            {
+                // Defensive — if the assertion failed, make sure the next test doesn't inherit state.
+                typeof(World)
+                    .GetMethod("ForceResetCurrent", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                    .Invoke(null, null);
+            }
+        }
+
+        [Test]
+        public void Dispose_WhenDifferentWorldIsCurrent_DoesNotTouchCurrent()
+        {
+            // Only clear Current if it points at the world being disposed — disposing a pocket
+            // world must not kick out the main world's assignment.
+            var pocket = new World();
+            var main = new World();
+            World.SetCurrent(main);
+
+            try
+            {
+                pocket.Dispose();
+
+                Assert.AreSame(main, World.Current,
+                    "Disposing a non-Current world must leave the Current slot untouched.");
+            }
+            finally
+            {
+                typeof(World)
+                    .GetMethod("ForceResetCurrent", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                    .Invoke(null, null);
+            }
+        }
+
+        [Test]
+        public void Register_AfterDispose_ThrowsObjectDisposedException()
+        {
+            var world = new World();
+            var entity = new Entity();
+            world.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() => world.Register(entity, typeof(TestAspectA)));
+            Assert.Throws<ObjectDisposedException>(() => world.Register(entity));
+        }
+
+        [Test]
+        public void Require_AfterDispose_ThrowsObjectDisposedException()
+        {
+            // IEntity.Require on a disposed World must throw so an Entity cached from before
+            // Dispose can't silently create orphaned aspects after its world is gone. Guard
+            // surfaces "entity outlives world" bugs at the call site.
+            var world = new World();
+            world.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() => ((IEntity)world).Require<TestAspectA>());
+        }
+
+        [Test]
+        public void SetCurrent_FromNull_FiresCurrentChangedWithNewWorld()
+        {
+            // CurrentChanged is the hook MonoEntity relies on for retroactive registration —
+            // entities that Awoke without a world must be notified when one becomes current.
+            var world = new World();
+            World fired = null;
+            Action<World> handler = w => fired = w;
+            World.CurrentChanged += handler;
+
+            try
+            {
+                World.SetCurrent(world);
+
+                Assert.AreSame(world, fired,
+                    "CurrentChanged must fire with the just-assigned world when Current transitions from null.");
+            }
+            finally
+            {
+                World.CurrentChanged -= handler;
+                ResetWorldStatics();
+            }
+        }
+
+        [Test]
+        public void SetCurrent_SameWorldTwice_FiresCurrentChangedOnlyOnce()
+        {
+            // Idempotent reassignment must not re-fire CurrentChanged — otherwise MonoEntity
+            // would attempt to register twice (RegisterById would throw on the duplicate id
+            // collision path, or the per-aspect Register would re-invoke AspectCreated and
+            // confuse subscribers like acs.netcode that dedupe on first-seen).
+            var world = new World();
+            var fireCount = 0;
+            Action<World> handler = _ => fireCount++;
+            World.CurrentChanged += handler;
+
+            try
+            {
+                World.SetCurrent(world);
+                World.SetCurrent(world);
+
+                Assert.AreEqual(1, fireCount,
+                    "SetCurrent with the already-Current world is a no-op and must not re-raise CurrentChanged.");
+            }
+            finally
+            {
+                World.CurrentChanged -= handler;
+                ResetWorldStatics();
+            }
+        }
+
+        [Test]
+        public void ClearCurrent_DoesNotFireCurrentChanged()
+        {
+            // CurrentChanged is scoped to null→world transitions — the world-→null teardown
+            // has no subscriber contract to honor (a disposed MonoEntity doesn't need to know).
+            // Keep the event's semantics minimal so future consumers can assume "fired = world available".
+            var world = new World();
+            World.SetCurrent(world);
+            var fireCount = 0;
+            Action<World> handler = _ => fireCount++;
+            World.CurrentChanged += handler;
+
+            try
+            {
+                World.ClearCurrent(world);
+
+                Assert.AreEqual(0, fireCount,
+                    "ClearCurrent must not fire CurrentChanged — the event signals world-becomes-available, not world-goes-away.");
+            }
+            finally
+            {
+                World.CurrentChanged -= handler;
+                ResetWorldStatics();
+            }
+        }
+
+        private static void ResetWorldStatics()
+        {
+            typeof(World)
+                .GetMethod("ForceResetCurrent", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, null);
+            typeof(World)
+                .GetMethod("ResetStaticEvents", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, null);
         }
 
         private class TestAspectA : IEntityAspect { }
