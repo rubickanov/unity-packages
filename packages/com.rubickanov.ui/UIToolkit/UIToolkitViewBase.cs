@@ -14,7 +14,7 @@ namespace Rubickanov.UI.UIToolkit
 
         internal void Initialize() => OnInitialize();
 
-        protected virtual bool InterceptsInput => true;
+        protected virtual bool InterceptsInput => false;
 
         private IAnimationTarget? _animationTarget;
         private IAnimationTarget AnimationTarget => _animationTarget ??= new UIToolkitAnimationTarget(Root);
