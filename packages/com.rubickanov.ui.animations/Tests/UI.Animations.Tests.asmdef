@@ -1,5 +1,5 @@
 {
-    "name": "UI.Animations.Tests",
+    "name": "Rubickanov.UI.Animations.Tests",
     "rootNamespace": "Rubickanov.UI.Animations.Tests",
     "references": [
         "GUID:9b0a6dbecb870fbc6bd3416eec435188",

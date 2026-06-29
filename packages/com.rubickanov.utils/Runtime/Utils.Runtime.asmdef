@@ -1,5 +1,5 @@
 {
-    "name": "Utils.Runtime",
+    "name": "Rubickanov.Utils.Runtime",
     "rootNamespace": "Rubickanov.Utils",
     "references": [],
     "includePlatforms": [],

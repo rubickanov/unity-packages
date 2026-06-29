@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using ObservableCollections;
@@ -31,14 +32,14 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // Populated only for ObservableDictionary kind — null otherwise. Kept as a
         // nullable Type instead of a discriminated union so the existing single-value
         // call sites (scalar / list) compile unchanged.
-        public readonly Type KeyType;
+        public readonly Type? KeyType;
         public readonly AuthorityMode Authority;
         public readonly InterpolationMode Interpolation;
         public readonly bool Predicted;
         public readonly QuantizationMode Quantization;
         public readonly ReplicatedFieldKind Kind;
 
-        public ReplicatedFieldInfo(FieldInfo field, Type valueType, AuthorityMode authority, InterpolationMode interpolation, bool predicted, QuantizationMode quantization, ReplicatedFieldKind kind = ReplicatedFieldKind.Scalar, Type keyType = null)
+        public ReplicatedFieldInfo(FieldInfo field, Type valueType, AuthorityMode authority, InterpolationMode interpolation, bool predicted, QuantizationMode quantization, ReplicatedFieldKind kind = ReplicatedFieldKind.Scalar, Type? keyType = null)
         {
             Field = field;
             ValueType = valueType;
@@ -99,7 +100,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         // unbounded ObservableRingBuffer<T> is matched separately solely to emit a
         // targeted "use the fixed-size variant" diagnostic; it is NOT a supported
         // kind.
-        private static bool TryMatchObservableList(Type fieldType, out Type elementType)
+        private static bool TryMatchObservableList(Type fieldType, [NotNullWhen(true)] out Type? elementType)
         {
             if (fieldType.IsGenericType && fieldType.GetGenericTypeDefinition() == typeof(ObservableList<>))
             {
@@ -110,7 +111,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             return false;
         }
 
-        private static bool TryMatchObservableDictionary(Type fieldType, out Type keyType, out Type valueType)
+        private static bool TryMatchObservableDictionary(Type fieldType, [NotNullWhen(true)] out Type? keyType, [NotNullWhen(true)] out Type? valueType)
         {
             if (fieldType.IsGenericType && fieldType.GetGenericTypeDefinition() == typeof(ObservableDictionary<,>))
             {
@@ -124,7 +125,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             return false;
         }
 
-        private static bool TryMatchObservableHashSet(Type fieldType, out Type elementType)
+        private static bool TryMatchObservableHashSet(Type fieldType, [NotNullWhen(true)] out Type? elementType)
         {
             if (fieldType.IsGenericType && fieldType.GetGenericTypeDefinition() == typeof(ObservableHashSet<>))
             {
@@ -135,7 +136,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             return false;
         }
 
-        private static bool TryMatchObservableRingBuffer(Type fieldType, out Type elementType)
+        private static bool TryMatchObservableRingBuffer(Type fieldType, [NotNullWhen(true)] out Type? elementType)
         {
             // Only the fixed-size variant is considered a match. The plain unbounded
             // ObservableRingBuffer<T> is recognised at the ImplementsObservableCollection

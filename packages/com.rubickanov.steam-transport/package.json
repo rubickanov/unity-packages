@@ -1,11 +1,12 @@
 {
     "name": "com.rubickanov.steam-transport",
     "version": "1.0.0",
+    "license": "MIT",
     "displayName": "Steam Networking Sockets Transport",
     "description": "Netcode for GameObjects transport using Steam Networking Sockets P2P.",
-    "unity": "2022.3",
+    "unity": "6000.0",
     "keywords": ["steam", "transport", "netcode", "p2p", "networking"],
-    "author": { "name": "Rubickanov" },
+    "author": { "name": "rubickanov" },
     "dependencies": {
         "com.rlabrecque.steamworks.net": "2025.163.0",
         "com.unity.netcode.gameobjects": "2.0.0"

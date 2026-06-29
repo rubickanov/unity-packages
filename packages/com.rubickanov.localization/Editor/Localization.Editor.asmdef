@@ -1,8 +1,8 @@
 {
-    "name": "Localization.Editor",
+    "name": "Rubickanov.Localization.Editor",
     "rootNamespace": "Rubickanov.Localization.Editor",
     "references": [
-        "Localization.Runtime",
+        "Rubickanov.Localization.Runtime",
         "Unity.Localization",
         "Unity.Localization.Editor"
     ],

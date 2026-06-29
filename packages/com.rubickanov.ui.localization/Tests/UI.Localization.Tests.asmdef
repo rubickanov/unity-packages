@@ -1,5 +1,5 @@
 {
-    "name": "UI.Localization.Tests",
+    "name": "Rubickanov.UI.Localization.Tests",
     "rootNamespace": "Rubickanov.UI.Localization.Tests",
     "references": [
         "GUID:99f3ec1a33ab64008ae0f2eb49782169",

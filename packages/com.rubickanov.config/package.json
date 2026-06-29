@@ -1,9 +1,10 @@
 {
   "name": "com.rubickanov.config",
   "version": "1.0.0",
+  "license": "MIT",
   "displayName": "Config",
   "description": "Type-safe config loading via Addressables with caching, validation, and catalog refresh.",
-  "unity": "2022.3",
+  "unity": "6000.0",
   "author": { "name": "rubickanov" },
   "keywords": ["config", "addressables", "scriptableobject"]
 }

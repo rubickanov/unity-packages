@@ -99,6 +99,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
     /// </summary>
     [Preserve]
     internal sealed class ObservableDictionaryBinding<TKey, TValue> : ObservableCollectionBinding
+        where TKey : notnull
         where TValue : unmanaged
     {
         // Unlike the list Op, Key is a typed field here (not an index) — it holds the

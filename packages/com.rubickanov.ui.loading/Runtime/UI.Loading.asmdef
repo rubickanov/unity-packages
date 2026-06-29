@@ -1,5 +1,5 @@
 {
-    "name": "UI.Loading",
+    "name": "Rubickanov.UI.Loading",
     "rootNamespace": "Rubickanov.UI.Loading",
     "references": [
         "GUID:83ac5b117fcc42099f5c21210c1a4a4e",

@@ -26,7 +26,7 @@ namespace Rubickanov.UI.UIToolkit
                 var img = new VisualElement();
                 img.AddToClassList(DialogStyle.Image);
                 img.style.backgroundImage = new StyleBackground(ViewModel.Image);
-                img.style.unityBackgroundScaleMode = ScaleMode.ScaleToFit;
+                img.style.backgroundSize = new BackgroundSize(BackgroundSizeType.Contain);
                 panel.Add(img);
             }
 

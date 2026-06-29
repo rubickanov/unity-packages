@@ -1,9 +1,10 @@
 {
   "name": "com.rubickanov.audio",
   "version": "1.0.0",
+  "license": "MIT",
   "displayName": "Audio",
   "description": "Audio service with SFX pooling, music playback, and AudioMixer-based volume control with persistence.",
-  "unity": "2022.3",
+  "unity": "6000.0",
   "author": { "name": "rubickanov" },
   "keywords": ["audio", "sfx", "music", "mixer"]
 }

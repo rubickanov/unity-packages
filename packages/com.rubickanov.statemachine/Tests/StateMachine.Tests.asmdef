@@ -1,9 +1,9 @@
 {
-    "name": "StateMachine.Tests",
+    "name": "Rubickanov.StateMachine.Tests",
     "rootNamespace": "Rubickanov.StateMachine.Tests",
     "references": [
-        "StateMachine.Runtime",
-        "StateMachine.Async",
+        "Rubickanov.StateMachine.Runtime",
+        "Rubickanov.StateMachine.Async",
         "UniTask"
     ],
     "includePlatforms": [

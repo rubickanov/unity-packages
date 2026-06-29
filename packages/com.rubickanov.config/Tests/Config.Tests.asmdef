@@ -1,8 +1,8 @@
 {
-    "name": "Config.Tests",
+    "name": "Rubickanov.Config.Tests",
     "rootNamespace": "Rubickanov.Config.Tests",
     "references": [
-        "Config.Runtime",
+        "Rubickanov.Config.Runtime",
         "UniTask",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"

@@ -1,0 +1,18 @@
+{
+    "name": "Rubickanov.BehaviorTree.Editor",
+    "rootNamespace": "Rubickanov.BehaviorTree.Editor",
+    "references": [
+        "GUID:fba6ad2d52a8cc94d89577bc958510f2"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

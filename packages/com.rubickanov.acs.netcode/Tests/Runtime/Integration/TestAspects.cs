@@ -51,7 +51,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// </summary>
     public sealed class StateTestAspectRegistrar : MonoBehaviour, IEntityComponent
     {
-        public StateTestAspect Aspect = default!;
+        [System.NonSerialized] public StateTestAspect Aspect = default!;
 
         private void Awake()
         {
@@ -66,7 +66,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
     /// </summary>
     public sealed class EventTestAspectRegistrar : MonoBehaviour, IEntityComponent
     {
-        public EventTestAspect Aspect = default!;
+        [System.NonSerialized] public EventTestAspect Aspect = default!;
 
         private void Awake()
         {

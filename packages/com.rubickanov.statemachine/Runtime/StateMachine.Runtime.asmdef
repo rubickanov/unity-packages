@@ -1,5 +1,5 @@
 {
-    "name": "StateMachine.Runtime",
+    "name": "Rubickanov.StateMachine.Runtime",
     "rootNamespace": "Rubickanov.StateMachine",
     "references": [],
     "includePlatforms": [],

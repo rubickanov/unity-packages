@@ -16,6 +16,6 @@ namespace Rubickanov.ACS.Runtime.Netcode
         /// Does NOT include the 8-byte <c>NetworkObjectId</c> or the 2-byte <c>payloadBytes</c>
         /// prefix — those are per-entity framing, not per-entity body.
         /// </summary>
-        public static Action<ulong, int> OnEntityPayloadWritten;
+        public static Action<ulong, int>? OnEntityPayloadWritten;
     }
 }

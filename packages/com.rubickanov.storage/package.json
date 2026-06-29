@@ -1,9 +1,10 @@
 {
   "name": "com.rubickanov.storage",
   "version": "1.0.0",
+  "license": "MIT",
   "displayName": "Storage",
   "description": "Key-value storage service with pluggable backends: PlayerPrefs, file-based, encrypted decorator.",
-  "unity": "2022.3",
+  "unity": "6000.0",
   "author": { "name": "rubickanov" },
   "keywords": ["storage", "settings", "persistence", "key-value"]
 }

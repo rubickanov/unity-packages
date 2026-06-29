@@ -1,10 +1,10 @@
 {
-    "name": "DevConsole.Config.Tests",
+    "name": "Rubickanov.DevConsole.Config.Tests",
     "rootNamespace": "Rubickanov.DevConsole.Config.Tests",
     "references": [
-        "DevConsole.Runtime",
-        "DevConsole.Config.Runtime",
-        "Config.Runtime",
+        "Rubickanov.DevConsole.Runtime",
+        "Rubickanov.DevConsole.Config.Runtime",
+        "Rubickanov.Config.Runtime",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

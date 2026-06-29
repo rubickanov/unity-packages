@@ -1,7 +1,7 @@
 {
-    "name": "DevConsole.Config.Runtime",
+    "name": "Rubickanov.DevConsole.Config.Runtime",
     "rootNamespace": "Rubickanov.DevConsole.Config",
-    "references": ["DevConsole.Runtime", "Config.Runtime"],
+    "references": ["Rubickanov.DevConsole.Runtime", "Rubickanov.Config.Runtime"],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

@@ -1,5 +1,5 @@
 {
-    "name": "UI.Localization.UIToolkit",
+    "name": "Rubickanov.UI.Localization.UIToolkit",
     "rootNamespace": "Rubickanov.UI.Localization.UIToolkit",
     "references": [
         "GUID:83ac5b117fcc42099f5c21210c1a4a4e",

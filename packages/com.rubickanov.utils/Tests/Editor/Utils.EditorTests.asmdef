@@ -1,8 +1,8 @@
 {
-    "name": "Utils.EditorTests",
+    "name": "Rubickanov.Utils.EditorTests",
     "rootNamespace": "Rubickanov.Utils.Tests",
     "references": [
-        "Utils.Runtime"
+        "Rubickanov.Utils.Runtime"
     ],
     "includePlatforms": [
         "Editor"

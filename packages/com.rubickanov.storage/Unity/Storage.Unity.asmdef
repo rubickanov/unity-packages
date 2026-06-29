@@ -1,8 +1,8 @@
 {
-    "name": "Storage.Unity",
+    "name": "Rubickanov.Storage.Unity",
     "rootNamespace": "Rubickanov.Storage",
     "references": [
-        "Storage.Runtime",
+        "Rubickanov.Storage.Runtime",
         "GUID:f51ebe6a0ceec4240a699833d6309b23"
     ],
     "includePlatforms": [],

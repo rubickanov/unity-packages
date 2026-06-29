@@ -1,8 +1,8 @@
 {
-    "name": "Loading.Tests",
+    "name": "Rubickanov.Loading.Tests",
     "rootNamespace": "Rubickanov.Loading.Tests",
     "references": [
-        "Loading.Runtime",
+        "Rubickanov.Loading.Runtime",
         "UniTask"
     ],
     "includePlatforms": [

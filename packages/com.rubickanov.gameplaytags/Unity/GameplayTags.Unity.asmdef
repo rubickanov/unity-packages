@@ -1,8 +1,8 @@
 {
-    "name": "GameplayTags.Unity",
+    "name": "Rubickanov.GameplayTags.Unity",
     "rootNamespace": "Rubickanov.GameplayTags",
     "references": [
-        "GameplayTags.Runtime"
+        "Rubickanov.GameplayTags.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -1,9 +1,10 @@
 {
   "name": "com.rubickanov.logging",
   "version": "1.0.0",
+  "license": "MIT",
   "displayName": "Logging",
   "description": "ZLogger-based logging factory with file rotation, platform-specific outputs, and Unity log interception.",
-  "unity": "2022.3",
+  "unity": "6000.0",
   "author": { "name": "rubickanov" },
   "keywords": ["logging", "zlogger", "diagnostics"]
 }

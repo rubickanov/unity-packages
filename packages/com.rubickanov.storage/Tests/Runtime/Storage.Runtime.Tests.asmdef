@@ -1,8 +1,8 @@
 {
-    "name": "Storage.Runtime.Tests",
+    "name": "Rubickanov.Storage.Runtime.Tests",
     "rootNamespace": "Rubickanov.Storage.Tests",
     "references": [
-        "Storage.Runtime",
+        "Rubickanov.Storage.Runtime",
         "GUID:f51ebe6a0ceec4240a699833d6309b23"
     ],
     "includePlatforms": [

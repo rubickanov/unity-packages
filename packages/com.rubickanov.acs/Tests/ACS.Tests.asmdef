@@ -1,9 +1,9 @@
 {
-    "name": "ACS.Tests",
+    "name": "Rubickanov.ACS.Tests",
     "rootNamespace": "Rubickanov.ACS.Tests",
     "references": [
-        "ACS.Runtime",
-        "ACS.Editor"
+        "Rubickanov.ACS.Runtime",
+        "Rubickanov.ACS.Editor"
     ],
     "includePlatforms": [
         "Editor"

@@ -195,7 +195,7 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
 
     public sealed class PredictionTestAspectRegistrar : MonoBehaviour, IEntityComponent
     {
-        public PredictionTestAspect Aspect = default!;
+        [System.NonSerialized] public PredictionTestAspect Aspect = default!;
 
         private void Awake()
         {

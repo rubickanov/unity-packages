@@ -1,5 +1,5 @@
 {
-    "name": "DevConsole.Runtime",
+    "name": "Rubickanov.DevConsole.Runtime",
     "rootNamespace": "Rubickanov.DevConsole",
     "references": ["Unity.InputSystem"],
     "includePlatforms": [],

@@ -1,5 +1,5 @@
 {
-    "name": "GameplayTags.Runtime",
+    "name": "Rubickanov.GameplayTags.Runtime",
     "rootNamespace": "Rubickanov.GameplayTags",
     "references": [],
     "includePlatforms": [],
