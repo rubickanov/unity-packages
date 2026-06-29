@@ -2,9 +2,9 @@
     "name": "Rubickanov.UI.Loading",
     "rootNamespace": "Rubickanov.UI.Loading",
     "references": [
-        "GUID:83ac5b117fcc42099f5c21210c1a4a4e",
-        "GUID:1c52287c1df24a328888216c9ebb83ef",
-        "GUID:f51ebe6a0ceec4240a699833d6309b23"
+        "Rubickanov.UI.Runtime",
+        "Rubickanov.Loading.Runtime",
+        "UniTask"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

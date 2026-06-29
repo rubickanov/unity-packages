@@ -2,9 +2,8 @@
     "name": "Rubickanov.UI.Localization.Runtime",
     "rootNamespace": "Rubickanov.UI.Localization",
     "references": [
-        "GUID:83ac5b117fcc42099f5c21210c1a4a4e",
-        "GUID:68edc6396f2e6bb879d95ff0a61595e5",
-        "GUID:77221876cc6b8244180b96e320b1bcd4"
+        "Rubickanov.UI.Runtime",
+        "Rubickanov.Localization.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

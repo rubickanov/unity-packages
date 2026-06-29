@@ -2,7 +2,7 @@
     "name": "Rubickanov.ACS.Editor",
     "rootNamespace": "Rubickanov.ACS.Editor",
     "references": [
-        "GUID:c318aa71effcd0148ade1233ecf216cc"
+        "Rubickanov.ACS.Runtime"
     ],
     "includePlatforms": [
         "Editor"

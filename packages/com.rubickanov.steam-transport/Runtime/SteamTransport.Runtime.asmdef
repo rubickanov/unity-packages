@@ -2,8 +2,8 @@
     "name": "Rubickanov.SteamTransport.Runtime",
     "rootNamespace": "Rubickanov.Netcode.Transports",
     "references": [
-        "GUID:1491147abca9d7d4bb7105af628b223e",
-        "GUID:68bd7fdb68ef2684e982e8a9825b18a5"
+        "Unity.Netcode.Runtime",
+        "com.rlabrecque.steamworks.net"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
