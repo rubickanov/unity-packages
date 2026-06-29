@@ -1,6 +1,6 @@
 {
   "name": "com.rubickanov.ui",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "UI Framework",
   "description": "Backend-agnostic UI framework with view lifecycle, layer management, and dialog system.",
   "unity": "2022.3",

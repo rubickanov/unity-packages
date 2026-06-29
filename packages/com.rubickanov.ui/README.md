@@ -31,6 +31,12 @@ TooltipService (hover tooltips on overlay layer)
 TooltipManipulator (VisualElement hover behavior)
 TooltipExtensions (AddTooltip / RemoveTooltip)
 
+IPopupService (flexible popups: place anywhere, modal/passive, many at once)
+├── PopupHost          — owns popup elements + world/cursor follow loop
+├── PopupBuilder       — fluent config
+├── PopupManipulator / PopupExtensions (AttachPopup) — hover popups
+└── PopupPlacement / PopupStyle — placement modes + CSS hooks
+
 IView (view contract)
 ├── UIToolkitViewBase → UIToolkitView<TViewModel>
 └── UGUIViewBase      → UGUIView<TViewModel>
@@ -41,7 +47,7 @@ IView (view contract)
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
 | **UI.Runtime** | No | Core abstractions: IView, IUIService, IDialogService, UIService, ViewModelBase |
-| **UI.UIToolkit** | Yes | UI Toolkit backend: UIToolkitView, UIToolkitViewFactory, dialog views, tooltips |
+| **UI.UIToolkit** | Yes | UI Toolkit backend: UIToolkitView, UIToolkitViewFactory, dialog views, tooltips, flexible popups |
 | **UI.UGUI** | Yes | UGUI backend: UGUIView, UGUIViewFactory |
 
 ## Core Concepts
@@ -329,6 +335,129 @@ tooltipService.Hide();
 }
 ```
 
+### Flexible Popups
+
+`IPopupService` shows configurable panels **anywhere on screen** — modal or passive,
+triggered by code or by hover, with any combination of close rules. Multiple popups can
+be open at once. It generalizes the dialog and tooltip systems: `IDialogService` and
+`AttachPopup` are presets over the same engine.
+
+**Setup** (UI Toolkit backend) — register `PopupHost` once, like `TooltipService`:
+
+```csharp
+builder.Register<IPopupService>(_ => new PopupHost(uiDocument,
+    // Live screen-pixel pointer position for cursor-following popups (see note below).
+    pointerScreenPosition: () => Pointer.current.position.ReadValue()), Lifetime.Singleton);
+
+// Minimal form (no cursor-follow, no default sheet):
+// new PopupHost(uiDocument)
+// With a default stylesheet for every popup:
+// new PopupHost(uiDocument, popupStyleSheet)
+```
+
+`PopupHost` requires the standard `screen-layer` / `hud-layer` / `popup-layer` /
+`overlay-layer` elements in the UIDocument root.
+
+> **Cursor-following popups:** pass `pointerScreenPosition` — the live pointer position in screen
+> pixels (bottom-left origin), which the host converts to panel space internally. UIToolkit runtime
+> panels only dispatch `PointerMoveEvent` while a *pickable* element is under the cursor, so the
+> event-based fallback freezes over empty areas and a `Cursor()` popup sticks; polling the device
+> avoids that. Use whichever input backend your project has (`Pointer.current`, `Mouse.current`, …).
+
+**Open a popup** via the fluent builder:
+
+```csharp
+// Centered modal, dismissable by button / X / click-outside / Escape
+var result = await popups.Create()
+    .Title("Delete save?")
+    .Message("This cannot be undone.")
+    .Modal()
+    .CloseOn(PopupCloseTriggers.CloseButton | PopupCloseTriggers.ClickOutside | PopupCloseTriggers.Escape)
+    .Button("Cancel", "cancel")
+    .Button("Delete", "delete", isPrimary: true)
+    .OpenAsync();
+
+if (result.ButtonId == "delete") { /* ... */ }
+```
+
+```csharp
+// Top-right toast that auto-closes after 3s
+popups.Create().Title("Saved").At(PopupPlacement.Screen(PopupAnchorCorner.TopRight, new Vector2(16, 16)))
+    .Timeout(3f).Open();
+```
+
+**Placement modes** (`PopupPlacement`):
+
+| Factory | Anchors to |
+|---------|-----------|
+| `ScreenCenter()` / `Screen(corner, offset)` | a point or region of the screen |
+| `ScreenPoint(panelPoint, offset)` | an explicit panel-space point |
+| `AtElement(element, side, autoFlip)` | a UI element, flipping near screen edges |
+| `AtWorld(transform, camera)` | a world-space object, following the camera each frame |
+| `Cursor(offset)` | the mouse cursor |
+
+**Hover popups** — richer than tooltips, via `AttachPopup` (mirrors `AddTooltip`):
+
+```csharp
+// Convenience: passive title/message anchored to the element, closes on pointer-leave
+element.AttachPopup(popups, "Apple", "A crisp red fruit.");
+
+// Full control through a config factory
+element.AttachPopup(popups, () => new PopupConfig {
+    Title = "Inventory slot",
+    ContentFactory = BuildSlotDetails,
+    Placement = PopupPlacement.AtElement(element, PopupSide.Right),
+    CloseTriggers = PopupCloseTriggers.PointerLeave
+});
+```
+
+**The handle** (`IPopupHandle`) returned by `Open()` lets you drive a live popup:
+
+```csharp
+var handle = popups.Create().Title("Loading").At(PopupPlacement.ScreenCenter()).Open();
+handle.UpdateContent(c => c.SetMessage("Almost there…"));
+handle.SetPlacement(PopupPlacement.Cursor());
+handle.Close();                       // or await handle.Result
+```
+
+#### Custom popup styles
+
+Three ways to restyle, from quickest to most invasive:
+
+**A. Override theme variables.** Every value in the package `Popup.uss` reads a `--popup-*`
+custom property with a fallback. Set them in your theme's `:root` to reskin without touching
+the sheet:
+
+```css
+:root {
+    --popup-bg: rgb(25, 25, 35);
+    --popup-radius: 12px;
+    --popup-backdrop-color: rgba(0, 0, 0, 0.6);
+    --popup-btn-primary-bg: var(--color-primary);
+}
+```
+
+**B. Define your own `.popup-*` classes.** The engine tags elements with the class names in
+`PopupStyle`. Define them in your global theme (imported via PanelSettings) using your design
+tokens — exactly how a project styles `.dialog-*`:
+
+```css
+.popup-panel  { background-color: var(--color-bg); border-radius: var(--radius-lg); padding: var(--spacing-md); }
+.popup-title  { font-size: var(--font-size-lg); -unity-font-style: bold; }
+.popup-btn--primary { background-color: var(--color-primary); }
+```
+
+Class hooks: `popup-backdrop`, `popup-panel`, `popup-title`, `popup-icon`, `popup-message`,
+`popup-content`, `popup-input`, `popup-buttons`, `popup-btn`, `popup-btn--primary`,
+`popup-close`, plus modifiers `popup--modal` / `popup--passive` and
+`popup--side-{top,bottom,left,right}` (set from the resolved side, e.g. to point an arrow).
+
+**C. Per-popup or coded overrides.** Reassign a `PopupStyle` field before the first popup to
+repoint a hook globally; add a variant class with `.Class("popup--danger")`; or inject a
+`StyleSheet` for a single popup with `.Style(sheet)` (load it at runtime via
+`Addressables.LoadAssetAsync<StyleSheet>`). A default sheet for every popup can be passed to
+the `PopupHost` constructor.
+
 ### Animations
 
 Views show/hide instantly by default. Override `OnShowAsync`/`OnHideAsync` to add transitions.
@@ -426,11 +555,27 @@ com.rubickanov.ui/
 │   ├── DialogStyle.cs
 │   ├── DynamicPopup.cs
 │   ├── DynamicDialogViewModel.cs
-│   └── Tooltip/
-│       ├── TooltipService.cs
-│       ├── TooltipManipulator.cs
-│       ├── TooltipExtensions.cs
-│       └── Tooltip.uss
+│   ├── Tooltip/
+│   │   ├── TooltipService.cs
+│   │   ├── TooltipManipulator.cs
+│   │   ├── TooltipExtensions.cs
+│   │   └── Tooltip.uss
+│   └── Popup/
+│       ├── PopupEnums.cs
+│       ├── PopupPlacement.cs
+│       ├── PopupConfig.cs
+│       ├── PopupResult.cs
+│       ├── PopupPlacementResolver.cs
+│       ├── PopupStyle.cs
+│       ├── Popup.uss
+│       ├── PopupInstance.cs
+│       ├── IPopupService.cs
+│       ├── IPopupHandle.cs
+│       ├── PopupContentContext.cs
+│       ├── PopupBuilder.cs
+│       ├── PopupHost.cs
+│       ├── PopupManipulator.cs
+│       └── PopupExtensions.cs
 └── UGUI/
     ├── UGUIViewBase.cs
     ├── UGUIView.cs
