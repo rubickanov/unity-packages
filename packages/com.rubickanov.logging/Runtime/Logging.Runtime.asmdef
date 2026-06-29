@@ -2,7 +2,7 @@
     "name": "Rubickanov.Logging.Runtime",
     "rootNamespace": "Rubickanov.Logging",
     "references": [
-        "GUID:2b78dc61ba35e42c39ba2aabce11b6c4"
+        "ZLogger.Unity"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -2,7 +2,7 @@
     "name": "Rubickanov.Logging.Editor",
     "rootNamespace": "Rubickanov.Logging.Editor",
     "references": [
-        "GUID:d63e3a82efc44e23af2c3fc73698686f"
+        "Rubickanov.Logging.Runtime"
     ],
     "includePlatforms": [
         "Editor"

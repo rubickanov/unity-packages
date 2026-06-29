@@ -2,12 +2,11 @@
     "name": "Rubickanov.UI.Localization.UIToolkit",
     "rootNamespace": "Rubickanov.UI.Localization.UIToolkit",
     "references": [
-        "GUID:83ac5b117fcc42099f5c21210c1a4a4e",
-        "GUID:345547c051ba483f94a27a51375c9860",
-        "GUID:99f3ec1a33ab64008ae0f2eb49782169",
-        "GUID:68edc6396f2e6bb879d95ff0a61595e5",
-        "GUID:77221876cc6b8244180b96e320b1bcd4",
-        "GUID:eec0964c48f6f4e40bc3ec2257ccf8c5"
+        "Rubickanov.UI.Runtime",
+        "Rubickanov.UI.UIToolkit",
+        "Rubickanov.UI.Localization.Runtime",
+        "Rubickanov.Localization.Runtime",
+        "Unity.Localization"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

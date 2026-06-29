@@ -2,9 +2,9 @@
     "name": "Rubickanov.UI.Animations",
     "rootNamespace": "Rubickanov.UI.Animations",
     "references": [
-        "GUID:83ac5b117fcc42099f5c21210c1a4a4e",
-        "GUID:f51ebe6a0ceec4240a699833d6309b23",
-        "GUID:3b570a5146f9d4f0fa107ed4559471a3"
+        "Rubickanov.UI.Runtime",
+        "UniTask",
+        "LitMotion"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

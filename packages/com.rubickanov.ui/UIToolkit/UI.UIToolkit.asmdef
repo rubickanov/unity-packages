@@ -2,9 +2,8 @@
     "name": "Rubickanov.UI.UIToolkit",
     "rootNamespace": "Rubickanov.UI.UIToolkit",
     "references": [
-        "GUID:f51ebe6a0ceec4240a699833d6309b23",
-        "GUID:77221876cc6b8244180b96e320b1bcd4",
-        "GUID:83ac5b117fcc42099f5c21210c1a4a4e"
+        "UniTask",
+        "Rubickanov.UI.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
