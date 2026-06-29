@@ -1,8 +1,8 @@
 {
-    "name": "GAS.Runtime",
+    "name": "Rubickanov.GAS.Runtime",
     "rootNamespace": "Rubickanov.GAS",
     "references": [
-        "GameplayTags.Runtime"
+        "Rubickanov.GameplayTags.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

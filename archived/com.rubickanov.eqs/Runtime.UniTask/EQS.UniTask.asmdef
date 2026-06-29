@@ -1,0 +1,25 @@
+{
+    "name": "Rubickanov.EQS.UniTask",
+    "rootNamespace": "Rubickanov.EQS",
+    "references": [
+        "GUID:c157ff19ee042ada3926b6524d1770e7",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "EQS_UNITASK_INTEGRATION"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.cysharp.unitask",
+            "expression": "2.0.0",
+            "define": "EQS_UNITASK_INTEGRATION"
+        }
+    ],
+    "noEngineReferences": false
+}

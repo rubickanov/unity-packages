@@ -1,10 +1,10 @@
 {
-    "name": "GameplayTags.Tests",
+    "name": "Rubickanov.GameplayTags.Tests",
     "rootNamespace": "Rubickanov.GameplayTags.Tests",
     "references": [
-        "GameplayTags.Runtime",
-        "GameplayTags.Unity",
-        "GameplayTags.Editor"
+        "Rubickanov.GameplayTags.Runtime",
+        "Rubickanov.GameplayTags.Unity",
+        "Rubickanov.GameplayTags.Editor"
     ],
     "includePlatforms": [
         "Editor"

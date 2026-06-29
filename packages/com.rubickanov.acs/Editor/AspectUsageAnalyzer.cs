@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 using Rubickanov.ACS.Runtime;
 using UnityEditor;
 
-[assembly: InternalsVisibleTo("ACS.Tests")]
+[assembly: InternalsVisibleTo("Rubickanov.ACS.Tests")]
 
 namespace Rubickanov.ACS.Editor
 {

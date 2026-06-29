@@ -1,8 +1,8 @@
 {
-    "name": "DevConsole.Tests",
+    "name": "Rubickanov.DevConsole.Tests",
     "rootNamespace": "Rubickanov.DevConsole.Tests",
     "references": [
-        "DevConsole.Runtime",
+        "Rubickanov.DevConsole.Runtime",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

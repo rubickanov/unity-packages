@@ -11,6 +11,21 @@ if [[ "${1:-}" == "--serve" ]]; then
     SERVE=true
 fi
 
+# --- Portable "relative path from $2 to $1" ---
+# GNU coreutils (Linux) has `realpath --relative-to`; BSD/macOS realpath does not.
+# Prefer GNU realpath, then Homebrew's grealpath, then fall back to python3.
+relpath() {
+    local target="$1" base="$2"
+    if realpath --relative-to="$base" "$target" 2>/dev/null; then
+        return
+    fi
+    if command -v grealpath >/dev/null 2>&1; then
+        grealpath --relative-to="$base" "$target"
+        return
+    fi
+    python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "$target" "$base"
+}
+
 # --- Discover runtime .asmdef files ---
 
 src_entries=()
@@ -26,7 +41,7 @@ while IFS= read -r asmdef_path; do
     name="$(grep '"name"' "$asmdef_path" | head -1 | sed 's/.*: *"\(.*\)".*/\1/')"
 
     # Relative path from docs/ to the asmdef folder
-    rel_path="$(realpath --relative-to="$DOCS_DIR" "$asmdef_dir")"
+    rel_path="$(relpath "$asmdef_dir" "$DOCS_DIR")"
 
     echo "  Found: $name ($rel_path)"
 

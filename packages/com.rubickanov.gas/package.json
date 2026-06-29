@@ -1,9 +1,10 @@
 {
     "name": "com.rubickanov.gas",
     "version": "1.0.0",
+    "license": "MIT",
     "displayName": "Gameplay Ability System",
     "description": "Data-driven gameplay effects system. Attribute modifiers with duration, periodicity, and tag-based conditions.",
-    "unity": "2022.3",
+    "unity": "6000.0",
     "author": {
         "name": "rubickanov"
     },

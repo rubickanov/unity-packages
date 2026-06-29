@@ -1,5 +1,5 @@
 {
-    "name": "ACS.Runtime.Netcode",
+    "name": "Rubickanov.ACS.Runtime.Netcode",
     "rootNamespace": "Rubickanov.ACS.Runtime.Netcode",
     "references": [
         "GUID:c318aa71effcd0148ade1233ecf216cc",

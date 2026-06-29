@@ -1,9 +1,9 @@
 {
-    "name": "ACS.Tests.Persistence",
+    "name": "Rubickanov.ACS.Tests.Persistence",
     "rootNamespace": "Rubickanov.ACS.Tests.Persistence",
     "references": [
-        "ACS.Runtime",
-        "ACS.Runtime.Persistence"
+        "Rubickanov.ACS.Runtime",
+        "Rubickanov.ACS.Runtime.Persistence"
     ],
     "includePlatforms": [
         "Editor"

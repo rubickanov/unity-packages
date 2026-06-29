@@ -1,5 +1,5 @@
 {
-    "name": "Config.Runtime",
+    "name": "Rubickanov.Config.Runtime",
     "rootNamespace": "Rubickanov.Config",
     "references": [
         "UniTask",

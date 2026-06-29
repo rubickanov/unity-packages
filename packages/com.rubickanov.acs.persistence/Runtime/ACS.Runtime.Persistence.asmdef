@@ -1,8 +1,8 @@
 {
-    "name": "ACS.Runtime.Persistence",
+    "name": "Rubickanov.ACS.Runtime.Persistence",
     "rootNamespace": "Rubickanov.ACS.Runtime.Persistence",
     "references": [
-        "ACS.Runtime"
+        "Rubickanov.ACS.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

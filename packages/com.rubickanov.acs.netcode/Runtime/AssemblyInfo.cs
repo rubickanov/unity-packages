@@ -1,3 +1,3 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("ACS.Runtime.Netcode.Tests")]
+[assembly: InternalsVisibleTo("Rubickanov.ACS.Runtime.Netcode.Tests")]

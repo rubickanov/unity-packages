@@ -1,13 +1,14 @@
 {
     "name": "com.rubickanov.devconsole.config",
     "version": "1.0.0",
+    "license": "MIT",
     "displayName": "Dev Console — Config Extension",
     "description": "Auto-resolve com.rubickanov.config items by Id in console commands. One-line bootstrap registers parser + autocomplete for any ConfigDatabase.",
-    "unity": "2022.3",
+    "unity": "6000.0",
     "dependencies": {
         "com.rubickanov.devconsole": "1.0.0",
         "com.rubickanov.config": "1.0.0"
     },
     "keywords": ["console", "config", "scriptableobject", "autocomplete"],
-    "author": { "name": "Rubickanov" }
+    "author": { "name": "rubickanov" }
 }

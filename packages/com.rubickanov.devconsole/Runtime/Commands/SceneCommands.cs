@@ -75,7 +75,7 @@ namespace Rubickanov.DevConsole.Commands
         {
             if (string.IsNullOrEmpty(type))
             {
-                var total = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None).Length;
+                var total = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude).Length;
                 ConsoleLog.Log($"Total GameObjects: {total}");
                 return;
             }
@@ -107,7 +107,7 @@ namespace Rubickanov.DevConsole.Commands
                 return;
             }
 
-            var count = UnityEngine.Object.FindObjectsByType(foundType, FindObjectsSortMode.None).Length;
+            var count = UnityEngine.Object.FindObjectsByType(foundType, FindObjectsInactive.Exclude).Length;
             ConsoleLog.Log($"{foundType.Name}: {count}");
         }
 

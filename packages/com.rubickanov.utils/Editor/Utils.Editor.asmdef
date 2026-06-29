@@ -1,8 +1,8 @@
 {
-    "name": "Utils.Editor",
+    "name": "Rubickanov.Utils.Editor",
     "rootNamespace": "Rubickanov.Utils.Editor",
     "references": [
-        "Utils.Runtime"
+        "Rubickanov.Utils.Runtime"
     ],
     "includePlatforms": [
         "Editor"

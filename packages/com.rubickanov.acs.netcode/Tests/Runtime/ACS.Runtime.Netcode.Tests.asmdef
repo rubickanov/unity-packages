@@ -1,9 +1,9 @@
 {
-    "name": "ACS.Runtime.Netcode.Tests",
+    "name": "Rubickanov.ACS.Runtime.Netcode.Tests",
     "rootNamespace": "Rubickanov.ACS.Runtime.Netcode.Tests",
     "references": [
-        "ACS.Runtime",
-        "ACS.Runtime.Netcode",
+        "Rubickanov.ACS.Runtime",
+        "Rubickanov.ACS.Runtime.Netcode",
         "Unity.Netcode.Runtime",
         "Unity.Collections",
         "UnityEngine.TestRunner",

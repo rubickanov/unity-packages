@@ -1,0 +1,18 @@
+{
+  "name": "com.rubickanov.behaviortree",
+  "version": "1.0.0",
+  "license": "MIT",
+  "displayName": "Behavior Tree",
+  "description": "Serializable behavior tree framework for Unity. Visual editor, blackboard, subtrees, and SerializeReference-based polymorphic serialization.",
+  "unity": "6000.0",
+  "author": {
+    "name": "rubickanov"
+  },
+  "keywords": [
+    "ai",
+    "behavior-tree",
+    "bt",
+    "blackboard",
+    "decision"
+  ]
+}

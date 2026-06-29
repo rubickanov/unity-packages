@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Rubickanov.ACS.Runtime.Netcode;
+using UnityEngine;
 
 namespace Experiments
 {
@@ -13,6 +14,16 @@ namespace Experiments
     {
         private static readonly Dictionary<ulong, int> s_LastPayload = new();
         private static bool s_Wired;
+
+        // With Domain Reload disabled the static subscription and dictionary would survive
+        // into the next play session, leaking a dangling handler. Reset on subsystem load.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            ReplicationDebug.OnEntityPayloadWritten -= OnPayload;
+            s_LastPayload.Clear();
+            s_Wired = false;
+        }
 
         public static void EnsureWired()
         {

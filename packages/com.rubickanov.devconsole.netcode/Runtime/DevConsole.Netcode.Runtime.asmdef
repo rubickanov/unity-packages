@@ -1,7 +1,7 @@
 {
-    "name": "DevConsole.Netcode.Runtime",
+    "name": "Rubickanov.DevConsole.Netcode.Runtime",
     "rootNamespace": "Rubickanov.DevConsole.Netcode",
-    "references": ["DevConsole.Runtime", "Unity.Netcode.Runtime"],
+    "references": ["Rubickanov.DevConsole.Runtime", "Unity.Netcode.Runtime"],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

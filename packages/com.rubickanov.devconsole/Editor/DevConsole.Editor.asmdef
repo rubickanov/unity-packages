@@ -1,8 +1,8 @@
 {
-    "name": "DevConsole.Editor",
+    "name": "Rubickanov.DevConsole.Editor",
     "rootNamespace": "Rubickanov.DevConsole.Editor",
     "references": [
-        "DevConsole.Runtime"
+        "Rubickanov.DevConsole.Runtime"
     ],
     "includePlatforms": [
         "Editor"

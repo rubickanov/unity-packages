@@ -22,7 +22,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
         private static readonly List<ISmoothBinding> s_Bindings = new();
         private static readonly List<ISmoothBinding> s_PendingRemoval = new();
         private static bool s_Iterating;
-        private static SmoothDriverHost s_Host;
+        private static SmoothDriverHost? s_Host;
 
         // With Domain Reload disabled the static list would retain bindings captured in a
         // previous play session and tick their dangling setters (pointing at destroyed

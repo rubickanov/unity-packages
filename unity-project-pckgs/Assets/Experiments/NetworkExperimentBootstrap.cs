@@ -1,3 +1,4 @@
+#nullable enable
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEngine;
@@ -42,7 +43,7 @@ namespace Experiments
             if (!connected)
                 DrawConnectionUI(nm);
             else
-                DrawSessionUI(nm);
+                DrawSessionUI(nm!); // connected ⟹ nm != null (see line above)
 
             GUILayout.EndArea();
         }

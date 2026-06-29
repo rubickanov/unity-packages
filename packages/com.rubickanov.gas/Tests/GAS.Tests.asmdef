@@ -1,11 +1,11 @@
 {
-    "name": "GAS.Tests",
+    "name": "Rubickanov.GAS.Tests",
     "rootNamespace": "Rubickanov.GAS.Tests",
     "references": [
-        "GAS.Runtime",
-        "GAS.Unity",
-        "GameplayTags.Runtime",
-        "GameplayTags.Unity"
+        "Rubickanov.GAS.Runtime",
+        "Rubickanov.GAS.Unity",
+        "Rubickanov.GameplayTags.Runtime",
+        "Rubickanov.GameplayTags.Unity"
     ],
     "includePlatforms": [
         "Editor"

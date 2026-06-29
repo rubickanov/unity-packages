@@ -1,8 +1,8 @@
 {
-    "name": "UI.Editor",
+    "name": "Rubickanov.UI.Editor",
     "rootNamespace": "Rubickanov.UI.Editor",
     "references": [
-        "UI.Runtime"
+        "Rubickanov.UI.Runtime"
     ],
     "includePlatforms": [
         "Editor"

@@ -1,10 +1,10 @@
 {
-    "name": "GAS.Unity",
+    "name": "Rubickanov.GAS.Unity",
     "rootNamespace": "Rubickanov.GAS",
     "references": [
-        "GAS.Runtime",
-        "GameplayTags.Runtime",
-        "GameplayTags.Unity"
+        "Rubickanov.GAS.Runtime",
+        "Rubickanov.GameplayTags.Runtime",
+        "Rubickanov.GameplayTags.Unity"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

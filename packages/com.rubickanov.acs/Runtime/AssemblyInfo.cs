@@ -1,3 +1,3 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("ACS.Tests")]
+[assembly: InternalsVisibleTo("Rubickanov.ACS.Tests")]
