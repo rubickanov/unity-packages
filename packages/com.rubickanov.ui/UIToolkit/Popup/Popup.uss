@@ -1,0 +1,109 @@
+/*
+ * Default styles for the flexible popup system.
+ * Every value reads from a `--popup-*` custom property with a built-in fallback, so the package is
+ * self-contained out of the box. Override the variables in your project theme to restyle without
+ * replacing this sheet (see the package README, "Custom popup styles").
+ */
+
+.popup-backdrop {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    background-color: var(--popup-backdrop-color, rgba(0, 0, 0, 0.5));
+    justify-content: center;
+    align-items: center;
+}
+
+.popup--passive {
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.popup-panel {
+    position: absolute;
+    background-color: var(--popup-bg, rgba(25, 25, 35, 0.98));
+    border-left-color: var(--popup-border-color, rgba(255, 255, 255, 0.1));
+    border-right-color: var(--popup-border-color, rgba(255, 255, 255, 0.1));
+    border-top-color: var(--popup-border-color, rgba(255, 255, 255, 0.1));
+    border-bottom-color: var(--popup-border-color, rgba(255, 255, 255, 0.1));
+    border-left-width: var(--popup-border-width, 1px);
+    border-right-width: var(--popup-border-width, 1px);
+    border-top-width: var(--popup-border-width, 1px);
+    border-bottom-width: var(--popup-border-width, 1px);
+    border-top-left-radius: var(--popup-radius, 10px);
+    border-top-right-radius: var(--popup-radius, 10px);
+    border-bottom-left-radius: var(--popup-radius, 10px);
+    border-bottom-right-radius: var(--popup-radius, 10px);
+    padding: var(--popup-padding, 16px);
+    min-width: var(--popup-min-width, 160px);
+    max-width: var(--popup-max-width, 420px);
+}
+
+.popup-title {
+    color: var(--popup-title-color, rgb(255, 255, 255));
+    font-size: var(--popup-title-font-size, 18px);
+    -unity-font-style: bold;
+    margin-bottom: var(--popup-gap, 8px);
+    white-space: normal;
+}
+
+.popup-icon {
+    width: var(--popup-icon-size, 48px);
+    height: var(--popup-icon-size, 48px);
+    align-self: center;
+    margin-bottom: var(--popup-gap, 8px);
+    -unity-background-scale-mode: scale-to-fit;
+}
+
+.popup-message {
+    color: var(--popup-color, rgb(230, 230, 230));
+    font-size: var(--popup-font-size, 14px);
+    white-space: normal;
+    margin-bottom: var(--popup-gap, 8px);
+}
+
+.popup-content {
+    margin-bottom: var(--popup-gap, 8px);
+}
+
+.popup-input {
+    margin-bottom: var(--popup-gap, 8px);
+}
+
+.popup-buttons {
+    flex-direction: row;
+    justify-content: flex-end;
+}
+
+.popup-btn {
+    margin-left: var(--popup-gap, 8px);
+    padding-left: 14px;
+    padding-right: 14px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    background-color: var(--popup-btn-bg, rgba(255, 255, 255, 0.08));
+    color: var(--popup-btn-color, rgb(255, 255, 255));
+    border-top-left-radius: var(--popup-btn-radius, 6px);
+    border-top-right-radius: var(--popup-btn-radius, 6px);
+    border-bottom-left-radius: var(--popup-btn-radius, 6px);
+    border-bottom-right-radius: var(--popup-btn-radius, 6px);
+}
+
+.popup-btn--primary {
+    background-color: var(--popup-btn-primary-bg, rgb(100, 150, 255));
+    color: var(--popup-btn-primary-color, rgb(255, 255, 255));
+}
+
+.popup-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: var(--popup-close-size, 22px);
+    height: var(--popup-close-size, 22px);
+    padding: 0;
+    background-color: rgba(0, 0, 0, 0);
+    color: var(--popup-color, rgb(230, 230, 230));
+    -unity-text-align: middle-center;
+    font-size: var(--popup-close-font-size, 16px);
+}
