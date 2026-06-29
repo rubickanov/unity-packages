@@ -49,7 +49,9 @@ fi
 
 # --- Relative path from project/Packages/ to unity-packages/packages/ ---
 
-REL_PATH="$(realpath --relative-to="$PROJECT_DIR/Packages" "$PACKAGES_DIR")"
+# GNU `realpath --relative-to` is unavailable on macOS (BSD), so derive the
+# relative path portably via Python.
+REL_PATH="$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "$PACKAGES_DIR" "$PROJECT_DIR/Packages")"
 
 # --- Status ---
 
@@ -88,11 +90,12 @@ switch_packages() {
 
         if [[ "$target" == "local" ]]; then
             local new_val="file:$REL_PATH/$pkg"
-            sed -i "s|\"$pkg\": \"[^\"]*\"|\"$pkg\": \"$new_val\"|" "$MANIFEST"
         else
             local new_val="$REMOTE_BASE/$pkg"
-            sed -i "s|\"$pkg\": \"[^\"]*\"|\"$pkg\": \"$new_val\"|" "$MANIFEST"
         fi
+        # `sed -i` with a backup suffix is portable across BSD (macOS) and GNU.
+        sed -i.bak "s|\"$pkg\": \"[^\"]*\"|\"$pkg\": \"$new_val\"|" "$MANIFEST"
+        rm -f "$MANIFEST.bak"
         changed=$((changed + 1))
     done
 
