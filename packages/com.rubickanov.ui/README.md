@@ -1,16 +1,21 @@
 # UI Framework
 
-Backend-agnostic UI framework with view lifecycle, layer management, and dialog system. Ships with UI Toolkit and UGUI backends.
+Backend-agnostic UI framework with view lifecycle, layer management, dialogs, tooltips, and flexible popups. Ships with UI Toolkit and UGUI backends.
 
 ## Dependencies
 
-- `UniTask` — async view lifecycle (show/hide/bind)
-- `R3` — reactive bindings in UIToolkit/UGUI backends and ViewModelBase
+- `UniTask` — async view lifecycle (register / show / hide, animations)
+- `R3` — reactive properties and commands in `ViewModelBase`, two-way bindings in the UI Toolkit backend
+- `UnityEngine.UI`, `Unity.TextMeshPro` — referenced by the UGUI backend only
+
+Ready-made show/hide animations live in the `com.rubickanov.ui.animations` extension package. This package only ships `NoneAnimation` (instant).
+
+Unity `6000.0+`.
 
 ## Architecture
 
 ```
-IUIService (screen/popup lifecycle)
+IUIService (view registry + show/hide by layer)
 ├── UIService          — backend-agnostic implementation
 └── NullUIService      — no-op for server/headless builds
 
@@ -18,87 +23,98 @@ IViewFactory (view creation + layer attachment)
 ├── UIToolkitViewFactory — UI Toolkit backend
 └── UGUIViewFactory      — UGUI backend
 
-IDialogService (confirm/alert/modal/builder)
-├── UIToolkitDialogService — popup-based dialogs (DynamicPopup + DialogBuilder)
-└── NullDialogService      — no-op for server builds
-
-IViewServiceResolver (optional service lookup from views)
-
-SceneViewScopeService (scene-lifetime view registration)
-└── ScopedViewRegistration (manual disposable scope)
-
-TooltipService (hover tooltips on overlay layer)
-TooltipManipulator (VisualElement hover behavior)
-TooltipExtensions (AddTooltip / RemoveTooltip)
-
-IPopupService (flexible popups: place anywhere, modal/passive, many at once)
-├── PopupHost          — owns popup elements + world/cursor follow loop
-├── PopupBuilder       — fluent config
-├── PopupManipulator / PopupExtensions (AttachPopup) — hover popups
-└── PopupPlacement / PopupStyle — placement modes + CSS hooks
-
-IView (view contract)
+IView (view contract, no Root)
 ├── UIToolkitViewBase → UIToolkitView<TViewModel>
 └── UGUIViewBase      → UGUIView<TViewModel>
+
+IDialogService (confirm / alert / modal)
+└── UIToolkitDialogService — built on popups / DialogBuilder
+
+IPopupService (flexible panels, placed anywhere, modal or passive)
+└── PopupHost
+
+ISpinnerHost (busy indicator)
+├── UIToolkitSpinnerHost
+└── NullSpinnerHost
+
+TooltipService          (hover tooltips on the overlay layer)
+IViewServiceResolver    (optional service lookup from inside views)
+SceneViewScopeService   (scene-lifetime view registration)
 ```
+
+`UIService` keeps a registry of views, one active **screen** (a view registered on `UILayer.Screen`) and a stack of **popups** (views registered on any other layer). The render layer is chosen once at `Register<T>` time, not per show. The factory owns all DOM operations; views never place themselves.
 
 ## Assemblies
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **UI.Runtime** | No | Core abstractions: IView, IUIService, IDialogService, UIService, ViewModelBase |
-| **UI.UIToolkit** | Yes | UI Toolkit backend: UIToolkitView, UIToolkitViewFactory, dialog views, tooltips, flexible popups |
-| **UI.UGUI** | Yes | UGUI backend: UGUIView, UGUIViewFactory |
+| **Rubickanov.UI.Runtime** | No | Core abstractions: `IView`, `IUIService`, `IDialogService`, `UIService`, `ViewModelBase`, animation interfaces |
+| **Rubickanov.UI.UIToolkit** | Yes | UI Toolkit backend: views, factory, dialogs, tooltips, flexible popups, spinner host |
+| **Rubickanov.UI.UGUI** | Yes | UGUI backend: views and factory |
+| **Rubickanov.UI.Editor** | Editor | `UIServiceDebugWindow` for inspecting live `UIService` state |
 
 ## Core Concepts
 
-**IView** — View contract with `Bind`, `Show`/`Hide`, `ShowAsync`/`HideAsync`, and `Destroy`. Backend-agnostic -- no Root property at this level.
+**IView** — Backend-agnostic view contract: `Bind`, `Show`/`Hide`, `ShowAsync`/`HideAsync`, `Destroy`, `IsVisible`. No `Root` at this level.
 
-**UILayer** — Enum defining render order: `Screen`, `HUD`, `Popup`, `Overlay`. Each layer is a separate container in the UI document.
+**UILayer** — Render order: `Screen`, `HUD`, `Popup`, `Overlay`. Each maps to a container element (`screen-layer`, `hud-layer`, `popup-layer`, `overlay-layer`) that must exist in the `UIDocument` root. A view registered on `Screen` is treated as the single active screen; any other layer makes it a stacked popup.
 
-**ViewModelBase** — Disposable base class for view models. Provides `CreateProperty<T>()`, `CreateCommand()`, `CreateSubject<T>()`, and `AddDisposable()`. All created state is auto-disposed with the VM.
+**ViewModelBase** — Disposable base for view models. `CreateProperty<T>()`, `CreateCommand()`, `CreateCommand<T>()`, `CreateSubject<T>()` allocate R3 state that is auto-disposed with the view model. `AddDisposable` / `TrackDisposable` track extra disposables.
 
-**UIToolkitView\<TViewModel\>** — Generic view base with typed ViewModel access and binding helpers. Manages two cleanup mechanisms: **DisposableBag** for R3 subscriptions and an unbind list for UI Toolkit events. Both are cleared automatically on hide.
+**UIToolkitView\<TViewModel\>** — Generic UI Toolkit view base with typed `ViewModel` access and binding helpers. It tracks two cleanup mechanisms: an R3 `DisposableBag` for observable subscriptions and an unbind list for UI Toolkit event handlers. Both clear automatically on hide.
 
 ## Quick Start
 
-1. Register services in your LifetimeScope:
+1. The `UIDocument` root must contain four layer elements: `screen-layer`, `hud-layer`, `popup-layer`, `overlay-layer`.
+
+2. Register services (VContainer shown):
 
 ```csharp
 // Client
-builder.Register<UIToolkitViewFactory>(Lifetime.Singleton).As<IViewFactory>();
+builder.Register<IViewFactory>(_ =>
+    new UIToolkitViewFactory(uiDocument, LoadUxml, serviceResolver), Lifetime.Singleton);
 builder.Register<UIService>(Lifetime.Singleton).As<IUIService>();
-builder.Register<UIToolkitDialogService>(Lifetime.Singleton).As<IDialogService>();
+builder.Register<IPopupService>(_ => new PopupHost(uiDocument), Lifetime.Singleton);
+builder.Register<IDialogService, UIToolkitDialogService>(Lifetime.Singleton);
 
-// Server
+// Server / headless
 builder.Register<NullUIService>(Lifetime.Singleton).As<IUIService>();
 builder.Register<NullDialogService>(Lifetime.Singleton).As<IDialogService>();
+
+// UxmlLoader: maps a view's type name to a VisualTreeAsset + a release handle
+static async UniTask<(VisualTreeAsset, IDisposable)> LoadUxml(string address)
+{
+    var handle = Addressables.LoadAssetAsync<VisualTreeAsset>(address);
+    return (await handle, new AddressableHandle(handle));
+}
 ```
 
-2. Register and show a view:
+3. Register a view (its layer is fixed here), then show it:
 
 ```csharp
 await ui.Register<HudView>(UILayer.HUD);
-await ui.ShowScreen<HudView>(new HudViewModel(health, ammo));
+await ui.Show<HudView>(new HudViewModel(health, ammo));
 ```
+
+`UIToolkitViewFactory` loads UXML by the view's type name (`HudView` → address `"HudView"`). Override `UxmlName` is not needed; the factory uses `GetType().Name`.
 
 ## Usage
 
-### View Lifecycle
+### View lifecycle
 
+```text
+new() → Root set → OnInitialize() → [ OnBind() → OnShowAsync() → OnHideAsync() → OnViewHide() → OnUnbind() ]* → Destroy()
+                   ^ once            ^ repeats per show/hide cycle
 ```
-new() -> Root set -> OnInitialize() -> [OnBind() -> OnShowAsync() -> OnHideAsync() -> OnViewHide() -> OnUnbind()]* -> Destroy()
-                     ^ once             ^ repeats per show/hide cycle
-```
 
-- `OnInitialize()` — called once after `Root` is set (during `Register`). Cache element references and animation targets here.
-- `OnBind()` — called each time the view is shown with a new ViewModel. Set up bindings.
-- `OnShowAsync(root, duration)` — called after display is set to Flex. Play show animations.
-- `OnHideAsync(root, duration)` — called before display is set to None. Play hide animations.
-- `OnViewHide()` — called after hide animation completes. Cleanup before unbind.
-- `OnUnbind()` — called after all bindings are cleared. Final cleanup.
+- `OnInitialize()` — once, after `Root` is assigned (during `Register`). Cache element references here.
+- `OnBind()` — each time the view is shown with a new view model. Set up bindings.
+- `OnShowAsync(target, duration)` — after display is set to Flex. Play show animation.
+- `OnHideAsync(target, duration)` — before display is set to None. Play hide animation.
+- `OnViewHide()` — after the hide animation completes.
+- `OnUnbind()` — after all bindings are cleared. Final cleanup.
 
-### Creating a View
+### Creating a view
 
 ```csharp
 public class HudView : UIToolkitView<HudViewModel>
@@ -109,13 +125,12 @@ public class HudView : UIToolkitView<HudViewModel>
         BindButton(Root.Q<Button>("reload-btn"), () => ViewModel.Reload.Execute(Unit.Default));
         return UniTask.CompletedTask;
     }
-
-    protected override void OnViewHide() { }
-    protected override void OnUnbind() { }
 }
 ```
 
-### Registering Views
+`Bind`, `BindButton` and the other helpers are auto-cleaned when the view hides — no manual unsubscription. `protected override UniTask OnBind()` is the only required override.
+
+### Registering views
 
 ```csharp
 // Global (lives forever)
@@ -125,40 +140,44 @@ await ui.Register<LoadingScreen>(UILayer.Screen);
 var views = new ScopedViewRegistration(ui);
 await views.Register<HudView>(UILayer.HUD);
 await views.Register<PausePopup>(UILayer.Popup);
-// views.Dispose() unregisters all
+// views.Dispose() unregisters all of them
 ```
 
-### Showing and Hiding
+### Showing and hiding
+
+A view registered on `UILayer.Screen` is the single active screen — showing another screen hides the previous one. Views on any other layer stack as popups.
 
 ```csharp
-// Screens (one active at a time)
-await ui.ShowScreen<HudView>(new HudViewModel(health, ammo));
-ui.HideScreen<HudView>();                  // instant
-await ui.HideScreenAsync<HudView>();       // animated
-ui.HideAllScreens();
+await ui.Show<HudView>(new HudViewModel(health, ammo));   // screen or popup, per registration
 
-// Popups (stacked)
-await ui.ShowPopup<PausePopup>(new PauseViewModel(onResume, onSettings, onQuit));
-ui.HidePopup<PausePopup>();                // instant
-await ui.HidePopupAsync<PausePopup>();     // animated
-ui.HideTopPopup();                         // instant, topmost
-await ui.HideTopPopupAsync();              // animated, topmost
+ui.Hide<HudView>();                  // instant
+await ui.HideAsync<HudView>();       // animated
+
+ui.HideTop();                        // instant, topmost popup
+await ui.HideTopAsync();             // animated, topmost popup
+
+ui.HideAll();                        // instant, screen + all popups
+await ui.HideAllAsync();             // animated
+
+var hud = ui.Get<HudView>();         // typed lookup of a registered view
 ```
 
-### Binding Helpers
+### Binding helpers
 
 | Helper | Description | Cleanup |
 |--------|-------------|---------|
-| `Bind<T>(Observable<T>, Action<T>)` | One-way: ViewModel to UI | DisposableBag (R3) |
+| `Bind<T>(Observable<T>, Action<T>)` | One-way: view model → UI | DisposableBag |
+| `BindButton(Button, Action)` | Click handler | unbind list |
+| `BindValueChanged<TElement, TValue>(element, handler)` | Value-change handler | unbind list |
 | `BindTextField(TextField, ReactiveProperty<string>)` | Two-way | DisposableBag + unbind list |
 | `BindSlider(Slider, ReactiveProperty<float>)` | Two-way | DisposableBag + unbind list |
 | `BindToggle(Toggle, ReactiveProperty<bool>)` | Two-way | DisposableBag + unbind list |
-| `BindDropdown(DropdownField, ReactiveProperty<int>, choices)` | Two-way | DisposableBag + unbind list |
-| `BindButton(Button, Action)` | Click handler | unbind list |
-| `BindValueChanged<TElement, TValue>(element, handler)` | Value change | unbind list |
-| `TrackUnbind(Action)` | Manual cleanup | unbind list |
+| `BindDropdown(DropdownField, ReactiveProperty<int>, List<string>)` | Two-way | DisposableBag + unbind list |
+| `TrackUnbind(Action)` | Register a manual cleanup action | unbind list |
 
-### Creating a ViewModel
+`BindSlider`, `BindToggle` and `BindDropdown` also have one-way overloads that take an initial value and an `Action<T>` callback instead of a `ReactiveProperty`.
+
+### Creating a view model
 
 ```csharp
 public class PauseViewModel : ViewModelBase
@@ -176,32 +195,30 @@ public class PauseViewModel : ViewModelBase
 }
 ```
 
-### ViewModel Helpers
-
 | Helper | Returns | Use case |
 |--------|---------|----------|
-| `CreateProperty<T>(initial)` | `ReactiveProperty<T>` | Observable state with current value |
+| `CreateProperty<T>(initial)` | `ReactiveProperty<T>` | Observable state with a current value |
 | `CreateCommand(action?)` | `ReactiveCommand` | UI action (button click) |
-| `CreateCommand<T>(action?)` | `ReactiveCommand<T>` | UI action with payload |
+| `CreateCommand<T>(action?)` | `ReactiveCommand<T>` | UI action with a payload |
 | `CreateSubject<T>()` | `Subject<T>` | One-shot event, no stored value |
-| `AddDisposable(disposable)` | -- | Manual disposal tracking |
+| `AddDisposable(d)` / `TrackDisposable(d)` | — | Track extra disposables for cleanup |
 
 ### Dialogs
 
-Standard confirm / alert / modal helpers:
+Standard confirm / alert / modal helpers on `IDialogService`:
 
 ```csharp
-bool confirmed = await dialogs.ShowConfirm("Exit", "Are you sure?", "Quit", "Cancel");
+bool ok = await dialogs.ShowConfirm("Exit", "Are you sure?", "Quit", "Cancel");
 await dialogs.ShowAlert("Error", message);
-using var modal = dialogs.ShowModal("Loading", "Please wait...");
+using var modal = dialogs.ShowModal("Loading", "Please wait...");   // closes on Dispose
 ```
 
-Custom dialogs via `DialogBuilder` (UIToolkit backend only):
+Custom dialogs through `DialogBuilder` (UI Toolkit backend):
 
 ```csharp
 var dialogs = (UIToolkitDialogService)dialogService;
 
-var result = await dialogs.CreateDialog("Rename")
+DialogResult result = await dialogs.CreateDialog("Rename")
     .WithMessage("Enter a new name:")
     .WithInput(placeholder: "name", defaultValue: currentName)
     .AddButton("Cancel", "cancel")
@@ -209,166 +226,36 @@ var result = await dialogs.CreateDialog("Rename")
     .ShowAsync();
 
 if (result.ButtonId == "save")
-    rename(result.InputValue);
+    rename(result.InputText);
 ```
 
-Supported builder options: `WithMessage`, `WithImage(Texture2D)`, `WithContent(Func<VisualElement>)`, `WithInput`, `AddButton(text, id, isPrimary)`. Pressing **Esc** completes the dialog with the last button (or an empty result if no buttons were added).
+Builder options: `WithMessage`, `WithImage(Texture2D)`, `WithContent(Func<VisualElement>)`, `WithInput`, `AddButton(text, id, isPrimary)`. `DialogResult` exposes `ButtonId` and `InputText`. Pressing **Esc** completes with the last button (or empty if none were added). USS class hooks are exposed as static fields on `DialogStyle` (`Panel`, `Title`, `Message`, `Button`, `ButtonPrimary`, …) — reassign them before the first dialog to repoint the engine at your own CSS.
 
-Styling classes used by `DynamicPopup` are exposed through static `DialogStyle` fields (`Overlay`, `Panel`, `Title`, `Image`, `Message`, `Content`, `Input`, `Buttons`, `Button`, `ButtonPrimary`). Override them before showing the first dialog if you need different CSS hooks.
+### Flexible popups
 
-### Scene-scoped registration
+`IPopupService` shows configurable panels **anywhere on screen** — modal or passive, opened by code or hover, with any combination of close rules. Many can be open at once. `IDialogService` and tooltips are presets over this same engine.
 
-When multiple views belong to a scene, use `SceneViewScopeService` to auto-unregister them on scene exit:
+Register `PopupHost` once. Its `UIDocument` root needs the standard `screen-layer` / `hud-layer` / `popup-layer` / `overlay-layer` elements.
 
 ```csharp
-public class GameplayScene : IDisposable
-{
-    private readonly ScopedViewRegistration _views;
+// Minimal
+new PopupHost(uiDocument);
 
-    public GameplayScene(SceneViewScopeService scope)
-    {
-        _views = scope.Begin();  // disposes previous scope if any
-    }
+// With a default stylesheet applied to every popup
+new PopupHost(uiDocument, popupStyleSheet);
 
-    public async UniTask Load()
-    {
-        await _views.Register<HudView>(UILayer.HUD);
-        await _views.Register<PausePopup>(UILayer.Popup);
-    }
-
-    public void Dispose() => _views.Dispose();  // unregisters both views
-}
+// With cursor-follow support (see note)
+new PopupHost(uiDocument,
+    pointerScreenPosition: () => Pointer.current.position.ReadValue());
 ```
 
-Calling `Begin()` again disposes the previous scope automatically — one active scope per service.
+> Cursor- and world-following popups need a live pointer provider. UI Toolkit runtime panels only dispatch `PointerMoveEvent` while a pickable element is under the cursor, so the event-based fallback freezes over empty areas. Pass `pointerScreenPosition` (screen pixels, bottom-left origin) from whatever input backend you use.
 
-### Service resolution
-
-Views access services through `IViewServiceResolver` (implemented as an adapter over your DI container):
-
-```csharp
-public class VContainerServiceResolver : IViewServiceResolver
-{
-    private readonly IObjectResolver _container;
-    public VContainerServiceResolver(IObjectResolver container) => _container = container;
-    public T? Resolve<T>() where T : class => _container.Resolve<T>();
-}
-```
-
-Register it once in your DI setup. Inside views:
-
-```csharp
-protected override UniTask OnBind()
-{
-    var audio = GetService<IAudioService>();   // throws if not registered
-    audio.Play("hover");
-    return UniTask.CompletedTask;
-}
-```
-
-`GetService<T>` calls `IViewServiceResolver.Require<T>()` — throws `InvalidOperationException` if the service is missing. Use `Resolver.Resolve<T>()` directly when a null return is acceptable.
-
-### Tooltips
-
-Show tooltips on hover for any `VisualElement`. Supports plain text and rich content. Works with both UI elements and 3D objects (via screen position).
-
-**Setup:**
-
-```csharp
-var tooltipService = new TooltipService(uiDocument);
-// Optionally pass a StyleSheet for default tooltip styles:
-// var tooltipService = new TooltipService(uiDocument, tooltipStyleSheet);
-```
-
-**UI elements — via Manipulator or extension method:**
-
-```csharp
-// Extension method (recommended)
-element.AddTooltip(tooltipService, "Tooltip text");
-element.AddTooltip(tooltipService, "Tooltip text", delay: 0.5f);
-
-// Rich content
-element.AddTooltip(tooltipService, () => {
-    var el = new VisualElement();
-    el.Add(new Label("Title"));
-    el.Add(new Label("Description"));
-    return el;
-});
-
-// Remove tooltip
-var manipulator = element.AddTooltip(tooltipService, "Text");
-element.RemoveTooltip(manipulator);
-
-// Or directly via Manipulator
-element.AddManipulator(new TooltipManipulator(tooltipService, "Text"));
-```
-
-**3D objects — via service directly:**
-
-```csharp
-// Show at screen position (e.g. from a raycast)
-tooltipService.Show(Input.mousePosition, "Object name");
-
-// Update position each frame
-tooltipService.UpdatePosition(Input.mousePosition);
-
-// Hide
-tooltipService.Hide();
-```
-
-**Styling:** The tooltip container uses CSS classes `.tooltip-container` and `.tooltip-text`. Define these in your project's theme USS:
-
-```css
-.tooltip-container {
-    background-color: var(--color-bg);
-    border-color: var(--color-border);
-    border-width: 1px;
-    border-radius: 8px;
-    padding: 6px 10px;
-    max-width: 300px;
-}
-
-.tooltip-text {
-    color: var(--color-text);
-    font-size: 14px;
-    white-space: normal;
-}
-```
-
-### Flexible Popups
-
-`IPopupService` shows configurable panels **anywhere on screen** — modal or passive,
-triggered by code or by hover, with any combination of close rules. Multiple popups can
-be open at once. It generalizes the dialog and tooltip systems: `IDialogService` and
-`AttachPopup` are presets over the same engine.
-
-**Setup** (UI Toolkit backend) — register `PopupHost` once, like `TooltipService`:
-
-```csharp
-builder.Register<IPopupService>(_ => new PopupHost(uiDocument,
-    // Live screen-pixel pointer position for cursor-following popups (see note below).
-    pointerScreenPosition: () => Pointer.current.position.ReadValue()), Lifetime.Singleton);
-
-// Minimal form (no cursor-follow, no default sheet):
-// new PopupHost(uiDocument)
-// With a default stylesheet for every popup:
-// new PopupHost(uiDocument, popupStyleSheet)
-```
-
-`PopupHost` requires the standard `screen-layer` / `hud-layer` / `popup-layer` /
-`overlay-layer` elements in the UIDocument root.
-
-> **Cursor-following popups:** pass `pointerScreenPosition` — the live pointer position in screen
-> pixels (bottom-left origin), which the host converts to panel space internally. UIToolkit runtime
-> panels only dispatch `PointerMoveEvent` while a *pickable* element is under the cursor, so the
-> event-based fallback freezes over empty areas and a `Cursor()` popup sticks; polling the device
-> avoids that. Use whichever input backend your project has (`Pointer.current`, `Mouse.current`, …).
-
-**Open a popup** via the fluent builder:
+Open a popup with the fluent builder:
 
 ```csharp
 // Centered modal, dismissable by button / X / click-outside / Escape
-var result = await popups.Create()
+PopupResult result = await popups.Create()
     .Title("Delete save?")
     .Message("This cannot be undone.")
     .Modal()
@@ -381,29 +268,33 @@ if (result.ButtonId == "delete") { /* ... */ }
 ```
 
 ```csharp
-// Top-right toast that auto-closes after 3s
-popups.Create().Title("Saved").At(PopupPlacement.Screen(PopupAnchorCorner.TopRight, new Vector2(16, 16)))
-    .Timeout(3f).Open();
+// Top-right toast that auto-closes after 3s (Open() is fire-and-forget)
+popups.Create()
+    .Title("Saved")
+    .At(PopupPlacement.Screen(PopupAnchorCorner.TopRight, new Vector2(16, 16)))
+    .Timeout(3f)
+    .Open();
 ```
 
-**Placement modes** (`PopupPlacement`):
+Placement modes (`PopupPlacement`):
 
 | Factory | Anchors to |
 |---------|-----------|
-| `ScreenCenter()` / `Screen(corner, offset)` | a point or region of the screen |
-| `ScreenPoint(panelPoint, offset)` | an explicit panel-space point |
-| `AtElement(element, side, autoFlip)` | a UI element, flipping near screen edges |
-| `AtWorld(transform, camera)` | a world-space object, following the camera each frame |
-| `Cursor(offset)` | the mouse cursor |
+| `ScreenCenter(offset?)` / `Screen(corner, offset?)` | a region of the screen |
+| `ScreenPoint(panelPoint, offset?)` | an explicit panel-space point |
+| `AtElement(element, side?, autoFlip?, offset?)` | a UI element, flipping near screen edges |
+| `AtWorld(transform, camera?, offset?)` | a world-space object, followed each frame |
+| `Cursor(offset?)` | the mouse cursor |
 
-**Hover popups** — richer than tooltips, via `AttachPopup` (mirrors `AddTooltip`):
+Hover popups — richer than tooltips — via `AttachPopup` (mirrors `AddTooltip`):
 
 ```csharp
 // Convenience: passive title/message anchored to the element, closes on pointer-leave
 element.AttachPopup(popups, "Apple", "A crisp red fruit.");
 
 // Full control through a config factory
-element.AttachPopup(popups, () => new PopupConfig {
+element.AttachPopup(popups, () => new PopupConfig
+{
     Title = "Inventory slot",
     ContentFactory = BuildSlotDetails,
     Placement = PopupPlacement.AtElement(element, PopupSide.Right),
@@ -411,101 +302,132 @@ element.AttachPopup(popups, () => new PopupConfig {
 });
 ```
 
-**The handle** (`IPopupHandle`) returned by `Open()` lets you drive a live popup:
+`Open()` returns an `IPopupHandle` to drive a live popup:
 
 ```csharp
-var handle = popups.Create().Title("Loading").At(PopupPlacement.ScreenCenter()).Open();
+IPopupHandle handle = popups.Create().Title("Loading").At(PopupPlacement.ScreenCenter()).Open();
 handle.UpdateContent(c => c.SetMessage("Almost there…"));
 handle.SetPlacement(PopupPlacement.Cursor());
-handle.Close();                       // or await handle.Result
+handle.Close();                       // or: await handle.Result
 ```
 
-#### Custom popup styles
+Restyle via theme variables in `Popup.uss` (`--popup-*`), by defining the `.popup-*` classes in your own theme, or per-popup with `.Style(sheet)` / `.Class("popup--danger")`. Class hooks and modifiers (`popup--modal`, `popup--side-{top,bottom,left,right}`, …) are exposed as static fields on `PopupStyle`.
 
-Three ways to restyle, from quickest to most invasive:
+### Tooltips
 
-**A. Override theme variables.** Every value in the package `Popup.uss` reads a `--popup-*`
-custom property with a fallback. Set them in your theme's `:root` to reskin without touching
-the sheet:
+`TooltipService` shows hover tooltips on the overlay layer for any `VisualElement`, and at an arbitrary screen position for 3D objects.
 
-```css
-:root {
-    --popup-bg: rgb(25, 25, 35);
-    --popup-radius: 12px;
-    --popup-backdrop-color: rgba(0, 0, 0, 0.6);
-    --popup-btn-primary-bg: var(--color-primary);
+```csharp
+var tooltips = new TooltipService(uiDocument);                 // optional StyleSheet 2nd arg
+
+// Elements — via extension method (returns the manipulator for removal)
+var m = element.AddTooltip(tooltips, "Reload weapon");
+element.AddTooltip(tooltips, "Slow tooltip", delay: 0.5f);
+element.AddTooltip(tooltips, () => BuildRichTooltip());         // rich content factory
+element.RemoveTooltip(m);
+
+// 3D objects — drive by screen position (e.g. from a raycast)
+tooltips.Show(Input.mousePosition, "Treasure chest");
+tooltips.UpdatePosition(Input.mousePosition);
+tooltips.Hide();
+```
+
+Style with the `.tooltip-container` and `.tooltip-text` USS classes in your theme.
+
+### Busy spinner
+
+`ISpinnerHost` shows a corner busy indicator. `Show` returns an `IDisposable`; the spinner is visible while at least one handle is alive, and the most recent label wins.
+
+```csharp
+using (spinner.Show("Saving…"))
+{
+    await SaveGame();
+}   // spinner hides when the handle is disposed
+```
+
+Register `UIToolkitSpinnerHost` on the client (needs the `overlay-layer`) and `NullSpinnerHost` for headless builds.
+
+### Service resolution from views
+
+Views resolve services through `IViewServiceResolver`, an adapter over your DI container:
+
+```csharp
+public class VContainerServiceResolver : IViewServiceResolver
+{
+    private readonly IObjectResolver _container;
+    public VContainerServiceResolver(IObjectResolver container) => _container = container;
+    public T? Resolve<T>() where T : class => _container.Resolve<T>();
 }
 ```
 
-**B. Define your own `.popup-*` classes.** The engine tags elements with the class names in
-`PopupStyle`. Define them in your global theme (imported via PanelSettings) using your design
-tokens — exactly how a project styles `.dialog-*`:
+Pass it to `UIToolkitViewFactory`, then inside a view:
 
-```css
-.popup-panel  { background-color: var(--color-bg); border-radius: var(--radius-lg); padding: var(--spacing-md); }
-.popup-title  { font-size: var(--font-size-lg); -unity-font-style: bold; }
-.popup-btn--primary { background-color: var(--color-primary); }
+```csharp
+protected override UniTask OnBind()
+{
+    var audio = GetService<IAudioService>();   // throws if not registered
+    audio.Play("hover");
+    return UniTask.CompletedTask;
+}
 ```
 
-Class hooks: `popup-backdrop`, `popup-panel`, `popup-title`, `popup-icon`, `popup-message`,
-`popup-content`, `popup-input`, `popup-buttons`, `popup-btn`, `popup-btn--primary`,
-`popup-close`, plus modifiers `popup--modal` / `popup--passive` and
-`popup--side-{top,bottom,left,right}` (set from the resolved side, e.g. to point an arrow).
+`GetService<T>` calls `IViewServiceResolver.Require<T>()` and throws if the service is missing. Call `Resolve<T>()` directly when a null return is acceptable.
 
-**C. Per-popup or coded overrides.** Reassign a `PopupStyle` field before the first popup to
-repoint a hook globally; add a variant class with `.Class("popup--danger")`; or inject a
-`StyleSheet` for a single popup with `.Style(sheet)` (load it at runtime via
-`Addressables.LoadAssetAsync<StyleSheet>`). A default sheet for every popup can be passed to
-the `PopupHost` constructor.
+### Scene-scoped registration
+
+`SceneViewScopeService` registers views that auto-unregister when the scene scope ends:
+
+```csharp
+public class GameplayScene : IDisposable
+{
+    private readonly ScopedViewRegistration _views;
+
+    public GameplayScene(SceneViewScopeService scope)
+    {
+        _views = scope.Begin();   // disposes the previous scope, if any
+    }
+
+    public async UniTask Load()
+    {
+        await _views.Register<HudView>(UILayer.HUD);
+        await _views.Register<PausePopup>(UILayer.Popup);
+    }
+
+    public void Dispose() => _views.Dispose();   // unregisters both views
+}
+```
+
+Calling `Begin()` again disposes the previous scope — one active scope per service.
 
 ### Animations
 
-Views show/hide instantly by default. Override `OnShowAsync`/`OnHideAsync` to add transitions.
+Views show/hide instantly by default (`NoneAnimation`). Override `OnShowAsync` / `OnHideAsync` to add transitions. Both receive an `IAnimationTarget` exposing `Opacity`, `TranslateX/Y`, `ScaleX/Y`, `SetVisible`, `ResetAnimationState`.
 
 ```csharp
 public class PausePopup : UIToolkitView<PauseViewModel>
 {
-    protected override UniTask OnShowAsync(IAnimationTarget root, float duration)
-        => ViewAnimations.FadeAndScale.PlayShowAsync(root, duration);
-
-    protected override UniTask OnHideAsync(IAnimationTarget root, float duration)
-        => ViewAnimations.Fade.PlayHideAsync(root, duration);
+    protected override async UniTask OnShowAsync(IAnimationTarget root, float duration)
+    {
+        root.Opacity = 0f;
+        // tween root.Opacity → 1 over `duration` with your tweening library
+    }
 }
 ```
 
-Per-element animations use cached **UIToolkitAnimationTarget** instances:
+For per-element animation, wrap a sub-element in a `UIToolkitAnimationTarget`:
 
 ```csharp
-private UIToolkitAnimationTarget _overlay = default!;
 private UIToolkitAnimationTarget _panel = default!;
 
 protected override void OnInitialize()
-{
-    _overlay = new UIToolkitAnimationTarget(Root.Q(className: "overlay"));
-    _panel = new UIToolkitAnimationTarget(Root.Q(className: "panel"));
-}
-
-protected override async UniTask OnShowAsync(IAnimationTarget root, float duration)
-{
-    await UniTask.WhenAll(
-        ViewAnimations.Fade.PlayShowAsync(_overlay, duration),
-        ViewAnimations.FadeAndScale.PlayShowAsync(_panel, duration));
-}
+    => _panel = new UIToolkitAnimationTarget(Root.Q(className: "panel"));
 ```
 
-Custom animations implement **IViewAnimation**:
+Reusable animations implement `IViewAnimation` (`PlayShowAsync` / `PlayHideAsync`). The `com.rubickanov.ui.animations` extension provides a ready-made library (fade, scale, slide) built on LitMotion.
 
-```csharp
-public class BounceAnimation : IViewAnimation
-{
-    public async UniTask PlayShowAsync(IAnimationTarget target, float duration) { /* LitMotion */ }
-    public async UniTask PlayHideAsync(IAnimationTarget target, float duration) { /* LitMotion */ }
-}
-```
+### Cursor visibility
 
-### Cursor Visibility
-
-**UIService** exposes `SetVisibilityCallback(Action<bool>)` to notify when UI is shown or fully hidden. Wire in your DI registration:
+`UIService.SetVisibilityCallback(Action<bool>)` fires `true` when UI becomes visible and `false` once everything is hidden. Wire it to a cursor service in your DI setup:
 
 ```csharp
 builder.RegisterBuildCallback(resolver =>
@@ -518,67 +440,33 @@ builder.RegisterBuildCallback(resolver =>
 
 ## Design Decisions
 
-- **IView has no Root** — keeps the interface backend-agnostic. **UIToolkitViewBase** adds `VisualElement Root`, **UGUIViewBase** adds its own root.
-- **IViewFactory owns all DOM operations** — creation, UXML loading, layer attachment. Views do not manage their own DOM placement.
-- **UIService is backend-agnostic** — delegates to **IViewFactory**, uses `Action<bool>` callback for cursor state instead of depending on a cursor service.
-- **IDialogService is separate from IUIService** — modals are implemented as a single popup view (**DynamicPopup**) driven by **DialogBuilder** + **DynamicDialogViewModel**, not inline VisualElements.
-- **UxmlLoader delegate instead of IAssetService** — **UIToolkitViewFactory** takes a `UxmlLoader` delegate, avoiding a hard dependency on any asset loading strategy.
+- **IView has no Root** — keeps the contract backend-agnostic. `UIToolkitViewBase` adds `VisualElement Root`; the UGUI base adds its own.
+- **Layer fixed at registration** — `Register<T>(layer)` decides screen-vs-popup and the container once, so `Show<T>` carries no placement argument.
+- **IViewFactory owns all DOM operations** — creation, UXML loading, layer attachment. Views never place themselves.
+- **UIService is backend-agnostic** — it delegates to `IViewFactory` and reports visibility through an `Action<bool>` callback instead of depending on a cursor service.
+- **UxmlLoader delegate instead of an asset service** — `UIToolkitViewFactory` takes a `UxmlLoader` delegate, avoiding a hard dependency on any asset-loading strategy (Addressables, Resources, …).
+- **Dialogs, tooltips, spinner are presets over the popup engine** — one placement/lifecycle system serves modals, hovers, toasts and busy indicators.
 
 ## File Structure
 
 ```
 com.rubickanov.ui/
 ├── Runtime/
-│   ├── IView.cs
-│   ├── IUIService.cs
-│   ├── IViewFactory.cs
-│   ├── IDialogService.cs
-│   ├── IViewAnimation.cs
-│   ├── IAnimationTarget.cs
-│   ├── IViewServiceResolver.cs
-│   ├── NoneAnimation.cs
-│   ├── UIService.cs
-│   ├── ViewModelBase.cs
-│   ├── UILayer.cs
-│   ├── ScopedViewRegistration.cs
-│   ├── SceneViewScopeService.cs
-│   ├── NullUIService.cs
-│   └── NullDialogService.cs
+│   ├── IView.cs / IUIService.cs / IViewFactory.cs
+│   ├── IDialogService.cs / ISpinnerHost.cs / IViewServiceResolver.cs
+│   ├── IViewAnimation.cs / IAnimationTarget.cs / NoneAnimation.cs
+│   ├── UIService.cs / ViewModelBase.cs / UILayer.cs
+│   ├── ScopedViewRegistration.cs / SceneViewScopeService.cs
+│   └── NullUIService.cs / NullDialogService.cs / NullSpinnerHost.cs
 ├── UIToolkit/
-│   ├── UIToolkitViewBase.cs
-│   ├── UIToolkitView.cs
-│   ├── UIToolkitViewFactory.cs
-│   ├── UIToolkitAnimationTarget.cs
-│   ├── UIToolkitDialogService.cs
-│   ├── DialogBuilder.cs
-│   ├── DialogResult.cs
-│   ├── DialogStyle.cs
-│   ├── DynamicPopup.cs
-│   ├── DynamicDialogViewModel.cs
-│   ├── Tooltip/
-│   │   ├── TooltipService.cs
-│   │   ├── TooltipManipulator.cs
-│   │   ├── TooltipExtensions.cs
-│   │   └── Tooltip.uss
-│   └── Popup/
-│       ├── PopupEnums.cs
-│       ├── PopupPlacement.cs
-│       ├── PopupConfig.cs
-│       ├── PopupResult.cs
-│       ├── PopupPlacementResolver.cs
-│       ├── PopupStyle.cs
-│       ├── Popup.uss
-│       ├── PopupInstance.cs
-│       ├── IPopupService.cs
-│       ├── IPopupHandle.cs
-│       ├── PopupContentContext.cs
-│       ├── PopupBuilder.cs
-│       ├── PopupHost.cs
-│       ├── PopupManipulator.cs
-│       └── PopupExtensions.cs
-└── UGUI/
-    ├── UGUIViewBase.cs
-    ├── UGUIView.cs
-    ├── UGUIViewFactory.cs
-    └── UGUIAnimationTarget.cs
+│   ├── UIToolkitViewBase.cs / UIToolkitView.cs / UIToolkitViewFactory.cs
+│   ├── UIToolkitAnimationTarget.cs / UIToolkitSpinnerHost.cs
+│   ├── UIToolkitDialogService.cs / DialogBuilder.cs / DialogResult.cs / DialogStyle.cs
+│   ├── DynamicPopup.cs / DynamicDialogViewModel.cs
+│   ├── Tooltip/   (TooltipService, TooltipManipulator, TooltipExtensions, Tooltip.uss)
+│   └── Popup/     (PopupHost, PopupBuilder, PopupConfig, PopupPlacement, IPopupHandle, …)
+├── UGUI/
+│   └── UGUIViewBase.cs / UGUIView.cs / UGUIViewFactory.cs / UGUIAnimationTarget.cs
+└── Editor/
+    └── UIServiceDebugWindow.cs
 ```

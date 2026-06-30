@@ -6,7 +6,9 @@ Declarative replication, prediction, and events for [ACS](../com.rubickanov.acs/
 
 - `com.rubickanov.acs` — aspect/component entities. Replicated fields live on aspects.
 - `com.unity.netcode.gameobjects` — underlying transport, `NetworkObject` / `NetworkBehaviour` lifecycle, named messages.
-- `R3` — `ReactiveProperty<T>` and `Subject<T>` are the supported field shapes.
+- `Unity.Collections` — unmanaged buffers used by the batch writer/reader.
+- `R3` — `ReactiveProperty<T>` and `Subject<T>` are the supported scalar / event field shapes.
+- `ObservableCollections` — `ObservableList<T>`, `ObservableDictionary<K,V>`, `ObservableHashSet<T>`, `ObservableFixedSizeRingBuffer<T>` are the supported collection field shapes (delta-replicated).
 
 ## Architecture
 
@@ -32,7 +34,7 @@ ReplicationScanner ──► ReplicatedFieldBinding<T>         ReplicatedEventBi
 
 ## Core Concepts
 
-**`[Replicated]`** — Marks a `ReactiveProperty<T>` field on an aspect for per-tick state sync. The authority side's writes are delta-sent (dirty-mask); non-authority peers receive the value and write it into the same reactive. Configures authority, interpolation, prediction, and quantization.
+**`[Replicated]`** — Marks a `ReactiveProperty<T>` (scalar) or an `ObservableCollections` field on an aspect for per-tick state sync. The authority side's writes are delta-sent (dirty-mask for scalars, change-list for collections); non-authority peers receive them and apply them to the same reactive / collection. Configures authority, interpolation, prediction, and quantization.
 
 **`[ReplicatedEvent]`** — Marks a `Subject<T>` field on an aspect. Each `OnNext` on the authority is serialized into a fire-and-forget RPC and re-fired on every other peer's local `Subject`. No replay, no buffering — missed subscribers miss the event. Reliability is configurable per field.
 
@@ -84,7 +86,7 @@ Server code (wherever your gameplay logic lives) writes `_health.CurrentHealth.V
 
 ### Replicating Fields
 
-Only `ReactiveProperty<T>` where `T` is an unmanaged type is supported. The scanner rejects `IObservableCollection<T>` fields with a targeted error — use a local subscription + custom RPC for networked collections until native delta support lands.
+`[Replicated]` goes on a `ReactiveProperty<T>` where `T` is an unmanaged type (primitives, enums, unmanaged structs). `EntityRef` is also accepted — it travels as the target's `NetworkObjectId` and resolves back to the local entity on the receiving peer.
 
 ```csharp
 public class MovementAspect : IEntityAspect
@@ -97,8 +99,34 @@ public class MovementAspect : IEntityAspect
 
     [Replicated] // default: server-auth, no interpolation, raw bytes
     public readonly ReactiveProperty<float> MoveSpeed = new(5f);
+
+    [Replicated] // EntityRef → NetworkObjectId on the wire
+    public readonly ReactiveProperty<EntityRef> Target = new();
 }
 ```
+
+### Replicating Collections
+
+`[Replicated]` also works on the `ObservableCollections` types. The authority's structural mutations (add / remove / set / clear) are delta-encoded — only the changed entries go on the wire, not the whole collection each tick — and replayed against the same collection on every other peer:
+
+```csharp
+public class InventoryAspect : IEntityAspect
+{
+    [Replicated]
+    public readonly ObservableList<int> ItemIds = new();
+
+    [Replicated]
+    public readonly ObservableDictionary<string, int> Ammo = new();
+
+    [Replicated]
+    public readonly ObservableHashSet<int> UnlockedAbilities = new();
+
+    [Replicated] // fixed capacity — bounded snapshot size
+    public readonly ObservableFixedSizeRingBuffer<float> RecentDamage = new(16);
+}
+```
+
+Element / value types follow the same rule as scalars: unmanaged or `EntityRef`. `ObservableDictionary` keys may additionally be `string`. `Quantization` applies to the element / value (not the key). `Interpolation` and `Predicted` are rejected on collection fields — there is no scalar to lerp and the snapshot layout is fixed. The plain unbounded `ObservableRingBuffer<T>` is rejected (unbounded snapshot); use the fixed-size variant.
 
 ### Replicating Events
 

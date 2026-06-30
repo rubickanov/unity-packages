@@ -124,29 +124,42 @@ every consumer.
 ## P4 — README / doc drift (clear before `docs/generate.sh`)
 
 Each is a code example that won't compile or contradicts the real API. Fix before regenerating
-the docs site so published docs aren't broken.
+the docs site so published docs aren't broken. **All cleared** in a 21-agent README rewrite that
+re-verified every example against the real current API per `README_STANDARD.md` (and turned up
+many additional drift fixes beyond this list: assembly names → `Rubickanov.*`, dependency lists,
+gas `IDisposable`/int return counts, gameplaytags engine-refs, devconsole frontend APIs, etc.).
 
-- [ ] **acs** — README documents non-existent `OnAwake` override (won't compile); class XML
+- [x] **acs** — README documents non-existent `OnAwake` override (won't compile); class XML
   docs contradict the real `virtual Awake()` (broken `<see cref="OnAwake"/>`, false
   "non-virtual" claim). `README.md:170-177`, `Runtime/Unity/Behavior/EntityComponent.cs:13-16,36-41`.
-- [ ] **acs.netcode** — README claims collections are unsupported, but `ObservableList`/
+  Fixed: README now overrides `Awake()` + `base.Awake()`; the `EntityComponent` XML/inline docs
+  rewritten to the real `protected virtual void Awake()` contract (no more `OnAwake` cref / "non-virtual").
+- [x] **acs.netcode** — README claims collections are unsupported, but `ObservableList`/
   `Dictionary`/`HashSet`/`RingBuffer` are fully delta-replicated. `README.md:87`.
-- [ ] **ui** — README uses non-existent `IUIService` methods (`ShowScreen`/`HideScreen`/…),
+  Fixed: added a Replicating Collections section; also added missing ObservableCollections/Unity.Collections deps and EntityRef fields.
+- [x] **ui** — README uses non-existent `IUIService` methods (`ShowScreen`/`HideScreen`/…),
   `DialogResult.InputValue` (should be `InputText`). `README.md:82-83,135-146,212`.
+  Fixed: rewritten to real `Show`/`Hide`/`HideTop`/`HideAll` API, `DialogResult.InputText`, real
+  factory registration, spinner host, Editor assembly.
   - [x] *(minor)* `UIService.HideAll` fires visibility callback even when nothing was visible.
     `Runtime/UIService.cs:199-211`.
     Fixed: `HideAll` early-returns when nothing is shown (mirrors `HideAllAsync`), so no spurious
     `false` reaches the visibility consumer. Regression test
     `HideAll_EmptyState_DoesNotFireVisibilityCallback`.
-- [ ] **ui.loading** — README calls non-existent `_loadingPipeline.Run(op)`; real API is
-  `Load(IReadOnlyList<ILoadingOperation>, …)`. `README.md:21`.
-- [ ] **ui.localization** — README advertises UniTask but the package neither references nor
-  uses it. `README.md:10`. Drop the line.
-- [ ] **loading** — README presenter example doesn't satisfy `ILoadingPresenter` (`Hide()`
-  must return `UniTask`; missing `WaitForInput`). `README.md:92-105`.
-- [ ] **logging** — README quick-start uses `EditorPrefs` in runtime startup code (won't
-  compile in a player build). `README.md:38`. Wrap in `#if UNITY_EDITOR`.
-- [ ] **storage** — README Assemblies table omits public `PrefixedStorageService`. `README.md:24`.
+- [x] **ui.loading** — README calls non-existent `_loadingPipeline.Run(op)`; real API is
+  `Load(IReadOnlyList<ILoadingOperation>, …)`. `README.md:21`. Fixed (also dropped non-existent
+  `UILayer.Dialog`).
+- [x] **ui.localization** — README advertises UniTask but the package neither references nor
+  uses it. `README.md:10`. Fixed: UniTask dep dropped (real deps R3 + Unity.Localization);
+  bindings moved to `OnBind`, real `LocalizationKey(table, key)` ctor, Assemblies table added.
+- [x] **loading** — README presenter example doesn't satisfy `ILoadingPresenter` (`Hide()`
+  must return `UniTask`; missing `WaitForInput`). `README.md:92-105`. Fixed; also documented the
+  two-phase `Execute`/`Activate` (`IDeferrableOperation`) pipeline and the `waitForInput` gate.
+- [x] **logging** — README quick-start uses `EditorPrefs` in runtime startup code (won't
+  compile in a player build). `README.md:38`. Fixed: `#if UNITY_EDITOR`-guarded; also real
+  assembly names + the Unity-log dedup filter and LogType→level mapping.
+- [x] **storage** — README Assemblies table omits public `PrefixedStorageService`. `README.md:24`.
+  Fixed (also added the `Microsoft.Extensions.Logging.Abstractions` optional dep).
 
 ## P5 — Low / cosmetic / known limitation (opportunistic, or leave documented)
 

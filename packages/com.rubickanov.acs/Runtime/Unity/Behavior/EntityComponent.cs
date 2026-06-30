@@ -9,11 +9,10 @@ namespace Rubickanov.ACS.Runtime
     /// subscriptions are automatically disposed on <see cref="OnDisable"/>.
     /// Mark aspect fields with <see cref="AspectAttribute"/> for automatic injection in Awake.
     /// <para/>
-    /// <see cref="Awake"/> is intentionally non-virtual: overriding it and forgetting
-    /// <c>base.Awake()</c> skips <see cref="AspectAttribute"/> injection and leaves every
-    /// aspect field as <c>null</c>, producing NREs on first use. To run logic at Awake time,
-    /// override <see cref="OnAwake"/> instead — it is invoked after injection, so all
-    /// <c>[Aspect]</c> fields are already populated.
+    /// <see cref="Awake"/> is <c>virtual</c> and performs <see cref="AspectAttribute"/> injection.
+    /// To run logic at Awake time, override it and call <c>base.Awake()</c> first — forgetting the
+    /// base call skips injection and leaves every aspect field <c>null</c>, producing NREs on first
+    /// use.
     /// </summary>
     public abstract class EntityComponent : MonoBehaviour, IEntityComponent
     {
@@ -33,11 +32,9 @@ namespace Rubickanov.ACS.Runtime
             }
         }
 
-        // Non-virtual on purpose: an overriding subclass that forgets `base.Awake()` would
-        // silently skip [Aspect] injection. The C# compiler now rejects `override void Awake`
-        // on any subclass — use OnAwake for custom init instead. Unity's magic-method
-        // reflection still picks this up because access modifier does not matter to the
-        // lifecycle dispatcher.
+        // Virtual so subclasses can add Awake-time init — they MUST call base.Awake() first,
+        // otherwise [Aspect] injection is skipped and aspect fields stay null. Unity's
+        // magic-method reflection picks this up regardless of access modifier.
         protected virtual void Awake()
         {
             EntityInjector.Invoke(gameObject);
