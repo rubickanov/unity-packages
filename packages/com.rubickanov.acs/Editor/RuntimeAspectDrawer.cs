@@ -116,7 +116,11 @@ namespace Rubickanov.ACS.Editor
             _valueStyle = null;
         }
 
-        public void Draw(MonoEntity context)
+        // Widened from MonoEntity to IEntity so the same drawer renders pure-C# Entity and the
+        // World (used by the acs.debug window), not just the MonoEntity inspector. Only touches
+        // GetAllAspects(), which lives on IEntity — the MonoEntityEditor call site still passes a
+        // MonoEntity (an IEntity) and compiles unchanged.
+        public void Draw(IEntity context)
         {
             if (!Application.isPlaying) return;
 

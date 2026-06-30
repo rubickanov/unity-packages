@@ -1,0 +1,23 @@
+{
+    "name": "Rubickanov.ACS.Runtime.Reactive.Tests",
+    "rootNamespace": "Rubickanov.ACS.Runtime.Reactive.Tests",
+    "references": [
+        "Rubickanov.ACS.Runtime.Reactive"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "R3.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

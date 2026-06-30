@@ -3,6 +3,8 @@
 Расширения поверх acs, которые переиспользуют существующую архитектуру (аспекты, ReactiveProperty, MonoEntity, сканеры).
 
 > Core-фичи `MonoWorld` (синглтон-обёртка) и pure core (`IEntity` / `Entity` / `World` / `IEntityLogic` / `ITickable` / `EntityTickRunner` / `AttachLogic`) уже реализованы в пакете — см. `README.md`. Этот документ — про то, что ещё предстоит.
+>
+> **✅ Реализовано как отдельные пакеты:** `com.rubickanov.acs.reactive` (раздел 6) и `com.rubickanov.acs.debug` (раздел 4) — см. их README. Разделы ниже оставлены как исходное проектирование.
 
 ---
 
@@ -301,7 +303,10 @@ public class EntityQueryGenerator : EQSGenerator
 
 ---
 
-## 4. acs.debug
+## 4. acs.debug — ✅ реализовано (`com.rubickanov.acs.debug`)
+
+> v1: EditorWindow `Window ▸ ACS ▸ Debugger` — список сущностей активного `World` + live-значения полей через переиспользование `RuntimeAspectDrawer`. Subscription count / сетевой трафик / dirty-state пока не входят. Ниже — исходный проект.
+
 
 Runtime визуализатор аспектов. Оверлей в play mode — все сущности, их аспекты, значения полей в реалтайме.
 
@@ -369,7 +374,10 @@ await clip.SaveAsync("killcam_2026-04-11.replay");
 
 ---
 
-## 6. acs.reactive
+## 6. acs.reactive — ✅ реализовано (`com.rubickanov.acs.reactive`)
+
+> v1: `ComputedProperty<T>` + `[Computed]`, фабрика `ComputedProperty.From(...)` на 1–4 источника, явный `Dispose`. `[Debounced]`/`[Throttled]` пока не реализованы. Ниже — исходный проект.
+
 
 Computed properties — производные значения, автоматически пересчитываемые при изменении источников.
 
@@ -925,11 +933,11 @@ CommandBus.Send(new DealDamageCommand { Target = enemy, Amount = 10f });
 **Пакеты-расширения:**
 1. **persistence** — минимальные примитивы Snapshot/Restore, переиспользует scanner + field bindings из netcode. Save-систему пишет игра сверху
 2. **animation** — убирает слой bridge-кода между аспектами и Animator
-3. **debug** — помогает при разработке всего остального, окупается сразу
+3. **debug** — ✅ реализовано — помогает при разработке всего остального, окупается сразу
 4. **rules** — мощный инструмент для геймдизайнеров, хорошо ложится на reactive
 5. **pooling** — нужен при масштабе (десятки AI с респавном)
 6. **replay** — нишевый но эффектный, переиспользует существующую сериализацию
-7. **reactive** — quality of life, сокращает boilerplate
+7. **reactive** — ✅ реализовано — quality of life, сокращает boilerplate
 8. **testing** — окупается при написании тестов для новых пакетов
 9. **live** — dev-time remote inspector, кайф для плейтестов
 10. **mirror** — production, GM-тулзы, аналитика
