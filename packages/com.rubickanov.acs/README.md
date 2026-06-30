@@ -167,16 +167,17 @@ protected override void OnSubscribe(ref DisposableBag disposables)
 }
 ```
 
-For custom init at Awake time, override `OnAwake` — never `Awake` itself. `Awake` is non-virtual on `EntityComponent` specifically to block the "forgot `base.Awake()` → silent NRE" failure mode; the compiler rejects `override void Awake` on subclasses, and `OnAwake` is invoked after `[Aspect]` injection completes:
+For custom init at Awake time, override `Awake` and call `base.Awake()` first — the base implementation runs the DI hook and `[Aspect]` injection, so every `[Aspect]` field is populated before your code runs. Skip `base.Awake()` and the fields stay `null`, producing NREs on first use:
 
 ```csharp
-protected override void OnAwake()
+protected override void Awake()
 {
-    // [Aspect] fields are already populated here.
+    base.Awake(); // runs [Aspect] injection
+    // [Aspect] fields are populated here.
 }
 ```
 
-For `SingletonMonoEntity<T>` subclasses (including `MonoWorld`), `Awake` stays virtual and you do still override it — `base.Awake()` assigns the static `Instance`. Skip the base call and `MonoWorld.Instance` / `YourSingleton.Instance` stay `null`:
+For `SingletonMonoEntity<T>` subclasses (including `MonoWorld`), the same rule applies — `base.Awake()` assigns the static `Instance` in addition to running injection. Skip the base call and `MonoWorld.Instance` / `YourSingleton.Instance` stay `null`:
 
 ```csharp
 public class MyWorld : SingletonMonoEntity<MyWorld>

@@ -28,7 +28,7 @@ GameplayTagContainer (sorted list, hierarchical queries)
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **GameplayTags.Runtime** | No | Pure C#: GameplayTag, GameplayTagRegistry, GameplayTagContainer |
+| **GameplayTags.Runtime** | Yes | Core types: GameplayTag, GameplayTagRegistry, GameplayTagContainer. Uses `UnityEngine` only for play-mode static reset. |
 | **GameplayTags.Unity** | Yes | GameplayTagAsset, SerializedGameplayTag, SerializedGameplayTagContainer |
 | **GameplayTags.Editor** | Editor | Dropdown picker, database inspector, code generator |
 
@@ -191,4 +191,4 @@ if (weaknesses.HasTag(incomingDamageType))
 - **Singleton registry with Install/Uninstall** — tags are meaningless without a hierarchy. The registry must exist before any tag operations. `Uninstall()` exists primarily for tests; in production, prefer `AddTags(...)` to extend the live registry and keep existing indices stable. `Install`/`AddTags`/`Instance` are main-thread-only.
 - **Serialized wrappers store string paths** — `SerializedGameplayTag` persists the dot-separated path, not the index. Paths are stable; cached indices are re-resolved lazily after deserialize.
 - **`SerializedGameplayTagContainer.Container` returns a read-only view** — mutation must go through the `_paths` serialized field (editor) or by rebuilding the wrapper. The read-only view prevents aliasing issues that would otherwise arise from the struct's shared backing container.
-- **Runtime assembly has no engine references** — the core tag/registry/container types are pure C#, usable in server builds without Unity dependencies.
+- **Runtime depends only on `UnityEngine` for play-mode static reset** — the tag, registry, and container types are otherwise plain C#. `[RuntimeInitializeOnLoadMethod]` clears the registry singleton between play sessions when domain reload is disabled.

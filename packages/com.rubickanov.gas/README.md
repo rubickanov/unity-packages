@@ -4,49 +4,53 @@ Data-driven gameplay effects system. Attribute modifiers with duration, periodic
 
 ## Dependencies
 
-- `com.rubickanov.gameplaytags` — tag-based attribute identification and effect conditions
+- `com.rubickanov.gameplaytags` — tags identify attributes, effects, and drive application/removal conditions
+
+Unity 6000.0+.
 
 ## Architecture
 
 ```
 GameplayEffectAsset (ScriptableObject)
-        |
-        v
+        │  ToDef() / CreateSpec()
+        ▼
     EffectDef (immutable definition)
-        |
-        v
-    EffectSpec (runtime instance: def + source + magnitude)
-        |
-        v
-  EffectController --> ActiveEffect (tracked handle, timers)
-        |                    |
-        v                    v
-  AttributeSet <-- ModifierAggregator (recalculates CurrentValue)
+        │  + source + magnitude
+        ▼
+    EffectSpec (runtime apply request)
+        │  ApplyEffect()
+        ▼
+  EffectController ──► ActiveEffect (handle, duration & period timers)
+        │                    │
+        ▼                    ▼
+  AttributeSet ◄── ModifierAggregator (recomputes CurrentValue)
 ```
+
+`EffectController` owns the active effects, ticks their timers, and recomputes attribute values whenever the active set changes.
 
 ## Assemblies
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **GAS.Runtime** | No | Core logic — attributes, effects, aggregation. Pure C#. |
-| **GAS.Unity** | Yes | `GameplayEffectAsset`, `SerializedModifier` — inspector integration |
-| **GAS.Editor** | Editor | Custom inspector for effect assets, modifier property drawer |
+| **Rubickanov.GAS.Runtime** | No | Core logic — attributes, effects, aggregation. Pure C#. |
+| **Rubickanov.GAS.Unity** | Yes | `GameplayEffectAsset`, `SerializedModifier` — inspector authoring. |
+| **Rubickanov.GAS.Editor** | Editor | Custom inspector for effect assets, modifier property drawer. |
 
 ## Core Concepts
 
-**GameplayAttribute** — Holds a `BaseValue` and a computed `CurrentValue`. The controller recalculates `CurrentValue` whenever active effects change. Fires `ValueChanged` on change.
+**GameplayAttribute** — Holds a `BaseValue` (authoritative) and a derived `CurrentValue`. The controller recomputes `CurrentValue` by aggregating active modifiers; `ValueChanged` fires `(oldValue, newValue)` on change. Mutate the base through `AttributeSet.SetBaseValue`, never by assignment.
 
-**Modifier** — Readonly struct describing a single operation on a single attribute: attribute tag, operation (`Add` / `Multiply` / `Override`), and value.
+**Modifier** — Readonly struct: target attribute tag, operation (`Add` / `Multiply` / `Override`), value, and an `Override` priority tie-breaker.
 
-**EffectDef** — Immutable definition of an effect: duration policy, modifiers, tag conditions. Created from **GameplayEffectAsset** via `ToDef()` or built in code.
+**EffectDef** — Immutable effect definition: duration policy, period, modifiers, tag conditions, stacking. Built from a **GameplayEffectAsset** via `ToDef()` or constructed in code.
 
-**EffectSpec** — Runtime instance pairing an **EffectDef** with a source object and magnitude scalar. Magnitude scales all modifier values.
+**EffectSpec** — A request to apply an **EffectDef** with an optional source object and a magnitude scalar that scales every modifier's input value.
 
-**EffectController** — Owns **ActiveEffect** instances. Applies, removes, and ticks effects. Recalculates attributes on every change.
+**EffectController** — Owns **ActiveEffect** instances, applies/removes/ticks them, and recalculates attributes on every change. Implements `IDisposable`.
 
 ## Quick Start
 
-Define your attribute / effect / status tags as constants via `com.rubickanov.gameplaytags` (the `Attribute.*`, `Status.*`, `Effect.*` identifiers used throughout this README are project-defined tags, not types the package exports):
+The `Attribute.*`, `Status.*`, and `Effect.*` identifiers below are project-defined `GameplayTag` constants from `com.rubickanov.gameplaytags`, not types this package exports:
 
 ```csharp
 public static class Attribute
@@ -67,7 +71,7 @@ var tags = new GameplayTagContainer();
 var controller = new EffectController(attributes, tags);
 ```
 
-2. Create a **GameplayEffectAsset** via `Assets > Create > GAS > Gameplay Effect` in the Inspector.
+2. Author a **GameplayEffectAsset** via `Assets > Create > GAS > Gameplay Effect`.
 
 3. Apply effects and tick the controller:
 
@@ -75,9 +79,9 @@ var controller = new EffectController(attributes, tags);
 [SerializeField] private GameplayEffectAsset _poisonEffect = default!;
 
 var spec = _poisonEffect.CreateSpec(source: this, magnitude: 1f);
-var handle = controller.ApplyEffect(spec);
+ActiveEffectHandle handle = controller.ApplyEffect(spec);
 
-// In update loop
+// In your update loop
 controller.Tick(Time.deltaTime);
 ```
 
@@ -85,21 +89,26 @@ controller.Tick(Time.deltaTime);
 
 ### Defining Attributes
 
+`Define` registers an attribute and returns it (throws if the tag is already defined).
+
 ```csharp
 var attributes = new AttributeSet();
-var health = attributes.Define(Attribute.Health, 100f);
-var moveSpeed = attributes.Define(Attribute.MoveSpeed, 5f);
+GameplayAttribute health = attributes.Define(Attribute.Health, 100f);
 
 health.ValueChanged += (oldValue, newValue) => Debug.Log($"Health: {oldValue} -> {newValue}");
 ```
 
-Writing `BaseValue` directly is not allowed; use `AttributeSet.SetBaseValue(tag, value)` so the controller recalculates dependent attributes and raises `BaseValueChanged`.
+Set base values through the set so the controller recomputes derived values:
 
-### Creating Effects in Inspector
+```csharp
+attributes.SetBaseValue(Attribute.Health, 80f); // fires BaseValueChanged → recalculation
+```
 
-Create via `Assets > Create > GAS > Gameplay Effect`. The inspector shows duration policy, effect tag, modifier list, and tag conditions.
+`Get` returns the attribute or `null`; `TryGet` is the non-throwing variant.
 
-### Creating Effects in Code
+### Building Effects in Code
+
+Container arguments accept a `GameplayTagContainer` (implicitly converted), so use `GameplayTagContainer.From(...)` or `new GameplayTagContainer()`:
 
 ```csharp
 var def = new EffectDef(
@@ -112,8 +121,7 @@ var def = new EffectDef(
     applicationBlockedTags: GameplayTagContainer.From(Status.Immune),
     removeEffectsWithTags: new GameplayTagContainer(),
     effectTag: Effect.Poison,
-    stacking: StackingPolicy.Replace
-);
+    stacking: StackingPolicy.Replace);
 
 var spec = new EffectSpec(def, source: this, magnitude: 2f);
 ```
@@ -121,13 +129,14 @@ var spec = new EffectSpec(def, source: this, magnitude: 2f);
 ### Applying Effects
 
 ```csharp
-// From ScriptableObject
 var spec = _poisonEffect.CreateSpec(source: this, magnitude: 1f);
-var handle = controller.ApplyEffect(spec);
-// handle can be stored to remove the effect later
+ActiveEffectHandle handle = controller.ApplyEffect(spec);
+
+if (handle.IsValid)
+    _activeBuffs.Add(handle); // store to remove this instance later
 ```
 
-`ApplyEffect` returns `ActiveEffectHandle.Invalid` for instant effects (no tracking needed) or when application conditions fail.
+`ApplyEffect` returns `ActiveEffectHandle.Invalid` for `Instant` effects (nothing to track) and when application conditions fail.
 
 ### Ticking
 
@@ -135,109 +144,113 @@ var handle = controller.ApplyEffect(spec);
 controller.Tick(Time.deltaTime);
 ```
 
-Handles periodic modifier application (every `Period` seconds) and duration countdown with automatic removal of expired effects.
+Advances period accumulators (firing periodic modifiers each `Period` seconds), counts down `Duration` effects, and removes expired ones.
 
 ### Removing Effects
 
+Each removal method returns the number of effects removed.
+
 ```csharp
-// By handle (specific effect instance)
-controller.RemoveEffect(handle);
-
-// By tag (all effects matching the tag, uses hierarchy)
-controller.RemoveEffectsWithTag(Effect.Poison);
-
-// Everything
+controller.RemoveEffect(handle);            // one specific instance
+controller.RemoveEffectsWithTag(Effect.Poison); // all whose EffectTag matches (hierarchical)
 controller.RemoveAllEffects();
 ```
 
 ### Reacting to Changes
 
 ```csharp
-// Attribute value changes (oldValue, newValue)
 health.ValueChanged += (_, newValue) => _healthBar.SetValue(newValue);
 
-// Effect lifecycle — both fire AFTER the list and tags are updated, attributes recalculated
+// Lifecycle events fire AFTER the active set, granted tags, and attributes are updated.
+// Not fired for Instant effects.
 controller.EffectApplied += effect => ShowBuffIcon(effect);
 controller.EffectRemoved += effect => HideBuffIcon(effect);
 
-// Query active effects
-foreach (var effect in controller.ActiveEffects)
+foreach (ActiveEffect effect in controller.ActiveEffects)
     Debug.Log($"{effect.Handle}: {effect.RemainingDuration}s remaining");
+```
+
+Both lifecycle events and `ValueChanged` are reentrancy-safe: a handler may call `ApplyEffect` / `RemoveEffect` and those take effect immediately.
+
+### Lifecycle
+
+`EffectController` subscribes to `AttributeSet.BaseValueChanged`. Dispose it when the controller is discarded but the attribute set lives on (pooling, respawn, re-init) to detach the handler:
+
+```csharp
+controller.Dispose(); // idempotent
 ```
 
 ### Duration Policies
 
 | Policy | Behavior |
 |--------|----------|
-| `Instant` | Modifies `BaseValue` immediately. No **ActiveEffect** created. |
+| `Instant` | Modifies `BaseValue` once. No **ActiveEffect** created, no handle. |
 | `Duration` | Persists for `DurationSeconds`, modifies `CurrentValue` via aggregation. |
-| `Infinite` | Persists until manually removed. |
+| `Infinite` | Persists until manually removed, modifies `CurrentValue` via aggregation. |
 
 ### Stacking Policies
 
 | Policy | Behavior |
 |--------|----------|
 | `Independent` | Multiple instances of the same effect coexist. |
-| `Replace` | New effect removes existing effects with the same `EffectTag`. |
+| `Replace` | Applying a new instance removes existing effects with the same `EffectTag`. |
 
 ### Modifier Aggregation
 
-For persistent effects (`Duration` / `Infinite`):
+For persistent (`Duration` / `Infinite`) effects, `CurrentValue` is:
 
-```
+```text
 result = hasOverride ? overrideValue : (BaseValue + addSum) * mulProduct
 ```
 
-- `Add` — summed into `addSum`
-- `Multiply` — multiplied into `mulProduct` (starts at 1)
-- `Override` — wins over `Add`/`Multiply`. Across multiple `Override` modifiers, the one with the highest `Modifier.Priority` wins; ties resolve to the last applied. Useful for immunity overriding debuff, god-mode overriding anything, etc.
+- `Add` — summed into `addSum`.
+- `Multiply` — multiplied into `mulProduct` (starts at 1).
+- `Override` — wins over `Add` / `Multiply`. Across multiple overrides the highest `Modifier.Priority` wins; ties resolve to the last applied.
 
-Instant effects modify `BaseValue` directly. Periodic modifiers on `Duration`/`Infinite` effects also apply to `BaseValue` each tick (like "damage over time permanently reduces the base") — model a separate `MaxHealth` attribute if you need a cap.
+`Instant` effects and periodic ticks write `BaseValue` directly (a DOT permanently lowers the base — model a separate `MaxHealth` attribute if you need a cap). Periodic effects therefore contribute through `BaseValue` only and are excluded from the continuous aggregate to avoid double-counting.
 
 ### Magnitude
 
-`EffectSpec.Magnitude` multiplies the stored `Value` of every modifier in the effect. It scales the input to the aggregator, not the result:
+`EffectSpec.Magnitude` scales the input value of every modifier, not the result:
 
-- `Add 10` with `Magnitude 2` → contributes `+20` to `addSum`
-- `Multiply 2` with `Magnitude 0.5` → contributes `*1.0` (effectively disables the multiplier)
-- `Override 42` with `Magnitude 3` → overrides to `126`
-
-For `Multiply`, think of magnitude as scaling the modifier's strength, not the final multiplier.
+- `Add 10` with magnitude 2 → contributes `+20` to `addSum`.
+- `Multiply 2` with magnitude 0.5 → contributes `*1.0` (effectively disables the multiplier).
+- `Override 42` with magnitude 3 → overrides to `126`.
 
 ### Tag Conditions
 
 | Field | Check |
 |-------|-------|
-| `ApplicationRequiredTags` | Target must have **all** these tags for the effect to apply. |
-| `ApplicationBlockedTags` | Target must have **none** of these tags for the effect to apply. |
-| `GrantedTags` | Tags added to the target while the effect is active. Removed when the effect ends. |
-| `RemoveEffectsWithTags` | On application, removes all active effects whose `EffectTag` matches any of these tags. |
+| `ApplicationRequiredTags` | Target must have **all** of these for the effect to apply. |
+| `ApplicationBlockedTags` | Target must have **none** of these for the effect to apply. |
+| `GrantedTags` | Added to the target's tag container while active; removed when the effect ends (unless another active effect still grants them). |
+| `RemoveEffectsWithTags` | On application, removes active effects whose `EffectTag` matches any of these (hierarchical). |
 
 ## Examples
 
 ### Instant Damage
 
-```
+```text
 Duration:   Instant
 Modifiers:  [Health] [Add] [-25]
 ```
 
-Subtracts 25 from `BaseValue` immediately. No tracking, no handle.
+Subtracts 25 from `BaseValue` immediately. No handle, no tracking.
 
-### Speed Buff (10 seconds)
+### Speed Buff, 10 Seconds
 
-```
+```text
 Duration:   Duration, 10s
 Effect Tag: Effect.SpeedBoost
 Stacking:   Replace
 Modifiers:  [MoveSpeed] [Multiply] [1.5]
 ```
 
-Multiplies `CurrentValue` of MoveSpeed by 1.5 for 10 seconds. Replace stacking means reapplying refreshes the duration instead of stacking multiplicatively.
+Multiplies MoveSpeed `CurrentValue` by 1.5 for 10 seconds. `Replace` means reapplying drops the old instance and starts a fresh duration instead of stacking multiplicatively.
 
-### Poison (DOT, 5 seconds, ticks every 1s)
+### Poison DOT, 5 Seconds, Ticks Every 1s
 
-```
+```text
 Duration:     Duration, 5s
 Period:       1s
 Effect Tag:   Effect.Poison
@@ -247,33 +260,33 @@ Granted Tags: [Status.Poisoned]
 Blocked Tags: [Status.Immune]
 ```
 
-Every 1 second, subtracts 3 from Health `BaseValue`. Grants `Status.Poisoned` tag while active. Won't apply if the target has `Status.Immune`.
+Subtracts 3 from Health `BaseValue` each second, grants `Status.Poisoned` while active, and refuses to apply if the target has `Status.Immune`.
 
-### Cleanse (removes debuffs on application)
+### Cleanse
 
+```text
+Duration:            Instant
+Remove Effects With: [Effect.Debuff]
 ```
-Duration:              Instant
-Remove Effects With:   [Effect.Debuff]
-```
 
-Removes all active effects tagged under `Effect.Debuff` (uses hierarchy -- removes `Effect.Debuff.Poison`, `Effect.Debuff.Slow`, etc).
+Removes all active effects tagged under `Effect.Debuff` (`Effect.Debuff.Poison`, `Effect.Debuff.Slow`, ...).
 
-### Stun Immunity Aura (infinite, blocks stuns)
+### Stun Immunity Aura
 
-```
+```text
 Duration:     Infinite
 Effect Tag:   Effect.StunImmunity
 Granted Tags: [Status.Immune.Stun]
 ```
 
-No modifiers -- only grants `Status.Immune.Stun` tag. Other effects that have `Status.Immune.Stun` in `ApplicationBlockedTags` will fail to apply. Stays until explicitly removed.
+No modifiers — only grants `Status.Immune.Stun`. Stun effects that list it in `ApplicationBlockedTags` fail to apply. Stays until explicitly removed.
 
 ## Integration
 
-GAS is framework-level -- it does not know about entities, components, or DI. Game code bridges effects to gameplay via ACS components:
+GAS is framework-level — it knows nothing about entities, components, or DI. Game code bridges a controller to a target's attributes and tags:
 
 ```csharp
-[ComponentDescription("Manages effect controller for the entity")]
+[ComponentDescription("Owns the effect controller for the entity")]
 public class EffectControllerComponent : EntityComponent
 {
     private EffectsAspect _effects = default!;
@@ -285,33 +298,25 @@ public class EffectControllerComponent : EntityComponent
         _effects = Context.Require<EffectsAspect>();
         _controller = new EffectController(_effects.Attributes, _effects.Tags);
     }
+
+    private void Update() => _controller.Tick(Time.deltaTime);
+
+    protected override void OnDestroy()
+    {
+        _controller.Dispose();
+        base.OnDestroy();
+    }
 }
 ```
 
 ## File Structure
 
-```
+```text
 com.rubickanov.gas/
 ├── Runtime/
-│   ├── Attributes/
-│   │   ├── GameplayAttribute.cs
-│   │   └── AttributeSet.cs
-│   ├── Effects/
-│   │   ├── ModifierOp.cs
-│   │   ├── Modifier.cs
-│   │   ├── DurationPolicy.cs
-│   │   ├── StackingPolicy.cs
-│   │   ├── EffectDef.cs
-│   │   ├── EffectSpec.cs
-│   │   ├── ActiveEffect.cs
-│   │   ├── ActiveEffectHandle.cs
-│   │   └── EffectController.cs
-│   └── Calculation/
-│       └── ModifierAggregator.cs
-├── Unity/
-│   ├── GameplayEffectAsset.cs
-│   └── SerializedModifier.cs
-└── Editor/
-    ├── GameplayEffectAssetEditor.cs
-    └── SerializedModifierPropertyDrawer.cs
+│   ├── Attributes/        — GameplayAttribute, AttributeSet
+│   ├── Effects/           — Modifier, EffectDef, EffectSpec, ActiveEffect, EffectController, policies
+│   └── Calculation/       — ModifierAggregator
+├── Unity/                 — GameplayEffectAsset, SerializedModifier
+└── Editor/                — asset inspector, modifier drawer
 ```

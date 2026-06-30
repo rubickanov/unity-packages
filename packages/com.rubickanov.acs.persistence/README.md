@@ -1,12 +1,43 @@
 # ACS Persistence
 
-Snapshot/restore primitives for ACS aspects. Extension for [ACS](../com.rubickanov.acs/).
+Snapshot and restore for ACS aspects. Collects `[PersistedState]` fields into a detachable POCO and writes it back — no storage backend, no save slots. Stable aspect keys and two-layer schema migration are built in.
 
 ## Dependencies
 
-- `com.rubickanov.acs` — base aspect framework
-- `R3` — `ReactiveProperty<T>` underpinning persisted fields
-- `ObservableCollections` — list/dictionary/hash-set support
+- `com.rubickanov.acs` — the aspect framework this snapshots
+- `R3` — `ReactiveProperty<T>`, the scalar field shape
+- `ObservableCollections` — `ObservableList` / `ObservableDictionary` / `ObservableHashSet` field shapes
+
+Unity 6000.0+.
+
+## Architecture
+
+```
+IEntity.Snapshot()                 World.SnapshotAll(keyOf)
+        │                                   │
+        ▼                                   ▼
+   AspectSnapshot  ────────────────►  WorldSnapshot
+   { key → AspectData }               { World, Entities, FormatVersion }
+        │                                   │
+   AspectData                          save layer serializes + stores
+   { Version, Fields }                      │
+        ▲                                   ▼
+   IEntity.Restore()  ◄───────────  World.RestoreAll(snap, resolveOrSpawn)
+        │
+   IAspectSnapshotMigrator  →  IAspectMigrator  →  ReactiveProperty.Value = …
+```
+
+The package produces and consumes plain value objects. Serialization, identity, prefab resolution, and storage all live in the game's save layer.
+
+## Core Concepts
+
+**Persisted field** — a `ReactiveProperty<T>`, `ObservableList<T>`, `ObservableHashSet<T>`, or `ObservableDictionary<K,V>` on an aspect, tagged `[PersistedState]`. Everything else on the aspect is runtime-only and never enters a snapshot.
+
+**AspectData / AspectSnapshot / WorldSnapshot** — the three POCO layers. `AspectData` holds one aspect's field values (boxed, by field name) plus a schema `Version`. `AspectSnapshot` maps a stable key to `AspectData` for one entity. `WorldSnapshot` bundles every entity's snapshot plus the world-scoped slot and a `FormatVersion`.
+
+**Snapshot key** — the stable id an aspect is stored under. `[PersistedKey]` when present, `Type.FullName` otherwise. Decoupling the key from the CLR type lets aspects be renamed or moved without breaking old saves.
+
+**Migration layers** — `IAspectMigrator` evolves one aspect's fields across a `[PersistedVersion]` bump; `IAspectSnapshotMigrator` restructures whole snapshots (split, merge, delete aspects) across a `WorldSnapshot.FormatVersion` bump. Both are registered on a save-layer-owned `PersistenceMigrationRegistry`.
 
 ## Quick Start
 
@@ -31,7 +62,7 @@ var entity = new Entity();
 entity.Require<PlayerAspect>().Health.Value = 73f;
 
 AspectSnapshot snap = entity.Snapshot();   // collect
-entity.Restore(snap);                      // apply
+entity.Restore(snap);                       // apply
 ```
 
 ## Usage
@@ -45,7 +76,7 @@ entity.Restore(snap);                      // apply
 - `ObservableHashSet<T>` — same type rule for `T`.
 - `ObservableDictionary<K, V>` — both `K` and `V` must be value type or `string`.
 
-Anything else logs an error at scan time and is skipped. Reference-type graphs are the save layer's concern, not ACS's.
+Anything else logs an error at scan time and is skipped. Reference-type graphs are the save layer's concern, not ACS's. Fields declared on a base aspect class are included in derived aspects' snapshots — the scanner walks the type hierarchy explicitly.
 
 A field tagged with both `[PersistedState]` and `[Replicated]` is fine — the two scanners are independent and own different pipelines.
 
@@ -57,13 +88,13 @@ entity.Restore(snap);
 bool hasAny = entity.HasPersistedState();
 ```
 
-`Snapshot()` returns a detachable POCO. Aspects without any `[PersistedState]` field are omitted entirely. `Restore()` creates missing aspects via `IEntity.Require<T>()` and writes the values back — writes go through the normal `ReactiveProperty.Value` setter, so UI, rules, and netcode replication all react as they would at runtime.
+`Snapshot()` returns a detachable POCO. Aspects with no `[PersistedState]` field are omitted entirely. `Restore()` creates missing aspects via `IEntity.Require<T>()` and writes the values back — writes go through the normal `ReactiveProperty.Value` setter, so UI, rules, and netcode replication react as they would at runtime.
 
-Unknown fields in the snapshot are silently ignored; missing fields keep whatever default the aspect constructor set. Unknown aspect types (removed/renamed since the snapshot was taken) log a warning and are skipped — this is the forward/backward compatibility the format provides by default.
+Unknown fields in the snapshot are silently ignored; missing fields keep whatever default the aspect constructor set. Unknown aspect keys (removed or renamed since the snapshot was taken) log a warning and are skipped — the forward/backward compatibility the format provides by default.
 
 ### Stable aspect keys
 
-By default an aspect is keyed in the snapshot by `Type.FullName`. A rename or namespace move breaks old saves — the resolver can no longer find the type. Two attributes cover this:
+By default an aspect is keyed by `Type.FullName`, so a rename or namespace move breaks old saves. Two attributes cover this:
 
 ```csharp
 [PersistedKey("hero")]
@@ -75,9 +106,9 @@ public sealed class HeroAspect : IEntityAspect
 ```
 
 - `[PersistedKey]` — canonical key written by `Snapshot()`. Without it the package falls back to `Type.FullName`, so existing saves keep loading.
-- `[PersistedAlias]` — resolve-only. Multiple attributes chain renames across several migrations. Snapshots never write alias keys.
+- `[PersistedAlias]` — resolve-only. Apply it multiple times to chain renames across several migrations. Snapshots never write alias keys.
 
-Alias resolution is a one-shot assembly scan cached for the session. A duplicate key (two aspects claiming the same `[PersistedKey]`, or an alias shadowing another aspect's canonical key) logs an error at first resolve — fix the collision, ACS picks one deterministically.
+Alias resolution is a one-shot assembly scan cached for the session. A duplicate key — two aspects claiming the same `[PersistedKey]`, or an alias shadowing another aspect's canonical key — logs an error at first resolve; first registration wins deterministically.
 
 ### Per-aspect versioning and migrations
 
@@ -114,19 +145,16 @@ public sealed class HeroV0ToV1 : IAspectMigrator
 var migrations = new PersistenceMigrationRegistry()
     .AddAspect(new HeroV0ToV1());
 
-world.RestoreAll(
-    snap,
-    resolveOrSpawn,
-    new WorldRestoreOptions { Migrations = migrations });
+entity.Restore(snap, migrations);
 ```
 
-Each migrator advances exactly one step (`FromVersion` → `FromVersion + 1`); the registry composes the chain. `Snapshot()` stamps `AspectData.Version` from `[PersistedVersion]`; without the attribute the version is `0`, matching the pre-1.2 shape. A missing step or a snapshot written by newer code than the current aspect logs a warning and skips that aspect — one broken migration does not poison the whole restore.
+Each migrator advances exactly one step (`FromVersion` → `FromVersion + 1`); the registry composes the chain. `Snapshot()` stamps `AspectData.Version` from `[PersistedVersion]`; without the attribute the version is `0`. A missing step, or a snapshot written by newer code than the current aspect, logs a warning and skips that aspect — one broken migration does not poison the whole restore.
 
-Collection migrations stay inside the aspect migrator — `data.Fields[name]` is a regular `List<T>` / `Dictionary<K,V>` / `HashSet<T>` and can be rewritten freely. What the package **cannot** bridge is a change in the CLR shape of a collection *element* (struct fields added/removed) — the serializer handles drift there, not ACS.
+Collection migrations stay inside the aspect migrator — `data.Fields[name]` is a regular `List<T>` / `Dictionary<K,V>` / `HashSet<T>` and can be rewritten freely. What the package cannot bridge is a change in the CLR shape of a collection *element* (struct fields added or removed) — that drift is the serializer's job, not ACS's.
 
 ### Cross-aspect migrations
 
-Aspect splits, merges, and renames that cross type boundaries run at the `WorldSnapshot` layer, keyed by `FormatVersion`:
+Aspect splits, merges, and renames that cross type boundaries run at the snapshot layer, keyed by `FormatVersion`:
 
 ```csharp
 public sealed class SplitHealthMigrator : IAspectSnapshotMigrator
@@ -151,25 +179,14 @@ var migrations = new PersistenceMigrationRegistry()
     .AddSnapshot(new SplitHealthMigrator());
 
 // Save — registry stamps FormatVersion = 1 automatically.
-var snap = world.SnapshotAll(keyOf, migrations);
+WorldSnapshot snap = world.SnapshotAll(keyOf, migrations);
 
 // Load — registry walks from snap.FormatVersion up to CurrentFormatVersion.
 world.RestoreAll(snap, resolveOrSpawn,
     new WorldRestoreOptions { Migrations = migrations });
 ```
 
-Snapshot migrators run once per entity snapshot *and* on the world-scoped slot before per-aspect migrators fire, so downstream migrators see the rearranged shape.
-
-### World-scoped aspects
-
-`World` implements `IEntity`, so a `WorldTimeAspect` with `[PersistedState]` on `TimeOfDay` snapshots and restores through the same API:
-
-```csharp
-var world = new World();
-((IEntity)world).Require<WorldTimeAspect>().TimeOfDay.Value = 12.5f;
-
-AspectSnapshot worldSnap = ((IEntity)world).Snapshot();
-```
+Snapshot migrators run once per entity snapshot and on the world-scoped slot before per-aspect migrators fire, so downstream migrators see the rearranged shape.
 
 ### Whole-world snapshots
 
@@ -182,12 +199,12 @@ world.RestoreAll(snap, id => saveLayer.ResolveOrSpawn(id));
 ```
 
 - `keyOf` is invoked for every non-world entity; it must return a non-null, unique id — a `null` return or a duplicate key throws.
-- `resolveOrSpawn` either looks up an existing entity by the stored id or spawns a new one (prefab resolution is the save layer's concern). Returning `null` surfaces a warning and skips that entry.
-- World-scoped aspects live on the dedicated `WorldSnapshot.World` slot — `keyOf` is never called on the world, `DisposeMissing` never touches it.
+- `resolveOrSpawn` either looks up an existing entity by the stored id or spawns a new one (prefab resolution is the save layer's concern). Returning `null` surfaces a warning and skips that entry; returning the `World` itself logs an error and is skipped.
+- World-scoped aspects live on the dedicated `WorldSnapshot.World` slot — `keyOf` is never called on the world, and `DisposeMissing` never touches it.
 
-#### Missing-entity policy
+### Missing-entity policy
 
-`RestoreAll` accepts `WorldRestoreOptions` to control what happens to entities that are alive in the world but absent from the snapshot:
+`RestoreAll` takes `WorldRestoreOptions` to control entities that are alive in the world but absent from the snapshot:
 
 ```csharp
 world.RestoreAll(
@@ -199,7 +216,20 @@ world.RestoreAll(
 - `MissingEntityPolicy.Ignore` (default) — leave them alone. Right for checkpoints and partial restores.
 - `MissingEntityPolicy.DisposeMissing` — dispose every persisted entity not referenced by the snapshot. Right for "load slot from scratch". Entities without any `[PersistedState]` field (particles, runtime-only ownership aspects) survive; the world itself is never disposed.
 
-Default teardown disposes `IDisposable` entities and calls `UnityEngine.Object.Destroy(component.gameObject)` for `MonoEntity`-backed ones. Supply `WorldRestoreOptions.DisposeMissing` to override — for example, to return pooled entities instead of destroying them.
+Default teardown disposes `IDisposable` entities and calls `UnityEngine.Object.Destroy(component.gameObject)` for `Component`-backed ones such as `MonoEntity`. Supply `WorldRestoreOptions.DisposeMissing` to override — for example, to return pooled entities instead of destroying them.
+
+### World-scoped aspects
+
+`World` implements `IEntity`, so a `WorldTimeAspect` with `[PersistedState]` on `TimeOfDay` snapshots and restores through the same API:
+
+```csharp
+var world = new World();
+((IEntity)world).Require<WorldTimeAspect>().TimeOfDay.Value = 12.5f;
+
+AspectSnapshot worldSnap = ((IEntity)world).Snapshot();
+```
+
+In a `WorldSnapshot` these land on the `World` slot, never inside `Entities`.
 
 ### Walking every persisted entity
 
@@ -208,7 +238,7 @@ For custom workflows that don't fit `SnapshotAll` / `RestoreAll`, iterate direct
 ```csharp
 foreach (var entity in world.PersistedEntities())
 {
-    var snap = entity.Snapshot();
+    AspectSnapshot snap = entity.Snapshot();
     // Save layer decides the id, the prefabId, the storage, and the timing.
 }
 ```
@@ -230,40 +260,48 @@ public sealed class CombatAspect : IEntityAspect
 }
 ```
 
-- **ByName (default)** — snapshot stores the member name. Safe against reorders and inserts; a rename requires an `IAspectMigrator`. Unknown names on restore log a warning and keep the field at its current value.
-- **ByValue** — snapshot stores the underlying numeric. Compact; reorders or new members inserted before existing ones break old saves. Undefined values on restore log a warning and keep the current value.
+- `PersistedEnumMode.ByName` (default) — stores the member name. Safe against reorders and inserts; a rename needs an `IAspectMigrator`. Unknown names on restore log a warning and keep the field's current value.
+- `PersistedEnumMode.ByValue` — stores the underlying numeric. Compact, but reorders or members inserted before existing ones break old saves. Undefined values on restore log a warning and keep the current value.
 
-Enum elements inside collections (`ObservableList<MyEnum>` etc.) are rejected in the current iteration — wrap the enum in a plain `int` or `string` on the aspect, or file an issue with the use case.
+Enum elements inside collections (`ObservableList<MyEnum>` etc.) are rejected — wrap the enum as a plain `int` or `string` on the aspect.
 
 ### Nullable value types
 
-`ReactiveProperty<int?>` and similar nullable shapes are allowed. They forward to the underlying serializer; `null` survives the round-trip as long as the serializer preserves it (JsonUtility does not — Newtonsoft / MsgPack do). Aspect migrators can freely read and write `null` into the `AspectData.Fields` dictionary.
+`ReactiveProperty<int?>` and similar nullable shapes are allowed. They forward to the underlying serializer; `null` survives the round-trip as long as the serializer preserves it (`JsonUtility` does not — Newtonsoft and MsgPack do). Aspect migrators can freely read and write `null` into the `AspectData.Fields` dictionary.
 
-### Diagnostics — `PersistenceDebug`
+### Diagnostics
 
-Bootstrap validation and inspector-style dumps live on `PersistenceDebug`:
+Bootstrap validation and inspector-style dumps live on `PersistenceDebug`. None of these mutate the scanner cache or the reverse index, so they are safe from editor tooling, tests, or dev-build overlays.
 
 ```csharp
 // Fail fast in a bootstrap assertion.
 PersistenceDebug.ValidateAspect<HeroAspect>();
 
-// Scan a whole assembly — returns the full list of scanner rejections.
+// Scan a whole assembly — returns every scanner rejection.
 IReadOnlyList<string> errors = PersistenceDebug.ValidateAllAspects(typeof(HeroAspect).Assembly);
 if (errors.Count > 0) throw new InvalidOperationException(string.Join("\n", errors));
 
 // Dump the resolved reverse index (key → type, version, aliases).
-foreach (var entry in PersistenceDebug.ListPersistedKeys())
-    Debug.Log($"{entry.Key} → {entry.Type.FullName} v{entry.Version}");
+foreach (PersistedKeyEntry entry in PersistenceDebug.ListPersistedKeys())
+    Debug.Log($"{entry.Key} -> {entry.Type.FullName} v{entry.Version}");
 
 // Catch key collisions before they surface at restore.
-foreach (var c in PersistenceDebug.FindKeyCollisions())
-    Debug.LogError($"key '{c.Key}' is claimed by {string.Join(", ", c.Claimants.Select(t => t.Name))}");
+foreach (PersistedKeyCollision c in PersistenceDebug.FindKeyCollisions())
+    Debug.LogError($"key '{c.Key}' claimed by {c.Claimants.Length} types");
 
 // Human-readable per-aspect dump for inspector previews / crash payloads.
 Debug.Log(PersistenceDebug.DumpAspect(typeof(HeroAspect)));
 ```
 
-None of these mutate the scanner cache or the reverse index — safe to call from editor tooling, unit tests, or dev-build overlays.
+## Examples
+
+### Renaming a field across one version
+
+Save format v0 stored health under `HP`; v1 renames it to `Health` and adds a computed `ManaMax`. Bump `[PersistedVersion]` to `1`, register `HeroV0ToV1` (above), and pass the registry to `Restore` or `RestoreAll`. Old v0 saves migrate field-by-field on load; v1 saves skip the migrator entirely because their `AspectData.Version` already matches.
+
+### Splitting one aspect into two
+
+A legacy `legacy.health` aspect held both `Health` and `Shield`. `SplitHealthMigrator` (above) removes it and writes two new aspects keyed `game.health` and `game.shield`. Because this crosses type boundaries it runs at the snapshot layer via `IAspectSnapshotMigrator`, before any per-aspect migrator sees the data.
 
 ## Integration
 
@@ -295,10 +333,12 @@ public sealed class SaveService
 
 ## Design Decisions
 
-- **No storage, no slots, no autosave** — that's a product concern. Slot UI, cloud sync, platform save APIs, autosave timing, and checkpoint triggers live in the game's save layer or a separate `com.rubickanov.save` package.
-- **No prefab resolution, no persistent identity** — ACS does not know what a prefab is and does not care about stable cross-session ids. The save layer maps between its own id scheme and whatever `IEntity` the runtime produced.
-- **No built-in serializer** — `AspectSnapshot` holds boxed values in a dictionary keyed by `Type.FullName`. Any serializer (`JsonUtility`, `Newtonsoft`, `MsgPack`, binary) consumes it as-is; the save layer picks the format.
-- **Schema migration is opt-in, in two layers** — `IAspectMigrator` evolves one aspect's fields across a `[PersistedVersion]` bump; `IAspectSnapshotMigrator` restructures whole `AspectSnapshot` instances (split, merge, delete) keyed by `WorldSnapshot.FormatVersion`. Both are configured through a `PersistenceMigrationRegistry` owned by the save layer. The package ships the mechanism; the save layer supplies policy and concrete migrators. Collection-element CLR-shape drift stays with the save-layer serializer — ACS receives already-deserialized `List<T>` and cannot patch elements it never saw unboxed.
+- **No storage, no slots, no autosave** — that's a product concern. Slot UI, cloud sync, platform save APIs, autosave timing, and checkpoint triggers live in the game's save layer.
+- **No prefab resolution, no persistent identity** — ACS does not know what a prefab is and does not care about cross-session ids. The save layer maps between its own id scheme and whatever `IEntity` the runtime produced.
+- **No built-in serializer** — `AspectData.Fields` holds boxed values keyed by field name. Any serializer (`JsonUtility`, Newtonsoft, MsgPack, binary) consumes it as-is; the save layer picks the format.
+- **Schema migration is opt-in, in two layers** — `IAspectMigrator` evolves one aspect's fields across a `[PersistedVersion]` bump; `IAspectSnapshotMigrator` restructures whole snapshots across a `WorldSnapshot.FormatVersion` bump. Both are configured through a `PersistenceMigrationRegistry` owned by the save layer. The package ships the mechanism; the save layer supplies policy and concrete migrators.
 - **Restore writes through `ReactiveProperty.Value`** — no suppress flag. A restore is supposed to look like a normal write so netcode replication, UI bindings, and gameplay rules respond exactly as they do during live play.
-- **Snapshot iteration is deterministic** — `AspectSnapshot.Aspects` and `AspectData.Fields` are backed by a `SortedDictionary<string, …>` with `StringComparer.Ordinal`. Identical state produces identical key ordering across runtimes and cultures, which is what autosave dedup (hash the serialized blob, skip the write if unchanged) and byte-wise save-file equality require. Determinism of the final serialized bytes is still the save layer's concern — a serializer that walks `IDictionary` in key order (Newtonsoft, MsgPack) inherits it for free; one that doesn't (`JsonUtility` via a wrapper, custom binary) must preserve it itself.
-- **Aspect keys are CLR-type-specific, not polymorphic** — the registry resolves a snapshot key to exactly one concrete `Type`. A derived aspect with its own `[PersistedKey]` is a different save slot from its base; a shared key across a base/derived pair is a collision, not an inheritance chain. Polymorphism is not supported by design — if two aspect shapes need to coexist in the same save, give them distinct keys and pick between them in the save layer.
+- **Snapshot iteration is deterministic** — `Aspects`, `Fields`, and `Entities` are backed by `SortedDictionary` with `StringComparer.Ordinal`. Identical state produces identical key ordering across runtimes and cultures, which autosave dedup and byte-wise save-file equality rely on. The final serialized bytes are still the save layer's concern — a serializer that walks `IDictionary` in key order inherits the determinism for free; one that does not must preserve it itself.
+- **Aspect keys are CLR-type-specific, not polymorphic** — the registry resolves a snapshot key to exactly one concrete `Type`. A derived aspect with its own `[PersistedKey]` is a different save slot from its base; a shared key across a base/derived pair is a collision, not an inheritance chain. If two aspect shapes must coexist in one save, give them distinct keys and pick between them in the save layer.
+</content>
+</invoke>

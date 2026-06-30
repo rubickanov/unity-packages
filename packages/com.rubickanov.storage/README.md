@@ -4,7 +4,8 @@ Key-value storage service with pluggable backends. Sync reads, async writes.
 
 ## Dependencies
 
-- `UniTask` — async write operations
+- `UniTask` — return type for write operations
+- `Microsoft.Extensions.Logging.Abstractions` — optional `ILogger<T>` passed into `FileStorageService` / `EncryptedStorageService` for write and decryption errors
 
 ## Architecture
 
@@ -21,7 +22,7 @@ IStorageService (sync Get, async Set)
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **Storage.Runtime** | No | Interface, FileStorageService, EncryptedStorageService, NullStorageService |
+| **Storage.Runtime** | No | Interface, FileStorageService, EncryptedStorageService, PrefixedStorageService, NullStorageService |
 | **Storage.Unity** | Yes | PlayerPrefsStorageService |
 
 ## Quick Start

@@ -1,65 +1,87 @@
 # UI Localization
 
-Localization binding helpers that bridge the [UI](../com.rubickanov.ui/) framework with the [Localization](../com.rubickanov.localization/) service. Provides one-line reactive binding of `Label`/`Button`/`VisualElement` to localized strings and locale direction, plus a ViewModel helper for disposable `LocalizedValue` creation.
+Localization binding helpers that bridge the [UI](../com.rubickanov.ui/) framework with the [Localization](../com.rubickanov.localization/) service. Extension for [UI](../com.rubickanov.ui/).
+
+One-line reactive binding of `Label` / `Button` text and layout direction to localized strings, plus a ViewModel helper for lifetime-tracked `LocalizedValue` creation.
 
 ## Dependencies
 
-- `com.rubickanov.ui` — `ViewModelBase`, `UIToolkitView<TVM>`, `BindObservable`
+- `com.rubickanov.ui` — `ViewModelBase`, `UIToolkitView<TVM>`, `BindObservable`, `GetService`, `TrackDisposable`
 - `com.rubickanov.localization` — `ILocalizationService`, `LocalizationKey`, `LocalizedValue`
-- `R3` — reactive observable source (already required by UI)
-- `UniTask` — async/await
+- `R3` — `Observable` / `ReadOnlyReactiveProperty` subscriptions (`OnLocaleChanged`, `IsRTL`); auto-referenced
+- `com.unity.localization` — `Locale` type carried by `OnLocaleChanged`
+
+## Assemblies
+
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **Rubickanov.UI.Localization.Runtime** | No | Backend-agnostic ViewModel helper (`CreateLocalized`) |
+| **Rubickanov.UI.Localization.UIToolkit** | Yes | UIToolkit binding extensions for `Label` / `Button` / `VisualElement` |
 
 ## Quick Start
 
-Inside a `UIToolkitView<TVM>`, bind labels and buttons to localization keys:
+Bindings are created inside `OnBind` so they are registered against the view's
+bind lifecycle and disposed automatically when the view is unbound. Resolve the
+service via `GetService<ILocalizationService>()` (provided by the UI container).
 
 ```csharp
-public class MainMenuView : UIToolkitView<MainMenuViewModel>
+public sealed class MainMenuView : UIToolkitView<MainMenuViewModel>
 {
-    protected override void OnInitialize()
+    protected override UniTask OnBind()
     {
         var title = Root.Q<Label>("title");
-        var playButton = Root.Q<Button>("play");
+        var play = Root.Q<Button>("play");
 
-        this.BindLocalized(title, LocKeys.MainMenu_Title);
-        this.BindLocalized(playButton, LocKeys.MainMenu_Play);
+        this.BindLocalized(title, new LocalizationKey("MainMenu", "Title"));
+        this.BindLocalized(play, new LocalizationKey("MainMenu", "Play"));
+
+        return UniTask.CompletedTask;
     }
 }
 ```
 
-Bindings re-evaluate on every `OnLocaleChanged` emission and are disposed automatically when the view is unbound.
+Each binding sets the current text immediately and re-evaluates on every
+`OnLocaleChanged` emission. `ILocalizationService.InitializeAsync` must have
+completed before a binding is created, otherwise `GetString` returns fallbacks.
 
 ## Usage
 
 ### Direct key binding
 
+`Label` and `Button` overloads bind `.text` to a `LocalizationKey`.
+
 ```csharp
-this.BindLocalized(label, LocKeys.Dialog_Confirm);
-this.BindLocalized(button, LocKeys.Dialog_Cancel);
+this.BindLocalized(label, new LocalizationKey("Dialog", "Confirm"));
+this.BindLocalized(button, new LocalizationKey("Dialog", "Cancel"));
 ```
 
 ### Factory binding
 
-Use a factory when the text depends on more than one key or needs composition:
+Use a factory when the text composes more than one key or mixes in dynamic data.
+The factory receives the service and re-runs on locale change.
 
 ```csharp
-this.BindLocalized(subtitleLabel, loc => $"{loc.GetString(LocKeys.Level_Prefix)} {levelIndex}");
+this.BindLocalized(
+    subtitle,
+    loc => $"{loc.GetString(new LocalizationKey("Level", "Prefix"))} {levelIndex}");
 ```
 
 ### Parameterized (Smart Strings) binding
 
-For strings with format arguments that need to re-evaluate on locale change:
+The `Label` parameterized overload re-evaluates `argsFactory` on every locale
+change and formats via `GetString(key, args)`.
 
 ```csharp
 this.BindLocalized(
     scoreLabel,
-    LocKeys.Hud_Score,
-    argsFactory: () => new object[] { _vm.Score.CurrentValue });
+    new LocalizationKey("Hud", "Score"),
+    () => new object[] { ViewModel.Score.CurrentValue });
 ```
 
 ### Layout direction (RTL)
 
-Toggle `flexDirection` between `Row` and `RowReverse` based on the current locale's direction:
+`BindIsRTL` toggles an element's `flexDirection` between `Row` (LTR) and
+`RowReverse` (RTL) reactively from `ILocalizationService.IsRTL`.
 
 ```csharp
 this.BindIsRTL(rootContainer);
@@ -67,16 +89,20 @@ this.BindIsRTL(rootContainer);
 
 ### Explicit service (no DI)
 
-Every binding has an overload that accepts `ILocalizationService` directly — useful in tests or when the service is not registered in the UI container:
+Every binding has an overload that takes `ILocalizationService` directly —
+useful in tests or presenters where the service is not resolved from the UI
+container. The service is the first argument after the view.
 
 ```csharp
-this.BindLocalized(loc, label, LocKeys.MainMenu_Title);
+this.BindLocalized(loc, label, new LocalizationKey("MainMenu", "Title"));
 this.BindIsRTL(loc, rootContainer);
 ```
 
 ### ViewModel-side reactive values
 
-Inside a `ViewModelBase`, create a `LocalizedValue` whose subscription is tracked against the ViewModel's lifetime:
+`CreateLocalized` (in the Runtime assembly, no UIToolkit dependency) builds a
+`LocalizedValue` via `ILocalizationService.Localize` and tracks its disposal
+against the ViewModel. The value unsubscribes when the ViewModel is unbound.
 
 ```csharp
 public sealed class MainMenuViewModel : ViewModelBase
@@ -85,15 +111,14 @@ public sealed class MainMenuViewModel : ViewModelBase
 
     public MainMenuViewModel(ILocalizationService loc)
     {
-        Title = this.CreateLocalized(loc, LocKeys.MainMenu_Title);
+        Title = this.CreateLocalized(loc, new LocalizationKey("MainMenu", "Title"));
     }
 }
 ```
 
-The value is disposed automatically when the ViewModel is unbound.
-
 ## Notes
 
-- `ILocalizationService.InitializeAsync` must complete before any binding is created — otherwise `GetString` returns fallbacks.
-- `LocalizationKey` must be valid (both `Table` and `Key` non-empty). Bindings throw `ArgumentException` on `default(LocalizationKey)`.
-- Text assignments go through an equality check — repeated same-string assignments do not touch the `VisualElement`.
+- `LocalizationKey` must be valid (non-empty `Table` and `Key`). Bindings throw
+  `ArgumentException` on `default(LocalizationKey)`.
+- Text assignments go through an equality check — re-assigning the same string
+  does not touch the `VisualElement`.
