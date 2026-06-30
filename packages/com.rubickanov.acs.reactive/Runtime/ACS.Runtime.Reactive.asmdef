@@ -1,0 +1,16 @@
+{
+    "name": "Rubickanov.ACS.Runtime.Reactive",
+    "rootNamespace": "Rubickanov.ACS.Runtime.Reactive",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "R3.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

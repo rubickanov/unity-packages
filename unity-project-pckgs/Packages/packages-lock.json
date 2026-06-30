@@ -45,6 +45,14 @@
       "source": "local",
       "dependencies": {}
     },
+    "com.rubickanov.acs.debug": {
+      "version": "file:../../packages/com.rubickanov.acs.debug",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.rubickanov.acs": "1.0.0"
+      }
+    },
     "com.rubickanov.acs.netcode": {
       "version": "file:../../packages/com.rubickanov.acs.netcode",
       "depth": 0,
@@ -55,6 +63,14 @@
     },
     "com.rubickanov.acs.persistence": {
       "version": "file:../../packages/com.rubickanov.acs.persistence",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.rubickanov.acs": "1.0.0"
+      }
+    },
+    "com.rubickanov.acs.reactive": {
+      "version": "file:../../packages/com.rubickanov.acs.reactive",
       "depth": 0,
       "source": "local",
       "dependencies": {
