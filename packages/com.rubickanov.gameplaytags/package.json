@@ -6,5 +6,8 @@
   "description": "Hierarchical gameplay tag system for categorization, filtering, and matching. Inspired by Unreal FGameplayTag.",
   "unity": "6000.0",
   "author": { "name": "rubickanov" },
-  "keywords": ["tags", "gameplay", "hierarchy", "matching"]
+  "keywords": ["tags", "gameplay", "hierarchy", "matching"],
+  "dependencies": {
+    "com.rubickanov.codegen": "1.0.0"
+  }
 }

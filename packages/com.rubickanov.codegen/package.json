@@ -1,0 +1,10 @@
+{
+  "name": "com.rubickanov.codegen",
+  "version": "1.0.0",
+  "license": "MIT",
+  "displayName": "Codegen",
+  "description": "Centralized code-generation framework for type-safe constants. Shared identifier sanitization, idempotent regeneration, a generator registry, and built-in generators for scenes, layers, tags, sorting layers, and animator parameters.",
+  "unity": "6000.0",
+  "author": { "name": "rubickanov" },
+  "keywords": ["codegen", "constants", "editor", "type-safe", "tooling"]
+}

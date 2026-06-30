@@ -1,73 +1,19 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
-using UnityEditor;
-using UnityEngine;
+using Rubickanov.Codegen.Editor;
 
 namespace Rubickanov.GameplayTags.Editor
 {
     /// <summary>
-    /// Generates strongly-typed static tag constants from <see cref="GameplayTagAsset"/> databases.
+    /// Pure code generator for strongly-typed static tag constants. Identifier sanitization and
+    /// collision handling are delegated to the shared <see cref="IdentifierSanitizer"/>; tag paths
+    /// preserve interior casing (lowercaseRemainder: false), so "DoT" stays "DoT".
     /// </summary>
     public static class GameplayTagsGenerator
     {
-        private static readonly HashSet<string> CSharpKeywords = new(StringComparer.Ordinal)
-        {
-            "abstract", "as", "base", "bool", "break", "byte", "case", "catch",
-            "char", "checked", "class", "const", "continue", "decimal", "default",
-            "delegate", "do", "double", "else", "enum", "event", "explicit",
-            "extern", "false", "finally", "fixed", "float", "for", "foreach",
-            "goto", "if", "implicit", "in", "int", "interface", "internal",
-            "is", "lock", "long", "namespace", "new", "null", "object", "operator",
-            "out", "override", "params", "private", "protected", "public",
-            "readonly", "ref", "return", "sbyte", "sealed", "short", "sizeof",
-            "stackalloc", "static", "string", "struct", "switch", "this", "throw",
-            "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe",
-            "ushort", "using", "virtual", "void", "volatile", "while"
-        };
-
-        private static GameplayTagsGeneratorSettings Settings => GameplayTagsGeneratorSettings.instance;
-
-        [MenuItem("Tools/Generators/Gameplay Tags")]
-        public static void GenerateTags()
-        {
-            var assets = FindAllTagAssets();
-            if (assets.Count == 0)
-            {
-                Debug.LogWarning("[GameplayTagsGenerator] No GameplayTagAsset found.");
-                return;
-            }
-
-            var allPaths = assets.SelectMany(a => a.TagPaths).Distinct().ToArray();
-            var registry = new GameplayTagRegistry(allPaths);
-            var names = registry.GetAllNames();
-
-            if (names.Count == 0)
-            {
-                Debug.LogWarning("[GameplayTagsGenerator] No tags found in database.");
-                return;
-            }
-
-            var options = new GenerateCodeOptions
-            {
-                Namespace = Settings.Namespace,
-                ClassName = Settings.ClassName,
-                AccessModifier = Settings.AccessModifier,
-                MakePartial = Settings.MakePartial,
-            };
-
-            var code = GenerateCode(names, options);
-            WriteToFile(code);
-
-            AssetDatabase.Refresh();
-            Debug.Log($"[GameplayTagsGenerator] Generated {Settings.OutputPath} with {names.Count} tag(s) from {assets.Count} asset(s).");
-        }
-
         /// <summary>
-        /// Pure code generator. Produces a C# source string from a sorted list of tag paths.
+        /// Produces a C# source string from a sorted list of tag paths.
         /// Deterministic: identical input + options yield identical output.
         /// </summary>
         public static string GenerateCode(IReadOnlyList<string> names, GenerateCodeOptions options)
@@ -155,7 +101,8 @@ namespace Rubickanov.GameplayTags.Editor
             for (var i = 0; i < sortedChildren.Count; i++)
             {
                 var child = sortedChildren[i].Value;
-                var fieldName = MakeUniqueIdentifier(SanitizeIdentifier(child.Segment), usedNames);
+                var fieldName = IdentifierSanitizer.MakeUnique(
+                    IdentifierSanitizer.Sanitize(child.Segment, lowercaseRemainder: false), usedNames);
 
                 if (child.Children.Count > 0)
                 {
@@ -175,88 +122,6 @@ namespace Rubickanov.GameplayTags.Editor
                 if (i < sortedChildren.Count - 1)
                     sb.AppendLine();
             }
-        }
-
-        private static string MakeUniqueIdentifier(string name, HashSet<string> used)
-        {
-            if (used.Add(name))
-                return name;
-
-            // Preserve a leading "@" keyword escape on the suffixed form (e.g. "@class" -> "@class_2").
-            var hasEscape = name.StartsWith("@", StringComparison.Ordinal);
-            var bare = hasEscape ? name.Substring(1) : name;
-            var prefix = hasEscape ? "@" : string.Empty;
-
-            int n = 2;
-            string candidate;
-            do { candidate = $"{prefix}{bare}_{n++}"; } while (!used.Add(candidate));
-            return candidate;
-        }
-
-        private static string SanitizeIdentifier(string input)
-        {
-            if (string.IsNullOrEmpty(input))
-                return "_";
-
-            var sanitized = Regex.Replace(input, @"[^a-zA-Z0-9_]", "_");
-
-            if (char.IsDigit(sanitized[0]))
-                sanitized = "_" + sanitized;
-
-            sanitized = ToPascalCase(sanitized);
-
-            if (IsCSharpKeyword(sanitized))
-                sanitized = "@" + sanitized;
-
-            return sanitized;
-        }
-
-        private static string ToPascalCase(string input)
-        {
-            var parts = input.Split('_', StringSplitOptions.RemoveEmptyEntries);
-            var sb = new StringBuilder();
-
-            foreach (var part in parts)
-            {
-                if (part.Length > 0)
-                {
-                    sb.Append(char.ToUpperInvariant(part[0]));
-                    if (part.Length > 1)
-                        sb.Append(part.Substring(1));
-                }
-            }
-
-            return sb.Length > 0 ? sb.ToString() : "_";
-        }
-
-        private static bool IsCSharpKeyword(string word)
-        {
-            return CSharpKeywords.Contains(word.ToLowerInvariant());
-        }
-
-        private static void WriteToFile(string content)
-        {
-            var directory = Path.GetDirectoryName(Settings.OutputPath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(Settings.OutputPath, content);
-        }
-
-        private static List<GameplayTagAsset> FindAllTagAssets()
-        {
-            var guids = AssetDatabase.FindAssets("t:GameplayTagAsset");
-            var assets = new List<GameplayTagAsset>();
-
-            foreach (var guid in guids)
-            {
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                var asset = AssetDatabase.LoadAssetAtPath<GameplayTagAsset>(path);
-                if (asset != null)
-                    assets.Add(asset);
-            }
-
-            return assets;
         }
 
         private sealed class TreeNode

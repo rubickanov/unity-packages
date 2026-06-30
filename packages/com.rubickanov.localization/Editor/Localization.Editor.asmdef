@@ -3,6 +3,7 @@
     "rootNamespace": "Rubickanov.Localization.Editor",
     "references": [
         "Rubickanov.Localization.Runtime",
+        "Rubickanov.Codegen.Editor",
         "Unity.Localization",
         "Unity.Localization.Editor"
     ],
