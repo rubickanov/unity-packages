@@ -1,108 +1,19 @@
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
-using UnityEditor;
-using UnityEditor.Localization;
-using UnityEngine;
+using Rubickanov.Codegen.Editor;
 
 namespace Rubickanov.Localization.Editor
 {
     /// <summary>
-    /// Generates strongly-typed localization keys from Unity String Table Collections.
+    /// Pure code generator for strongly-typed localization keys. Identifier sanitization and
+    /// collision handling are delegated to the shared <see cref="IdentifierSanitizer"/>; keys are
+    /// lowercased after their first character (lowercaseRemainder: true), so "DoT" becomes "Dot".
     /// </summary>
     public static class LocalizationKeysGenerator
     {
-        private static LocalizationGeneratorSettings Settings => LocalizationGeneratorSettings.instance;
-
-        private static readonly Regex IdentifierPattern = new(@"[^a-zA-Z0-9_]", RegexOptions.Compiled);
-
-        private static readonly HashSet<string> CSharpKeywords = new(System.StringComparer.Ordinal)
-        {
-            "abstract", "as", "base", "bool", "break", "byte", "case", "catch",
-            "char", "checked", "class", "const", "continue", "decimal", "default",
-            "delegate", "do", "double", "else", "enum", "event", "explicit",
-            "extern", "false", "finally", "fixed", "float", "for", "foreach",
-            "goto", "if", "implicit", "in", "int", "interface", "internal",
-            "is", "lock", "long", "namespace", "new", "null", "object", "operator",
-            "out", "override", "params", "private", "protected", "public",
-            "readonly", "ref", "return", "sbyte", "sealed", "short", "sizeof",
-            "stackalloc", "static", "string", "struct", "switch", "this", "throw",
-            "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe",
-            "ushort", "using", "virtual", "void", "volatile", "while"
-        };
-
-        [MenuItem("Tools/Generators/Localization")]
-        public static void GenerateKeys()
-        {
-            if (string.IsNullOrWhiteSpace(Settings.OutputPath))
-            {
-                Debug.LogError("[LocalizationKeysGenerator] OutputPath is empty. " +
-                               "Configure it in Project Settings / Localization Generator.");
-                return;
-            }
-
-            var tables = FindAllStringTableCollections();
-
-            if (tables.Count == 0)
-            {
-                Debug.LogWarning("[LocalizationKeysGenerator] No String Table Collections found.");
-                return;
-            }
-
-            var options = new LocalizationCodeOptions
-            {
-                Namespace = Settings.Namespace,
-                ClassName = Settings.ClassName,
-            };
-
-            var code = GenerateCode(tables, options);
-            WriteToFile(code);
-
-            AssetDatabase.Refresh();
-            Debug.Log($"[LocalizationKeysGenerator] Generated {Settings.OutputPath} with {tables.Count} table(s).");
-        }
-
-        private static Dictionary<string, List<string>> FindAllStringTableCollections()
-        {
-            var result = new Dictionary<string, List<string>>();
-
-            var guids = AssetDatabase.FindAssets("t:StringTableCollection");
-
-            foreach (var guid in guids)
-            {
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                var collection = AssetDatabase.LoadAssetAtPath<StringTableCollection>(path);
-
-                if (collection == null) continue;
-
-                var tableName = collection.TableCollectionName;
-                var keys = new List<string>();
-
-                var sharedData = collection.SharedData;
-                if (sharedData != null)
-                {
-                    foreach (var entry in sharedData.Entries)
-                    {
-                        if (!string.IsNullOrEmpty(entry.Key))
-                        {
-                            keys.Add(entry.Key);
-                        }
-                    }
-                }
-
-                if (keys.Count > 0)
-                {
-                    result[tableName] = keys;
-                }
-            }
-
-            return result;
-        }
-
         /// <summary>
-        /// Pure code generator. Produces a C# source string from a table-name → keys map.
+        /// Produces a C# source string from a table-name → keys map.
         /// Deterministic: identical input + options yield identical output. Member names are
         /// de-duplicated per scope so realistic table layouts can't emit uncompilable output.
         /// </summary>
@@ -139,7 +50,8 @@ namespace Rubickanov.Localization.Editor
             for (var i = 0; i < sortedTables.Count; i++)
             {
                 var table = sortedTables[i];
-                var tableClassName = MakeUniqueIdentifier(SanitizeIdentifier(table.Key), usedTableNames);
+                var tableClassName = IdentifierSanitizer.MakeUnique(
+                    IdentifierSanitizer.Sanitize(table.Key, lowercaseRemainder: true), usedTableNames);
 
                 var root = new KeyTreeNode();
                 var sortedKeys = table.Value.OrderBy(k => k, System.StringComparer.Ordinal).ToList();
@@ -186,7 +98,7 @@ namespace Rubickanov.Localization.Editor
                 .ThenBy(l => l.OriginalKey, System.StringComparer.Ordinal);
             foreach (var leaf in sortedLeaves)
             {
-                var fieldName = MakeUniqueIdentifier(leaf.FieldName, usedNames);
+                var fieldName = IdentifierSanitizer.MakeUnique(leaf.FieldName, usedNames);
                 sb.AppendLine(
                     $"{indent}    public static readonly LocalizationKey {fieldName} = new(Table, \"{leaf.OriginalKey}\");");
             }
@@ -198,7 +110,8 @@ namespace Rubickanov.Localization.Editor
             for (var i = 0; i < sortedChildren.Count; i++)
             {
                 var child = sortedChildren[i];
-                var childClassName = MakeUniqueIdentifier(SanitizeIdentifier(child.Key), usedNames);
+                var childClassName = IdentifierSanitizer.MakeUnique(
+                    IdentifierSanitizer.Sanitize(child.Key, lowercaseRemainder: true), usedNames);
                 WriteTreeNode(sb, child.Value, tableName, childClassName, indent + "    ");
 
                 if (i < sortedChildren.Count - 1)
@@ -206,22 +119,6 @@ namespace Rubickanov.Localization.Editor
             }
 
             sb.AppendLine($"{indent}}}");
-        }
-
-        private static string MakeUniqueIdentifier(string name, HashSet<string> used)
-        {
-            if (used.Add(name))
-                return name;
-
-            // Preserve a leading "@" keyword escape on the suffixed form (e.g. "@class" -> "@class_2").
-            var hasEscape = name.StartsWith("@", System.StringComparison.Ordinal);
-            var bare = hasEscape ? name.Substring(1) : name;
-            var prefix = hasEscape ? "@" : string.Empty;
-
-            int n = 2;
-            string candidate;
-            do { candidate = $"{prefix}{bare}_{n++}"; } while (!used.Add(candidate));
-            return candidate;
         }
 
         private sealed class KeyTreeNode
@@ -233,7 +130,7 @@ namespace Rubickanov.Localization.Editor
             {
                 if (segments.Length == 1)
                 {
-                    Leaves.Add((SanitizeIdentifier(segments[0]), originalKey));
+                    Leaves.Add((IdentifierSanitizer.Sanitize(segments[0], lowercaseRemainder: true), originalKey));
                     return;
                 }
 
@@ -246,64 +143,6 @@ namespace Rubickanov.Localization.Editor
 
                 child.Insert(segments[1..], originalKey);
             }
-        }
-
-        private static string SanitizeIdentifier(string input)
-        {
-            if (string.IsNullOrEmpty(input))
-                return "_";
-
-            var sanitized = IdentifierPattern.Replace(input, "_");
-
-            if (char.IsDigit(sanitized[0]))
-            {
-                sanitized = "_" + sanitized;
-            }
-
-            sanitized = ToPascalCase(sanitized);
-
-            if (IsCSharpKeyword(sanitized))
-            {
-                sanitized = "@" + sanitized;
-            }
-
-            return sanitized;
-        }
-
-        private static string ToPascalCase(string input)
-        {
-            var parts = input.Split('_', System.StringSplitOptions.RemoveEmptyEntries);
-            var sb = new StringBuilder();
-
-            foreach (var part in parts)
-            {
-                if (part.Length > 0)
-                {
-                    sb.Append(char.ToUpperInvariant(part[0]));
-                    if (part.Length > 1)
-                    {
-                        sb.Append(part.Substring(1).ToLowerInvariant());
-                    }
-                }
-            }
-
-            return sb.Length > 0 ? sb.ToString() : "_";
-        }
-
-        private static bool IsCSharpKeyword(string word)
-        {
-            return CSharpKeywords.Contains(word.ToLowerInvariant());
-        }
-
-        private static void WriteToFile(string content)
-        {
-            var directory = Path.GetDirectoryName(Settings.OutputPath);
-            if (!Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory!);
-            }
-
-            File.WriteAllText(Settings.OutputPath, content);
         }
     }
 

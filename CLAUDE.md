@@ -17,6 +17,7 @@ All at version `1.0.0` unless noted:
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
 | `behaviortree` | Serializable BT with visual editor, blackboard, subtrees. |
 | `character-motor` | Modular character motor, pure C# simulation (Rigidbody + Kinematic). |
+| `codegen` | Centralized Editor codegen: shared identifier sanitization, idempotent writes, generator registry + Project Settings panel. Built-in generators for scenes/layers/tags/sorting-layers/animator-params/resources/streaming-assets/shader-props/uitoolkit-names; `localization` and `gameplaytags` generators ride on it. |
 | `config` | Type-safe config loading via Addressables, caching, validation. |
 | `devconsole` | In-game dev console with auto-discovery and autocomplete. |
 | `devconsole.netcode` | NGO extension for devconsole. |

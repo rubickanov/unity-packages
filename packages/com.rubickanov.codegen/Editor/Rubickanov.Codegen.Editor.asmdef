@@ -1,11 +1,7 @@
 {
-    "name": "Rubickanov.GameplayTags.Editor",
-    "rootNamespace": "Rubickanov.GameplayTags.Editor",
-    "references": [
-        "Rubickanov.GameplayTags.Runtime",
-        "Rubickanov.GameplayTags.Unity",
-        "Rubickanov.Codegen.Editor"
-    ],
+    "name": "Rubickanov.Codegen.Editor",
+    "rootNamespace": "Rubickanov.Codegen.Editor",
+    "references": [],
     "includePlatforms": [
         "Editor"
     ],

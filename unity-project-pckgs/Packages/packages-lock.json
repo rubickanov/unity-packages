@@ -67,6 +67,12 @@
       "source": "local",
       "dependencies": {}
     },
+    "com.rubickanov.codegen": {
+      "version": "file:../../packages/com.rubickanov.codegen",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "com.rubickanov.config": {
       "version": "file:../../packages/com.rubickanov.config",
       "depth": 0,
@@ -103,7 +109,9 @@
       "version": "file:../../packages/com.rubickanov.gameplaytags",
       "depth": 0,
       "source": "local",
-      "dependencies": {}
+      "dependencies": {
+        "com.rubickanov.codegen": "1.0.0"
+      }
     },
     "com.rubickanov.gas": {
       "version": "file:../../packages/com.rubickanov.gas",
@@ -124,7 +132,8 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.rubickanov.storage": "1.0.0"
+        "com.rubickanov.storage": "1.0.0",
+        "com.rubickanov.codegen": "1.0.0"
       }
     },
     "com.rubickanov.logging": {
