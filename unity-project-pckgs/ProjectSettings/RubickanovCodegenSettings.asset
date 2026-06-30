@@ -1,0 +1,103 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &1
+MonoBehaviour:
+  m_ObjectHideFlags: 53
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bdb52367bcd8748768b501cbda2fbc48, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Rubickanov.Codegen.Editor::Rubickanov.Codegen.Editor.CodegenSettings
+  _configs:
+  - Id: animatorParameters
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/AnimatorParameters.Generated.cs
+    Namespace: Game.Generated
+    ClassName: AnimatorParameters
+    Access: 0
+    MakePartial: 0
+  - Id: gameplayTags
+    Enabled: 1
+    AutoRegenerate: 1
+    OutputPath: Assets/Code/Game/Tags/GameTags.Generated.cs
+    Namespace: Game.Tags
+    ClassName: GameTags
+    Access: 0
+    MakePartial: 0
+  - Id: layers
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/Layers.Generated.cs
+    Namespace: Game.Generated
+    ClassName: Layers
+    Access: 0
+    MakePartial: 0
+  - Id: localization
+    Enabled: 1
+    AutoRegenerate: 1
+    OutputPath: Assets/Code/Game/Localization/LocalizationKeys.Generated.cs
+    Namespace: Game.Localization
+    ClassName: L
+    Access: 0
+    MakePartial: 0
+  - Id: scenes
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/Scenes.Generated.cs
+    Namespace: Game.Generated
+    ClassName: Scenes
+    Access: 0
+    MakePartial: 0
+  - Id: sortingLayers
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/SortingLayers.Generated.cs
+    Namespace: Game.Generated
+    ClassName: SortingLayers
+    Access: 0
+    MakePartial: 0
+  - Id: tags
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/Tags.Generated.cs
+    Namespace: Game.Generated
+    ClassName: Tags
+    Access: 0
+    MakePartial: 0
+  - Id: resources
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/ResourcePaths.Generated.cs
+    Namespace: Game.Generated
+    ClassName: ResourcePaths
+    Access: 0
+    MakePartial: 0
+  - Id: streamingAssets
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/StreamingAssets.Generated.cs
+    Namespace: Game.Generated
+    ClassName: StreamingAssets
+    Access: 0
+    MakePartial: 0
+  - Id: shaderProperties
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/ShaderProps.Generated.cs
+    Namespace: Game.Generated
+    ClassName: ShaderProps
+    Access: 0
+    MakePartial: 0
+  - Id: uiToolkitNames
+    Enabled: 0
+    AutoRegenerate: 1
+    OutputPath: Assets/Codegen/UI.Generated.cs
+    Namespace: Game.Generated
+    ClassName: UI
+    Access: 0
+    MakePartial: 0
