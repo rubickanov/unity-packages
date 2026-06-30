@@ -90,8 +90,15 @@ namespace Rubickanov.Loading
             }
             finally
             {
+                // Only the latest Load owns _cts; a newer Load has already cancelled+replaced it.
+                // Dispose ours so its registration on the caller's ct doesn't linger until the
+                // next Load/Dispose.
                 if (_loadGeneration == generation)
+                {
                     await _presenter.Hide();
+                    _cts?.Dispose();
+                    _cts = null;
+                }
             }
         }
 

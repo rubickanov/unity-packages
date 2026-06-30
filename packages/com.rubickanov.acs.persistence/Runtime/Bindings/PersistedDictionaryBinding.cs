@@ -36,8 +36,13 @@ namespace Rubickanov.ACS.Runtime.Persistence
             var source = (IEnumerable<KeyValuePair<TKey, TValue>>)value;
 
             _collection.Clear();
+            // Upsert via indexer rather than Add: a duplicate-key source (the permissive cast
+            // intentionally accepts list-of-pairs shapes) would throw ArgumentException on the
+            // second Add — and that escapes the per-field restore catch (InvalidCast/NRE only),
+            // aborting the whole entity *and* world restore with the dict left half-populated.
+            // Last value wins, mirroring how the source would have been read back.
             foreach (var kvp in source)
-                _collection.Add(kvp.Key, kvp.Value);
+                _collection[kvp.Key] = kvp.Value;
         }
     }
 }

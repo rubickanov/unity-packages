@@ -45,14 +45,19 @@ namespace Rubickanov.Config
                 return new UniTask<TConfig>((TConfig)cached.Config);
             }
 
+            // Coalesced loads run on an internal token, never the caller's. If the shared load
+            // carried the first caller's token, that caller cancelling would fault every other
+            // caller awaiting the same load. Instead each caller attaches its own token via
+            // AttachExternalCancellation, so cancellation is per-caller and independent; the
+            // shared load itself always runs to completion and caches.
             if (_pending.TryGetValue(type, out var pending))
             {
-                return (UniTask<TConfig>)pending;
+                return ((UniTask<TConfig>)pending).AttachExternalCancellation(ct);
             }
 
-            var preserved = LoadInternalAsync<TConfig>(type, ct).Preserve();
+            var preserved = LoadInternalAsync<TConfig>(type, CancellationToken.None).Preserve();
             _pending[type] = preserved;
-            return AwaitAndCleanup(type, preserved);
+            return AwaitAndCleanup(type, preserved).AttachExternalCancellation(ct);
         }
 
         public TConfig Get<TConfig>() where TConfig : ConfigBase
@@ -128,6 +133,15 @@ namespace Rubickanov.Config
             {
                 _logger.LogError(ex, "Failed to load {Type} from {Address}", type.Name, attribute.Address);
                 throw;
+            }
+
+            // Dispose() may have run while the load was in flight: ReleaseAllInternal already
+            // cleared the cache, so caching this handle now would leak it for the process
+            // lifetime. Release it and bail instead of repopulating a disposed service.
+            if (_disposed)
+            {
+                _loader.Release(releaseToken);
+                throw new ObjectDisposedException(nameof(ConfigService));
             }
 
             if (!config.Validate())

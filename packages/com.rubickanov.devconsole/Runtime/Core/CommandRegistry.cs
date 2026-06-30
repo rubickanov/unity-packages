@@ -534,6 +534,10 @@ namespace Rubickanov.DevConsole
 
             _tokenBuffer.Clear();
             Tokenize(input, _tokenBuffer);
+            // Non-empty input can still tokenize to zero tokens (leading space, or a lone
+            // quote char). Bail before the _tokenBuffer[0] access below, which would otherwise
+            // throw IndexOutOfRangeException on a normal keystroke.
+            if (_tokenBuffer.Count == 0) return;
             var endsWithSpace = input[input.Length - 1] == ' ';
 
             if (_tokenBuffer.Count == 1 && !endsWithSpace)

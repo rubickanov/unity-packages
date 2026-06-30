@@ -94,7 +94,7 @@ namespace Rubickanov.GameplayTags.Editor
             sb.AppendLine("    {");
 
             var root = BuildTree(names);
-            WriteNode(sb, root, "        ", access);
+            WriteNode(sb, root, "        ", access, reserveTag: false);
 
             sb.AppendLine("    }");
             sb.AppendLine("}");
@@ -136,7 +136,7 @@ namespace Rubickanov.GameplayTags.Editor
             return root;
         }
 
-        private static void WriteNode(StringBuilder sb, TreeNode node, string indent, string access)
+        private static void WriteNode(StringBuilder sb, TreeNode node, string indent, string access, bool reserveTag)
         {
             var sortedChildren = new List<KeyValuePair<string, TreeNode>>(node.Children);
             sortedChildren.Sort((a, b) => StringComparer.Ordinal.Compare(a.Key, b.Key));
@@ -145,6 +145,12 @@ namespace Rubickanov.GameplayTags.Editor
             // "Fire" both PascalCase to "Fire"). Members in one scope must be unique or the
             // generated file won't compile, so disambiguate collisions per scope.
             var usedNames = new HashSet<string>(StringComparer.Ordinal);
+
+            // Nested-class scopes auto-emit a "Tag" field (see below). Reserve it so a child
+            // segment that sanitizes to "Tag" (path "Damage.Tag") gets suffixed instead of
+            // colliding with the emitted field. The top-level class has no such field.
+            if (reserveTag)
+                usedNames.Add("Tag");
 
             for (var i = 0; i < sortedChildren.Count; i++)
             {
@@ -157,7 +163,7 @@ namespace Rubickanov.GameplayTags.Editor
                     sb.AppendLine($"{indent}{{");
                     sb.AppendLine($"{indent}    {access} static readonly GameplayTag Tag = GameplayTagRegistry.Instance.Get(\"{child.FullPath}\");");
 
-                    WriteNode(sb, child, indent + "    ", access);
+                    WriteNode(sb, child, indent + "    ", access, reserveTag: true);
 
                     sb.AppendLine($"{indent}}}");
                 }

@@ -209,6 +209,17 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
+        public void HideAll_EmptyState_DoesNotFireVisibilityCallback()
+        {
+            var events = new System.Collections.Generic.List<bool>();
+            _ui.SetVisibilityCallback(events.Add);
+
+            _ui.HideAll();
+
+            CollectionAssert.IsEmpty(events);
+        }
+
+        [Test]
         public async Task HideAllAsync_EmptyState_NoOp()
         {
             await _ui.HideAllAsync();

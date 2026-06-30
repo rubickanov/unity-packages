@@ -73,7 +73,7 @@ namespace Rubickanov.Utils
                 throw new ArgumentException(
                     $"maxExclusive ({maxExclusive}) must be greater than min ({min}).",
                     nameof(maxExclusive));
-            return min + (int)(Hash(a, b) % (uint)(maxExclusive - min));
+            return min + (int)(Hash(a, b) % (uint)((long)maxExclusive - min));
         }
 
         /// <summary>Returns a deterministic int in [min, maxExclusive) from three integer keys.</summary>
@@ -84,7 +84,7 @@ namespace Rubickanov.Utils
                 throw new ArgumentException(
                     $"maxExclusive ({maxExclusive}) must be greater than min ({min}).",
                     nameof(maxExclusive));
-            return min + (int)(Hash(a, b, c) % (uint)(maxExclusive - min));
+            return min + (int)(Hash(a, b, c) % (uint)((long)maxExclusive - min));
         }
 
         /// <summary>Returns a deterministic boolean (50/50) from two integer keys.</summary>

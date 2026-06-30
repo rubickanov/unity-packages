@@ -29,6 +29,18 @@ namespace Rubickanov.DevConsole.Tests
         }
 
         [Test]
+        public void GetSuggestions_WhitespaceOrQuoteOnlyInput_DoesNotThrow()
+        {
+            _registry.Register("alpha", _ => null);
+
+            // Non-empty but tokenizes to zero tokens: a leading space and a lone quote both
+            // previously hit _tokenBuffer[0] and threw IndexOutOfRangeException every keystroke.
+            Assert.DoesNotThrow(() => _registry.GetSuggestions(" ", _results));
+            Assert.DoesNotThrow(() => _registry.GetSuggestions("\"", _results));
+            Assert.IsEmpty(_results);
+        }
+
+        [Test]
         public void GetSuggestions_PartialPrefix_FiltersByCaseInsensitivePrefix()
         {
             _registry.Register("apple", _ => null);
