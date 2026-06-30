@@ -75,6 +75,84 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
         }
 
         [UnityTest]
+        public IEnumerator HostRegainsOwnership_ThenFiresServerAuthEvent_PeersStillReceiveExactlyOnce()
+        {
+            // Regression: server-auth event bindings are subscribed ONCE at spawn into
+            // the spawn-lifetime _disposables bag, which only OnNetworkDespawn tears down.
+            // OnGainedOwnership must re-wire ONLY owner-auth bindings (into _ownerDisposables).
+            // The old shared SubscribeEventBindingsAsAuthority re-subscribed server-auth
+            // bindings too, so a host that handed ownership to a client and took it back
+            // ended up with two live OnLocalEvent subscriptions on every server-auth Subject —
+            // a single OnNext then fired two BroadcastEventRpcs and every client received the
+            // event twice. This test does the host -> client -> host round-trip and asserts the
+            // per-peer receive count is still exactly one.
+            var serverInstance = SpawnObject(_eventPrefab, m_ServerNetworkManager);
+            var networkObjectId = serverInstance.GetComponent<NetworkObject>().NetworkObjectId;
+            yield return WaitForSpawnOnAllClients(networkObjectId);
+
+            var serverNetworkObject = serverInstance.GetComponent<NetworkObject>();
+
+            // Hand ownership to client 0, then take it back to the host. The regain is the
+            // step that re-ran the authority subscribe path on the host.
+            serverNetworkObject.ChangeOwnership(m_ClientNetworkManagers[0].LocalClientId);
+            yield return WaitForConditionOrTimeOut(() =>
+            {
+                for (int i = 0; i < m_NetworkManagers.Length; i++)
+                    if (m_NetworkManagers[i].SpawnManager.SpawnedObjects[networkObjectId].OwnerClientId
+                        != m_ClientNetworkManagers[0].LocalClientId)
+                        return false;
+                return true;
+            });
+            AssertOnTimeout("Ownership change to client did not propagate.");
+
+            serverNetworkObject.ChangeOwnership(m_ServerNetworkManager.LocalClientId);
+            yield return WaitForConditionOrTimeOut(() =>
+            {
+                for (int i = 0; i < m_NetworkManagers.Length; i++)
+                    if (m_NetworkManagers[i].SpawnManager.SpawnedObjects[networkObjectId].OwnerClientId
+                        != m_ServerNetworkManager.LocalClientId)
+                        return false;
+                return true;
+            });
+            AssertOnTimeout("Ownership change back to host did not propagate.");
+
+            var counts = new int[m_NetworkManagers.Length];
+            var disposables = new IDisposable[m_NetworkManagers.Length];
+            for (int i = 0; i < m_NetworkManagers.Length; i++)
+            {
+                int capture = i;
+                disposables[i] = GetEventAspectOnClient(m_NetworkManagers[i], networkObjectId)
+                    .ServerEvent.Subscribe(_ => counts[capture]++);
+            }
+
+            try
+            {
+                GetEventAspectOnClient(m_ServerNetworkManager, networkObjectId).ServerEvent.OnNext(7);
+
+                yield return WaitForConditionOrTimeOut(() =>
+                {
+                    for (int i = 0; i < counts.Length; i++)
+                        if (counts[i] < 1) return false;
+                    return true;
+                });
+                AssertOnTimeout("Server-auth event did not reach every peer after the ownership round-trip.");
+
+                for (int i = 0; i < 5; i++) yield return s_DefaultWaitForTick;
+
+                for (int i = 0; i < counts.Length; i++)
+                {
+                    Assert.AreEqual(1, counts[i],
+                        $"Peer {m_NetworkManagers[i].LocalClientId} received {counts[i]} events after a host " +
+                        "ownership round-trip, expected exactly 1 — server-auth binding was re-subscribed on regain.");
+                }
+            }
+            finally
+            {
+                for (int i = 0; i < disposables.Length; i++) disposables[i]?.Dispose();
+            }
+        }
+
+        [UnityTest]
         public IEnumerator PureClientOwnerFiresOwnerAuthEvent_RelaysToServerAndOtherClient()
         {
             // Full owner-auth event pipeline: client 0 is owner, emits

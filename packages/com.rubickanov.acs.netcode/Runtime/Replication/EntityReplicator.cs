@@ -380,9 +380,15 @@ namespace Rubickanov.ACS.Runtime.Netcode
 
             // Subscribe owner-auth field and event bindings now that this peer
             // is the authority. Previous owner's subscriptions were disposed in
-            // their OnLostOwnership.
+            // their OnLostOwnership. Only owner-auth events are (re)wired here —
+            // server-auth event subscriptions were made once at spawn and persist
+            // across ownership changes; re-subscribing them would double-fire on a
+            // host that regains ownership.
             SubscribeOwnerFieldBindings();
-            SubscribeEventBindingsAsAuthority();
+            SubscribeOwnerEventBindings();
+
+            // Membership in the system's owned-replicator set changed without a Register.
+            _system?.MarkOwnershipChanged();
 
             // Reset the tick offset — a new owner has a different clock drift.
             _ownerSubmitTickSync.Reset();
@@ -416,6 +422,9 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 if (_bindingAuthorities[i] == AuthorityMode.Owner)
                     _bindings[i].OnAuthorityLost();
             }
+
+            // No longer an owned non-server replicator — drop out of OwnerTick's set.
+            _system?.MarkOwnershipChanged();
 
             ReapplyOwnerScope();
         }

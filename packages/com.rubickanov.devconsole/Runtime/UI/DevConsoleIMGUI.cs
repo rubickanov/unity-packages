@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace Rubickanov.DevConsole
 {
@@ -8,7 +9,6 @@ namespace Rubickanov.DevConsole
     public class DevConsoleIMGUI : MonoBehaviour
     {
         private const int MaxHistory = 64;
-        private const float ConsoleHeightRatio = 0.5f;
         private const string InputControlName = "DevConsoleInput";
 
         private static DevConsoleIMGUI? _instance;
@@ -86,6 +86,43 @@ namespace Rubickanov.DevConsole
             _scrollToBottom = true;
         }
 
+        // Drive the built-in toggle from DevConsoleSettings, mirroring DevConsoleUIToolkit so the
+        // two frontends honor the same Toggle Key / Use Built-in Toggle options. Polling the Input
+        // System here (once per frame) rather than in OnGUI avoids the multi-event-per-frame
+        // double-toggle that wasPressedThisFrame would cause inside OnGUI.
+        private void Update()
+        {
+            var settings = DevConsoleSettings.GetOrCreate();
+            if (settings.UseBuiltInToggle && Keyboard.current != null &&
+                Keyboard.current[settings.ToggleKey].wasPressedThisFrame)
+                Toggle();
+        }
+
+        /// <summary>Toggles the console open/closed. Call this when <c>UseBuiltInToggle</c> is disabled.</summary>
+        public void Toggle() => SetOpen(!_isOpen);
+
+        /// <summary>Opens or closes the console.</summary>
+        public void SetOpen(bool open)
+        {
+            if (_isOpen == open) return;
+
+            _isOpen = open;
+            _requestFocus = open;
+            if (open)
+            {
+                // Swallow the character the toggle key emits on the next OnGUI so it does not
+                // land in the freshly focused input field.
+                _consumeNextChar = true;
+            }
+            else
+            {
+                _suggestions.Clear();
+                _suggestionIndex = -1;
+            }
+
+            Toggled?.Invoke(_isOpen);
+        }
+
         private void OnGUI()
         {
 #if UNITY_SERVER
@@ -93,7 +130,7 @@ namespace Rubickanov.DevConsole
 #endif
             var e = Event.current;
 
-            // --- Consume the character produced by the backtick physical key ---
+            // --- Consume the character produced by the toggle key ---
             if (_consumeNextChar)
             {
                 if (e.type == EventType.KeyDown && e.character != '\0' && e.keyCode == KeyCode.None)
@@ -105,29 +142,6 @@ namespace Rubickanov.DevConsole
 
                 if (e.type == EventType.Repaint)
                     _consumeNextChar = false;
-            }
-
-            // --- Backtick toggle ---
-            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.BackQuote)
-            {
-                _isOpen = !_isOpen;
-                _requestFocus = _isOpen;
-                _consumeNextChar = true;
-                if (!_isOpen)
-                {
-                    _suggestions.Clear();
-                    _suggestionIndex = -1;
-                }
-
-                Toggled?.Invoke(_isOpen);
-                e.Use();
-                return;
-            }
-
-            if (e.keyCode == KeyCode.BackQuote && e.type == EventType.KeyUp)
-            {
-                e.Use();
-                return;
             }
 
             if (!_isOpen) return;
@@ -152,7 +166,7 @@ namespace Rubickanov.DevConsole
             }
 
             // --- Draw UI ---
-            float consoleHeight = Screen.height * ConsoleHeightRatio;
+            float consoleHeight = Screen.height * DevConsoleSettings.GetOrCreate().ConsoleHeight;
             float suggestionRowHeight = 20f;
             float inputRowHeight = 28f;
             float logHeight = consoleHeight - suggestionRowHeight - inputRowHeight;
@@ -197,10 +211,7 @@ namespace Rubickanov.DevConsole
                     break;
 
                 case KeyCode.Escape:
-                    _isOpen = false;
-                    _suggestions.Clear();
-                    _suggestionIndex = -1;
-                    Toggled?.Invoke(false);
+                    SetOpen(false);
                     break;
             }
 

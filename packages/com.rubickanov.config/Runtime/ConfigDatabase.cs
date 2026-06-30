@@ -22,6 +22,11 @@ namespace Rubickanov.Config
         /// </summary>
         public TData? Get(string id)
         {
+            // Guard null/empty up front: the lookup dictionary would otherwise throw
+            // ArgumentNullException on a null key, contradicting the "returns null if not found"
+            // contract. An empty/missing id is simply "not found".
+            if (string.IsNullOrEmpty(id)) return null;
+
             if (_lookup == null)
             {
                 BuildLookup();

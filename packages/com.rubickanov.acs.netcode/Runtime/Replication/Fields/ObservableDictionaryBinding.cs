@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using ObservableCollections;
@@ -37,21 +38,29 @@ namespace Rubickanov.ACS.Runtime.Netcode
             return sizeof(ushort) + Encoding.UTF8.GetByteCount(s);
         }
 
+        // UTF-8 keys shorter than this (in bytes) encode into a stack buffer — no heap alloc on
+        // the common path. The byte[] that Encoding.UTF8.GetBytes(string) returns is otherwise
+        // garbage on every replicated dictionary mutation.
+        private const int StackEncodeCap = 256;
+
         public unsafe void Write(FastBufferWriter writer, in string value)
         {
             var s = value ?? string.Empty;
-            var bytes = Encoding.UTF8.GetBytes(s);
-            if (bytes.Length > ushort.MaxValue)
+            int byteCount = Encoding.UTF8.GetByteCount(s);
+            if (byteCount > ushort.MaxValue)
             {
-                Debug.LogError($"[StringKeyCodec] UTF-8 byte length {bytes.Length} exceeds ushort limit; writing empty key. Source string (truncated): '{s.Substring(0, Mathf.Min(32, s.Length))}…'");
+                Debug.LogError($"[StringKeyCodec] UTF-8 byte length {byteCount} exceeds ushort limit; writing empty key. Source string (truncated): '{s.Substring(0, Mathf.Min(32, s.Length))}…'");
                 writer.WriteValueSafe((ushort)0);
                 return;
             }
-            writer.WriteValueSafe((ushort)bytes.Length);
-            if (bytes.Length == 0) return;
-            fixed (byte* ptr = bytes)
+            writer.WriteValueSafe((ushort)byteCount);
+            if (byteCount == 0) return;
+
+            Span<byte> buffer = byteCount <= StackEncodeCap ? stackalloc byte[StackEncodeCap] : new byte[byteCount];
+            int written = Encoding.UTF8.GetBytes(s, buffer);
+            fixed (byte* ptr = buffer)
             {
-                writer.WriteBytesSafe(ptr, bytes.Length);
+                writer.WriteBytesSafe(ptr, written);
             }
         }
 
@@ -311,35 +320,28 @@ namespace Rubickanov.ACS.Runtime.Netcode
                         {
                             var key = _keyCodec.Read(reader);
                             var value = _valueCodec.Read(reader);
-                            // Defensive against mid-stream reorderings: if the key is
-                            // already present, apply as a Replace. Keeps receiver
-                            // coherent with the authority's next delta rather than
-                            // throwing the ArgumentException ObservableDictionary.Add
-                            // would emit.
+                            // Indexer assignment handles both the normal add and the defensive
+                            // already-present case (mid-stream reorderings) in one hash, emitting
+                            // ObserveAdd or ObserveReplace exactly as the old ContainsKey + Add/
+                            // indexer pair did. The add-vs-replace diagnostic is dev-only.
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
                             if (_dict.ContainsKey(key))
-                            {
                                 Debug.LogWarning($"[ObservableDictionaryBinding<{typeof(TKey).Name},{typeof(TValue).Name}>] AddKey for already-present key; applying as Replace.");
-                                _dict[key] = value;
-                            }
-                            else
-                            {
-                                _dict.Add(key, value);
-                            }
+#endif
+                            _dict[key] = value;
                             break;
                         }
                         case CollectionOpCode.ReplaceKey:
                         {
                             var key = _keyCodec.Read(reader);
                             var value = _valueCodec.Read(reader);
-                            if (_dict.ContainsKey(key))
-                            {
-                                _dict[key] = value;
-                            }
-                            else
-                            {
+                            // Same single-hash path: the indexer adds when missing (defensive)
+                            // and replaces when present, emitting the matching observe event.
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                            if (!_dict.ContainsKey(key))
                                 Debug.LogWarning($"[ObservableDictionaryBinding<{typeof(TKey).Name},{typeof(TValue).Name}>] ReplaceKey for missing key; applying as Add.");
-                                _dict.Add(key, value);
-                            }
+#endif
+                            _dict[key] = value;
                             break;
                         }
                         case CollectionOpCode.RemoveKey:

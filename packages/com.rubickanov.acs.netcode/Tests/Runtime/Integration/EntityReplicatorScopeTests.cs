@@ -103,9 +103,12 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             //
             // NGO does not support spawning runtime-instantiated prefabs with
             // nested NetworkObjects — it logs an error we must acknowledge.
-            LogAssert.Expect(LogType.Error,
-                "Spawning NetworkObjects with nested NetworkObjects is only supported for scene objects. " +
-                "Child NetworkObjects will not be spawned over the network!");
+            // NGO emits a Warning ("[Netcode] Spawning NetworkObjects with nested
+            // NetworkObjects is only supported for scene objects...") when a runtime-
+            // instantiated prefab carries nested NetworkObjects. We deliberately do NOT
+            // LogAssert.Expect it: it's incidental NGO noise (a Warning cannot fail the
+            // test as an unexpected log), and its level + "[Netcode]" prefix have drifted
+            // across NGO versions — pinning it just makes the test brittle.
             var serverInstance = SpawnObject(_nestedScopePrefab, m_ServerNetworkManager);
             var networkObjectId = serverInstance.GetComponent<NetworkObject>().NetworkObjectId;
             yield return WaitForSpawnOnAllClients(networkObjectId);
@@ -167,9 +170,12 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests.Integration
             // [NetworkScope] to a nested-NO component will never learn the attribute was ignored.
             // The controller logs one warning per such component per peer. Spawning on host +
             // two pure clients drives ApplyInitial three times, so three warnings are expected.
-            LogAssert.Expect(LogType.Error,
-                "Spawning NetworkObjects with nested NetworkObjects is only supported for scene objects. " +
-                "Child NetworkObjects will not be spawned over the network!");
+            // NGO emits a Warning ("[Netcode] Spawning NetworkObjects with nested
+            // NetworkObjects is only supported for scene objects...") when a runtime-
+            // instantiated prefab carries nested NetworkObjects. We deliberately do NOT
+            // LogAssert.Expect it: it's incidental NGO noise (a Warning cannot fail the
+            // test as an unexpected log), and its level + "[Netcode]" prefix have drifted
+            // across NGO versions — pinning it just makes the test brittle.
             var warningRegex = new System.Text.RegularExpressions.Regex(
                 @"\[NetworkScopeController\] ServerOnlyMarkerComponent on '.*' is marked \[NetworkScope\(ServerOnly\)\] but sits under a nested NetworkObject");
             for (int i = 0; i < m_NetworkManagers.Length; i++)

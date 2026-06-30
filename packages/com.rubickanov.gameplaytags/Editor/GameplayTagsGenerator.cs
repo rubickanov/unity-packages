@@ -141,10 +141,15 @@ namespace Rubickanov.GameplayTags.Editor
             var sortedChildren = new List<KeyValuePair<string, TreeNode>>(node.Children);
             sortedChildren.Sort((a, b) => StringComparer.Ordinal.Compare(a.Key, b.Key));
 
+            // Distinct registry tags can sanitize to the same C# identifier (e.g. "fire" and
+            // "Fire" both PascalCase to "Fire"). Members in one scope must be unique or the
+            // generated file won't compile, so disambiguate collisions per scope.
+            var usedNames = new HashSet<string>(StringComparer.Ordinal);
+
             for (var i = 0; i < sortedChildren.Count; i++)
             {
                 var child = sortedChildren[i].Value;
-                var fieldName = SanitizeIdentifier(child.Segment);
+                var fieldName = MakeUniqueIdentifier(SanitizeIdentifier(child.Segment), usedNames);
 
                 if (child.Children.Count > 0)
                 {
@@ -164,6 +169,22 @@ namespace Rubickanov.GameplayTags.Editor
                 if (i < sortedChildren.Count - 1)
                     sb.AppendLine();
             }
+        }
+
+        private static string MakeUniqueIdentifier(string name, HashSet<string> used)
+        {
+            if (used.Add(name))
+                return name;
+
+            // Preserve a leading "@" keyword escape on the suffixed form (e.g. "@class" -> "@class_2").
+            var hasEscape = name.StartsWith("@", StringComparison.Ordinal);
+            var bare = hasEscape ? name.Substring(1) : name;
+            var prefix = hasEscape ? "@" : string.Empty;
+
+            int n = 2;
+            string candidate;
+            do { candidate = $"{prefix}{bare}_{n++}"; } while (!used.Add(candidate));
+            return candidate;
         }
 
         private static string SanitizeIdentifier(string input)

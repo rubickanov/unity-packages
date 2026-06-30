@@ -69,6 +69,18 @@ namespace Rubickanov.Localization.Tests
         }
 
         [Test]
+        public void Equals_DefaultStruct_EqualsEmpty()
+        {
+            // default(LangLocale) has Code == null; Empty has Code == "". Both are IsEmpty and
+            // share a hash, so they must compare equal — otherwise they diverge in sets/dicts.
+            LangLocale defaultLocale = default;
+
+            Assert.AreEqual(LangLocale.Empty, defaultLocale);
+            Assert.IsTrue(defaultLocale == LangLocale.Empty);
+            Assert.AreEqual(LangLocale.Empty.GetHashCode(), defaultLocale.GetHashCode());
+        }
+
+        [Test]
         public void GetHashCode_DifferentCasingSameCode_SameHash()
         {
             var a = new LangLocale("en");

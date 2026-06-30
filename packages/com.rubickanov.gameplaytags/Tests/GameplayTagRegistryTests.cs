@@ -408,6 +408,19 @@ namespace Rubickanov.GameplayTags.Tests
         }
 
         [Test]
+        public void Matches_StaleOutOfRangeTag_ReturnsFalseWithoutThrowing()
+        {
+            var big = new GameplayTagRegistry(new[] { "A", "B", "C", "D", "E", "F", "G", "H" });
+            var staleTag = big.Get("H");
+            var small = new GameplayTagRegistry(new[] { "X" });
+            var localTag = small.Get("X");
+
+            Assert.DoesNotThrow(() => small.Matches(staleTag, localTag));
+            Assert.IsFalse(small.Matches(staleTag, localTag));
+            Assert.IsFalse(small.Matches(localTag, staleTag));
+        }
+
+        [Test]
         public void GetAllTags_ReturnsAllRegisteredTagsInOrder()
         {
             var registry = new GameplayTagRegistry(new[] { "Zeta", "Alpha", "Mike" });

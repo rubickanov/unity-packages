@@ -112,10 +112,14 @@ namespace Rubickanov.ACS.Runtime.Persistence
         }
 
         /// <summary>
-        /// Rough snapshot of registry/scanner state — useful in dev-only overlays. Counts are
-        /// best-effort: the scanner cache grows lazily on first <c>Snapshot</c>/<c>Restore</c>
-        /// of each aspect type, so <see cref="PersistenceCacheStats.ScannedTypes"/> reflects
-        /// how many aspect types have actually been touched, not how many exist in code.
+        /// Rough snapshot of registry state — useful in dev-only overlays. Counts come from the
+        /// eagerly-built key reverse index, not the lazy scanner cache:
+        /// <see cref="PersistenceCacheStats.ScannedTypes"/> is the number of canonical aspect
+        /// types registered in code (every concrete <c>IEntityAspect</c>, whether or not it has
+        /// been snapshotted or carries any <c>[PersistedState]</c> field), and
+        /// <see cref="PersistenceCacheStats.TotalFields"/> is the count of <c>[PersistedState]</c>-
+        /// tagged fields across those types — including fields the scanner would later reject,
+        /// since this does not run <c>TryClassify</c>.
         /// </summary>
         public static PersistenceCacheStats GetCacheStats()
         {

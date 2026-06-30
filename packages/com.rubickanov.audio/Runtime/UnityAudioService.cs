@@ -114,7 +114,7 @@ namespace Rubickanov.Audio
             {
                 source = _sfxPool.Dequeue();
             }
-            else
+            else if (_activeSources.Count > 0)
             {
                 var oldest = _activeSources.First!;
                 source = oldest.Value;
@@ -123,6 +123,16 @@ namespace Rubickanov.Audio
                 source.Stop();
                 _activeSources.RemoveFirst();
                 _activeNodes.Remove(source);
+            }
+            else
+            {
+                // Pool drained and the active list is empty too: every source is in fade-out
+                // limbo (StopSound removed it from _activeSources but FadeOutAndReclaimAsync
+                // has not reclaimed it to the pool yet). There is nothing to dequeue or evict,
+                // so grow a fresh source rather than dereferencing a null _activeSources.First.
+                // The extra source reclaims back into the pool when it finishes, so the pool
+                // settles at the real peak concurrency.
+                source = CreateSFXSource();
             }
 
             var node = _activeSources.AddLast(source);
@@ -214,10 +224,11 @@ namespace Rubickanov.Audio
             source.spatialBlend = 0f;
             source.resource = sound.Resource;
             ApplyPitch(source, in sound);
-            StartPlayWithFade(source, volumeScale, fadeIn);
+            var watch = BeginWatch(source);
+            StartPlayWithFade(source, volumeScale, fadeIn, watch);
 
             var handle = TrackHandle(source);
-            ReturnAfterPlayAsync(source, BeginWatch(source)).Forget();
+            ReturnAfterPlayAsync(source, watch).Forget();
             return handle;
         }
 
@@ -230,10 +241,11 @@ namespace Rubickanov.Audio
             source.spatialBlend = 1f;
             source.resource = sound.Resource;
             ApplyPitch(source, in sound);
-            StartPlayWithFade(source, volumeScale, fadeIn);
+            var watch = BeginWatch(source);
+            StartPlayWithFade(source, volumeScale, fadeIn, watch);
 
             var handle = TrackHandle(source);
-            ReturnAfterPlayAsync(source, BeginWatch(source)).Forget();
+            ReturnAfterPlayAsync(source, watch).Forget();
             return handle;
         }
 
@@ -247,20 +259,25 @@ namespace Rubickanov.Audio
             source.spatialBlend = 1f;
             source.resource = sound.Resource;
             ApplyPitch(source, in sound);
-            StartPlayWithFade(source, volumeScale, fadeIn);
+            var watch = BeginWatch(source);
+            StartPlayWithFade(source, volumeScale, fadeIn, watch);
 
             var handle = TrackHandle(source);
-            FollowAndReturnAsync(source, follow, BeginWatch(source)).Forget();
+            FollowAndReturnAsync(source, follow, watch).Forget();
             return handle;
         }
 
-        private void StartPlayWithFade(AudioSource source, float targetVolume, float fadeIn)
+        private void StartPlayWithFade(AudioSource source, float targetVolume, float fadeIn, CancellationToken watch)
         {
             if (fadeIn > 0f)
             {
                 source.volume = 0f;
                 source.Play();
-                FadeInAsync(source, targetVolume, fadeIn, _cts.Token).Forget();
+                // Tie the fade to the per-source watcher token, not the service-lifetime _cts:
+                // if the source is returned, evicted, or stopped mid-fade, EndWatch cancels this
+                // token so the fade stops writing volume to what is now a recycled source playing
+                // a different sound.
+                FadeInAsync(source, targetVolume, fadeIn, watch).Forget();
             }
             else
             {

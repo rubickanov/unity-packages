@@ -143,7 +143,8 @@ namespace Rubickanov.DevConsole
         private void Update()
         {
             var settings = DevConsoleSettings.GetOrCreate();
-            if (settings.UseBuiltInToggle && Keyboard.current[settings.ToggleKey].wasPressedThisFrame)
+            if (settings.UseBuiltInToggle && Keyboard.current != null &&
+                Keyboard.current[settings.ToggleKey].wasPressedThisFrame)
                 Toggle();
 
             if (_needsScrollToBottom)

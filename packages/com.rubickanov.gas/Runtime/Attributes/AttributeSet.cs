@@ -58,7 +58,5 @@ namespace Rubickanov.GAS
             attribute.BaseValue = value;
             BaseValueChanged?.Invoke(tag, value);
         }
-
-        internal IEnumerable<KeyValuePair<GameplayTag, GameplayAttribute>> All => _attributes;
     }
 }

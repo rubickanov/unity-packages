@@ -22,6 +22,7 @@ namespace Rubickanov.Utils
         private readonly Dictionary<T, LinkedListNode<T>> _nodeMap = new();
         private readonly int _maxActive;
         private readonly Action<T, Action<T>>? _onEvict;
+        private readonly Action<T> _releaseToPool;
         private bool _disposed;
 
         /// <summary>Number of items currently in active use (not counting items being evicted).</summary>
@@ -42,6 +43,7 @@ namespace Rubickanov.Utils
         /// </param>
         /// <param name="evictBuffer">Extra pool capacity to hold items mid-eviction.</param>
         /// <param name="prewarm">Number of instances to pre-create.</param>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="maxActive"/> is not positive or <paramref name="evictBuffer"/> is negative.</exception>
         public EvictingPool(
             T prefab,
             int maxActive,
@@ -49,9 +51,17 @@ namespace Rubickanov.Utils
             int evictBuffer = 8,
             int prewarm = 0)
         {
+            if (maxActive <= 0)
+                throw new ArgumentOutOfRangeException(nameof(maxActive), "maxActive must be positive.");
+            if (evictBuffer < 0)
+                throw new ArgumentOutOfRangeException(nameof(evictBuffer), "evictBuffer must be non-negative.");
+
             _maxActive = maxActive;
             _onEvict = onEvict;
             _pool = new ObjectPool<T>(prefab, prewarm, maxSize: maxActive + evictBuffer);
+            // Cache the method-group delegate once: passing _pool.Release directly would allocate
+            // a new Action<T> on every eviction (C# doesn't cache instance method-group conversions).
+            _releaseToPool = _pool.Release;
         }
 
         /// <summary>
@@ -126,7 +136,7 @@ namespace Rubickanov.Utils
             _active.RemoveFirst();
 
             if (_onEvict != null)
-                _onEvict(oldest, _pool.Release);
+                _onEvict(oldest, _releaseToPool);
             else
                 _pool.Release(oldest);
         }

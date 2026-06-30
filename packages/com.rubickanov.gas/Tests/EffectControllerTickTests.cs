@@ -160,6 +160,51 @@ namespace Rubickanov.GAS.Tests
         }
 
         [Test]
+        public void Tick_PeriodicEffect_RecalculatesCurrentValueOfTargetAttribute()
+        {
+            var def = GasTestFixtures.MakeEffect(
+                DurationPolicy.Duration,
+                durationSeconds: 10f,
+                period: 1f,
+                modifiers: new[] { GasTestFixtures.Mod("Attribute.Health", ModifierOp.Add, 10f) });
+            _controller.ApplyEffect(new EffectSpec(def));
+            var health = _attributes.Get(GasTestFixtures.Tag("Attribute.Health"))!;
+            float before = health.CurrentValue;
+
+            _controller.Tick(1f);
+
+            Assert.That(health.CurrentValue, Is.GreaterThan(before));
+            Assert.That(health.CurrentValue, Is.EqualTo(
+                ModifierAggregator.Aggregate(
+                    health.BaseValue, GasTestFixtures.Tag("Attribute.Health"), _controller.ActiveEffects))
+                .Within(GasTestFixtures.FloatTolerance));
+        }
+
+        [Test]
+        public void Tick_PeriodicOnOneAttribute_LeavesUnrelatedAttributeIntact()
+        {
+            var speedBuff = GasTestFixtures.MakeEffect(
+                DurationPolicy.Duration,
+                durationSeconds: 10f,
+                modifiers: new[] { GasTestFixtures.Mod("Attribute.Speed", ModifierOp.Add, 5f) });
+            _controller.ApplyEffect(new EffectSpec(speedBuff));
+            var speed = _attributes.Get(GasTestFixtures.Tag("Attribute.Speed"))!;
+            float speedAfterBuff = speed.CurrentValue;
+
+            var healthDot = GasTestFixtures.MakeEffect(
+                DurationPolicy.Duration,
+                durationSeconds: 10f,
+                period: 1f,
+                modifiers: new[] { GasTestFixtures.Mod("Attribute.Health", ModifierOp.Add, 5f) });
+            _controller.ApplyEffect(new EffectSpec(healthDot));
+
+            _controller.Tick(1f);
+
+            Assert.That(speed.CurrentValue, Is.EqualTo(speedAfterBuff).Within(GasTestFixtures.FloatTolerance));
+            Assert.That(speed.CurrentValue, Is.EqualTo(15f).Within(GasTestFixtures.FloatTolerance));
+        }
+
+        [Test]
         public void Tick_ZeroDelta_IsNoOp()
         {
             var def = GasTestFixtures.MakeEffect(DurationPolicy.Duration, durationSeconds: 5f);

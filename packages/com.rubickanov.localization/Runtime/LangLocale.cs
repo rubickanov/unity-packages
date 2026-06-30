@@ -42,8 +42,11 @@ namespace Rubickanov.Localization
 
         public bool IsEmpty => string.IsNullOrEmpty(Code);
 
+        // Normalize null/empty before comparing so default(LangLocale) (Code == null) compares
+        // equal to Empty (Code == ""): both are IsEmpty, and GetHashCode already coalesces to
+        // string.Empty, so equality must agree or the two diverge in sets/dictionaries.
         public bool Equals(LangLocale other) =>
-            string.Equals(Code, other.Code, StringComparison.OrdinalIgnoreCase);
+            string.Equals(Code ?? string.Empty, other.Code ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
         public override bool Equals(object? obj) =>
             obj is LangLocale other && Equals(other);

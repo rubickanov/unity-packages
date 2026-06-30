@@ -129,6 +129,22 @@ namespace Rubickanov.UI.Loading.Tests
                 async () => await op.Execute(new DummyProgress(), cts.Token).AsTask());
         }
 
+        [Test]
+        public async Task Execute_CancelledBeforeBegin_LeavesPriorScopeIntact()
+        {
+            var first = new RegisterViewsOperation(_scope).Add<FakeViewA>(UILayer.Screen);
+            await first.Execute(new DummyProgress(), CancellationToken.None);
+
+            var second = new RegisterViewsOperation(_scope).Add<FakeViewB>(UILayer.Popup);
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            Assert.CatchAsync<OperationCanceledException>(
+                async () => await second.Execute(new DummyProgress(), cts.Token).AsTask());
+
+            Assert.DoesNotThrow(() => _ui.Get<FakeViewA>());
+        }
+
         private sealed class DummyProgress : IProgress<float>
         {
             public void Report(float value) { }

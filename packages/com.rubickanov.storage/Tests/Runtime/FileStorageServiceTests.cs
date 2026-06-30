@@ -45,6 +45,21 @@ namespace Rubickanov.Storage.Tests
         }
 
         [Test]
+        public async Task RoundTrip_FloatWithFullPrecision_PreservesExactBits()
+        {
+            // A value whose shortest decimal differs from its default ("G") rendering — persisting
+            // with the round-trip ("R") format must read back bit-for-bit, not an approximation.
+            const float precise = 0.123456789f;
+
+            var first = new FileStorageService(_filePath);
+            await first.SetFloat("precise", precise).AsTask();
+
+            var second = new FileStorageService(_filePath);
+
+            Assert.AreEqual(precise, second.GetFloat("precise"));
+        }
+
+        [Test]
         public void Constructor_CorruptJson_BacksUpFileAndStartsEmpty()
         {
             File.WriteAllText(_filePath, "{not valid json", Encoding.UTF8);

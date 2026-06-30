@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -37,6 +38,26 @@ namespace Rubickanov.Audio.Tests
             var handle = _service.PlaySFX(default);
 
             Assert.IsFalse(handle.IsValid);
+        }
+
+        [Test]
+        public void PlaySFX_PoolEmptyAndAllSourcesFadingOut_GrowsFreshSourceInsteadOfThrowing()
+        {
+            // Regression: with the single pooled source rented and then pushed into fade-out
+            // limbo by StopSound (removed from _activeSources but not yet reclaimed by the fade
+            // task), the next RentSource saw an empty pool AND an empty active list and NRE'd on
+            // _activeSources.First!. It must instead grow a fresh source so the sound still plays.
+            SetMaxSfxSources(_config, 1);
+            using var service = new UnityAudioService(_config);
+            var sound = MakeValidSound();
+
+            var first = service.PlaySFX(sound);          // rents the only pooled source
+            service.StopSound(first, fadeOut: 10f);      // pool + active list now both empty
+
+            SoundHandle second = default;
+            Assert.DoesNotThrow(() => second = service.PlaySFX(sound),
+                "RentSource must not dereference an empty active list when every source is fading out");
+            Assert.IsTrue(second.IsValid, "a fresh source must be created when nothing is available");
         }
 
         [Test]
@@ -204,6 +225,26 @@ namespace Rubickanov.Audio.Tests
             service.SetSFXVolume(0.4f);
 
             Assert.AreEqual(0.4f, storage.GetFloat("audio_sfx"));
+        }
+
+        private static SoundConfig MakeValidSound()
+        {
+            // SoundConfig.IsValid is just `_resource != null`; a runtime-created AudioClip
+            // (an AudioResource) is enough to drive the rent/play path without a real asset.
+            var clip = AudioClip.Create("test", 1, 1, 44100, false);
+            object boxed = default(SoundConfig);
+            typeof(SoundConfig).GetField("_resource", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(boxed, clip);
+            return (SoundConfig)boxed;
+        }
+
+        private static void SetMaxSfxSources(AudioServiceConfig config, int count)
+        {
+            // MaxSfxSources has a private setter (auto-property backing field) and is read once
+            // in the constructor, so set it before building the service under test.
+            typeof(AudioServiceConfig)
+                .GetField("<MaxSfxSources>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(config, count);
         }
     }
 }

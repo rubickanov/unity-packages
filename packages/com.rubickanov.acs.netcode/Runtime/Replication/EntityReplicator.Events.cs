@@ -89,6 +89,11 @@ namespace Rubickanov.ACS.Runtime.Netcode
             }
         }
 
+        // Spawn-time subscribe: wires both server-auth and owner-auth event bindings this
+        // peer is authority for. Server-auth subscriptions land in _disposables (torn down
+        // only at despawn); owner-auth in _ownerDisposables (torn down at ownership loss).
+        // Call this ONCE at spawn — an ownership re-gain must use SubscribeOwnerEventBindings
+        // instead, or the server-auth subs in _disposables get duplicated on every regain.
         private void SubscribeEventBindingsAsAuthority()
         {
             if (_system == null) return;
@@ -104,6 +109,27 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 bool isOwnerSubmit = binding.Authority == AuthorityMode.Owner && !IsServer;
                 ref var bag = ref (binding.Authority == AuthorityMode.Owner ? ref _ownerDisposables : ref _disposables);
                 binding.SubscribeAsAuthority(ref bag, (byte)i, _system, NetworkObjectId, isOwnerSubmit);
+            }
+        }
+
+        // Ownership-transfer subscribe: wires ONLY owner-auth event bindings into
+        // _ownerDisposables, which OnLostOwnership disposes. Server-auth event bindings are
+        // deliberately skipped — they were subscribed once at spawn into _disposables and
+        // stay live across ownership changes. Re-subscribing them here (as the old shared
+        // SubscribeEventBindingsAsAuthority did) double-subscribed every server-auth Subject
+        // on a host that lost then regained ownership, so each server event fired N+1 times.
+        private void SubscribeOwnerEventBindings()
+        {
+            if (_system == null) return;
+
+            for (int i = 0; i < _eventBindings.Length; i++)
+            {
+                var binding = _eventBindings[i];
+                if (binding.Authority != AuthorityMode.Owner || !IsOwner) continue;
+
+                // Host-owner broadcasts directly to NotServer; pure client owner submits to server.
+                bool isOwnerSubmit = !IsServer;
+                binding.SubscribeAsAuthority(ref _ownerDisposables, (byte)i, _system, NetworkObjectId, isOwnerSubmit);
             }
         }
     }

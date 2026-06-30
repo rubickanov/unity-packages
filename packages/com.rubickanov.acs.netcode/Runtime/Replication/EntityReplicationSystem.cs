@@ -46,6 +46,12 @@ namespace Rubickanov.ACS.Runtime.Netcode
         private readonly List<EntityReplicator> _replicators = new();
         private EntityReplicator[] _iterationSnapshot = Array.Empty<EntityReplicator>();
         private bool _snapshotDirty;
+        // Subset of _replicators this peer owns as a non-server (the only ones OwnerTick acts
+        // on). Rebuilt from _replicators whenever membership could change — spawn/despawn
+        // (Register/Unregister) or an ownership transfer (MarkOwnershipChanged) — so OwnerTick
+        // visits ~the 1-2 owned entities instead of linear-scanning every spawned replicator.
+        private readonly List<EntityReplicator> _ownedReplicators = new();
+        private bool _ownedDirty;
         private readonly List<ulong> _broadcastTargetIds = new();
         private readonly List<EntityReplicator> _dirtyReplicatorsBuffer = new();
         private bool _broadcastTargetsDirty = true;
@@ -129,6 +135,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 _byEntityId[entityIdValue] = replicator;
             _replicators.Add(replicator);
             _snapshotDirty = true;
+            _ownedDirty = true;
         }
 
         internal void Unregister(EntityReplicator replicator)
@@ -141,10 +148,18 @@ namespace Rubickanov.ACS.Runtime.Netcode
                 _byEntityId.Remove(entityIdValue);
             _replicators.Remove(replicator);
             _snapshotDirty = true;
+            _ownedDirty = true;
 
             if (_replicators.Count == 0)
                 Dispose();
         }
+
+        /// <summary>
+        /// Flags the owned-replicator set for rebuild. Called by an <see cref="EntityReplicator"/>
+        /// from OnGainedOwnership/OnLostOwnership, since an ownership transfer of an
+        /// already-spawned entity changes OwnerTick membership without a Register/Unregister.
+        /// </summary>
+        internal void MarkOwnershipChanged() => _ownedDirty = true;
 
         // Accessors for EntityRefCodec. Explicit interface implementation keeps the
         // resolver surface invisible on the concrete class — the codec depends on the
@@ -200,6 +215,7 @@ namespace Rubickanov.ACS.Runtime.Netcode
             _byNetworkObjectId.Clear();
             _byEntityId.Clear();
             _replicators.Clear();
+            _ownedReplicators.Clear();
             _iterationSnapshot = Array.Empty<EntityReplicator>();
             s_Systems.Remove(_networkManager);
         }
@@ -342,11 +358,31 @@ namespace Rubickanov.ACS.Runtime.Netcode
             }
         }
 
+        private void RebuildOwnedReplicators()
+        {
+            _ownedReplicators.Clear();
+            for (int i = 0; i < _replicators.Count; i++)
+            {
+                var rep = _replicators[i];
+                if (rep.IsOwner && !rep.IsServer)
+                    _ownedReplicators.Add(rep);
+            }
+            _ownedDirty = false;
+        }
+
         private unsafe void OwnerTick()
         {
-            for (int e = 0; e < _iterationSnapshot.Length; e++)
+            if (_ownedDirty)
+                RebuildOwnedReplicators();
+
+            // Iterate only the owned subset, not every replicator. The per-rep guards below are
+            // retained so this stays a pure candidate-set reduction: a stale membership entry is
+            // skipped here rather than mis-sent. _ownedReplicators is only structurally changed
+            // by RebuildOwnedReplicators (above, before iteration) — Register/Unregister/ownership
+            // transfer merely set _ownedDirty — so it is never mutated mid-loop.
+            for (int e = 0; e < _ownedReplicators.Count; e++)
             {
-                var rep = _iterationSnapshot[e];
+                var rep = _ownedReplicators[e];
                 if (!rep.IsSpawned) continue;
                 if (!rep.IsOwner || rep.IsServer) continue;
 

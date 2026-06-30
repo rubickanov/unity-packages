@@ -328,6 +328,93 @@ namespace Rubickanov.StateMachine.Tests
         }
 
         [Test]
+        public void SetState_OnExitThrows_FsmRecoversAndAcceptsNextTransition()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            var c = NewState("C");
+            a.OnExitHook = () => throw new InvalidOperationException("boom");
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+            _fsm.AddState(Key.C, c);
+            _fsm.Start(Key.A);
+
+            Assert.Throws<InvalidOperationException>(() => _fsm.SetState(Key.B));
+
+            Assert.IsFalse(_fsm.HasPendingTransition);
+            a.OnExitHook = null;
+            _log.Clear();
+            _fsm.SetState(Key.C);
+
+            Assert.AreEqual(Key.C, _fsm.CurrentKey);
+            Assert.AreEqual(1, c.EnterCount);
+        }
+
+        [Test]
+        public void SetState_OnEnterThrows_FsmRecoversAndAcceptsNextTransition()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            var c = NewState("C");
+            b.OnEnterHook = () => throw new InvalidOperationException("boom");
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+            _fsm.AddState(Key.C, c);
+            _fsm.Start(Key.A);
+
+            Assert.Throws<InvalidOperationException>(() => _fsm.SetState(Key.B));
+
+            Assert.IsFalse(_fsm.HasPendingTransition);
+            _fsm.SetState(Key.C);
+
+            Assert.AreEqual(Key.C, _fsm.CurrentKey);
+            Assert.AreEqual(1, c.EnterCount);
+        }
+
+        [Test]
+        public void SetState_QueuedDuringThrowingTransition_IsClearedNotApplied()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            var c = NewState("C");
+            b.OnEnterHook = () =>
+            {
+                _fsm.SetState(Key.C);
+                throw new InvalidOperationException("boom");
+            };
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+            _fsm.AddState(Key.C, c);
+            _fsm.Start(Key.A);
+
+            Assert.Throws<InvalidOperationException>(() => _fsm.SetState(Key.B));
+
+            Assert.IsFalse(_fsm.HasPendingTransition);
+            Assert.AreEqual(0, c.EnterCount);
+        }
+
+        [Test]
+        public void Start_InitialOnEnterThrows_FsmCanBeStoppedAndRestarted()
+        {
+            var a = NewState("A");
+            var b = NewState("B");
+            a.OnEnterHook = () => throw new InvalidOperationException("boom");
+
+            _fsm.AddState(Key.A, a);
+            _fsm.AddState(Key.B, b);
+
+            Assert.Throws<InvalidOperationException>(() => _fsm.Start(Key.A));
+
+            _fsm.Stop();
+            a.OnEnterHook = null;
+            Assert.DoesNotThrow(() => _fsm.Start(Key.B));
+            Assert.AreEqual(Key.B, _fsm.CurrentKey);
+        }
+
+        [Test]
         public void GetState_ExistingKeyAndMatchingType_ReturnsState()
         {
             var a = NewState("A");

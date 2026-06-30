@@ -212,6 +212,12 @@ namespace Rubickanov.GameplayTags
             if (tag.Index <= 0 || parent.Index <= 0)
                 return false;
 
+            // Upper-bound guard: a stale/out-of-range index (e.g. a tag cached against a larger
+            // registry, or across Uninstall + Install with a smaller set) must degrade to "no
+            // match" rather than throw IndexOutOfRangeException when walking the parent chain.
+            if (tag.Index >= _parents.Count || parent.Index >= _parents.Count)
+                return false;
+
             var current = tag.Index;
             while (current > 0)
             {
