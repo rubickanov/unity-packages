@@ -24,10 +24,18 @@ namespace Rubickanov.ACS.Runtime.Persistence
 
         public override void WriteValue(object value)
         {
-            _collection.Clear();
-            if (value == null) return;
+            if (value == null)
+            {
+                _collection.Clear();
+                return;
+            }
 
+            // Cast BEFORE clearing: a type-mismatched snapshot (e.g. HashSet<long> for an
+            // ObservableHashSet<int>) throws InvalidCastException here, and the restore loop's
+            // catch keeps the live collection intact instead of leaving it wiped.
             var source = (IEnumerable<T>)value;
+
+            _collection.Clear();
             foreach (var item in source)
                 _collection.Add(item);
         }

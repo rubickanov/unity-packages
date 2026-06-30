@@ -144,7 +144,6 @@ namespace Rubickanov.Localization.Editor
             sb.AppendLine($"{indent}public static class {className}");
             sb.AppendLine($"{indent}{{");
 
-            var needsTableConst = node.Leaves.Count > 0 || !node.Children.Values.Any(c => c.Leaves.Count > 0 && c.Children.Count == 0);
             if (node.Leaves.Count > 0 || node.Children.Count == 0)
             {
                 sb.AppendLine($"{indent}    private const string Table = \"{tableName}\";");

@@ -32,10 +32,14 @@ namespace Rubickanov.DevConsole.Netcode
             CommandRegistry.Instance.PreExecuteFilter = FilterCommand;
         }
 
-        /// <summary>Removes the pre-execute filter, reverting the console to local-only mode.</summary>
+        /// <summary>Removes the pre-execute filter and built-in commands, reverting the console to local-only mode.</summary>
         public override void OnNetworkDespawn()
         {
             CommandRegistry.Instance.PreExecuteFilter = null;
+            // sv_cheats was registered in OnNetworkSpawn and closes over this bridge's
+            // NetworkVariable; leaving it behind on despawn keeps a stale command alive and
+            // makes a later respawn's re-Register collide. Mirror the spawn-time registration.
+            CommandRegistry.Instance.Unregister("sv_cheats");
         }
 
         void ScanCommandAttributes()
@@ -109,10 +113,13 @@ namespace Rubickanov.DevConsole.Netcode
         {
             var senderId = rpcParams.Receive.SenderClientId;
 
-            // Temporarily remove filter to avoid recursion
-            var filter = CommandRegistry.Instance.PreExecuteFilter;
-            CommandRegistry.Instance.PreExecuteFilter = null;
-
+            // SECURITY: keep the pre-execute filter installed so cheat protection and command
+            // domains are re-enforced here on the server. rawInput comes from a client that may
+            // be modified, so the server must never trust that the client already passed the
+            // filter — nor parse rawInput ourselves (aliases would let a cheat slip through).
+            // Routing through Execute re-runs FilterCommand against the fully resolved command.
+            // No recursion: on the server FilterCommand runs Server-domain commands locally
+            // (NetworkManager.IsServer is true) instead of sending the RPC again.
             ExecutingClientId = senderId;
             try
             {
@@ -126,7 +133,6 @@ namespace Rubickanov.DevConsole.Netcode
             finally
             {
                 ExecutingClientId = null;
-                CommandRegistry.Instance.PreExecuteFilter = filter;
             }
         }
 

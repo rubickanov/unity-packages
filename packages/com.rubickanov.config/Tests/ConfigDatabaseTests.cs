@@ -173,6 +173,17 @@ namespace Rubickanov.Config.Tests
         }
 
         [Test]
+        public void Get_NullId_ReturnsNull()
+        {
+            _database.SetItems(new List<TestData>
+            {
+                CreateTestData("item1", 10)
+            });
+
+            Assert.IsNull(_database.Get(null!));
+        }
+
+        [Test]
         public void Get_EmptyIdItems_AreSkippedNotThrown()
         {
             _database.SetItems(new List<TestData>

@@ -2,7 +2,6 @@
     "name": "Rubickanov.StateMachine.Async",
     "rootNamespace": "Rubickanov.StateMachine",
     "references": [
-        "Rubickanov.StateMachine.Runtime",
         "UniTask"
     ],
     "includePlatforms": [],

@@ -100,9 +100,20 @@ namespace Rubickanov.StateMachine
             _currentState = state;
             _transitionDepth = 0;
 
-            _isTransitioning = true;
-            await state.OnEnterAsync(ct);
-            _isTransitioning = false;
+            try
+            {
+                _isTransitioning = true;
+                await state.OnEnterAsync(ct);
+                _isTransitioning = false;
+            }
+            catch
+            {
+                _isTransitioning = false;
+                _transitionDepth = 0;
+                _hasPendingTransition = false;
+                _pendingCancellationToken = default;
+                throw;
+            }
 
             if (_hasPendingTransition)
             {
@@ -164,43 +175,51 @@ namespace Rubickanov.StateMachine
             var nextKey = key;
             var nextCt = ct;
 
-            while (true)
+            try
             {
-                _transitionDepth++;
-                if (_transitionDepth > MaxTransitionDepth)
+                while (true)
                 {
-                    _transitionDepth = 0;
+                    _transitionDepth++;
+                    if (_transitionDepth > MaxTransitionDepth)
+                    {
+                        throw new InvalidOperationException(
+                            $"Maximum transition depth ({MaxTransitionDepth}) exceeded. Possible infinite loop detected.");
+                    }
+
+                    var previousKey = _currentKey;
+                    var previousState = _currentState!;
+
+                    _isTransitioning = true;
+                    await previousState.OnExitAsync(nextCt);
+
+                    var nextState = _states[nextKey];
+                    _currentKey = nextKey;
+                    _currentState = nextState;
+
+                    await nextState.OnEnterAsync(nextCt);
+                    _isTransitioning = false;
+
+                    StateChanged?.Invoke(previousKey, nextKey);
+
+                    if (!_hasPendingTransition)
+                    {
+                        _transitionDepth = 0;
+                        return;
+                    }
+
                     _hasPendingTransition = false;
+                    nextKey = _pendingKey;
+                    nextCt = _pendingCancellationToken;
                     _pendingCancellationToken = default;
-                    throw new InvalidOperationException(
-                        $"Maximum transition depth ({MaxTransitionDepth}) exceeded. Possible infinite loop detected.");
                 }
-
-                var previousKey = _currentKey;
-                var previousState = _currentState!;
-
-                _isTransitioning = true;
-                await previousState.OnExitAsync(nextCt);
-
-                var nextState = _states[nextKey];
-                _currentKey = nextKey;
-                _currentState = nextState;
-
-                await nextState.OnEnterAsync(nextCt);
+            }
+            catch
+            {
                 _isTransitioning = false;
-
-                StateChanged?.Invoke(previousKey, nextKey);
-
-                if (!_hasPendingTransition)
-                {
-                    _transitionDepth = 0;
-                    return;
-                }
-
+                _transitionDepth = 0;
                 _hasPendingTransition = false;
-                nextKey = _pendingKey;
-                nextCt = _pendingCancellationToken;
                 _pendingCancellationToken = default;
+                throw;
             }
         }
     }

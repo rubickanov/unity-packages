@@ -56,7 +56,9 @@ namespace Rubickanov.Storage
 
         public UniTask SetFloat(string key, float value)
         {
-            _data[key] = value.ToString(CultureInfo.InvariantCulture);
+            // "R" (round-trip) guarantees the parsed value equals the original; the default
+            // format can drop low-order bits and silently corrupt persisted floats.
+            _data[key] = value.ToString("R", CultureInfo.InvariantCulture);
             return SaveAsync();
         }
 

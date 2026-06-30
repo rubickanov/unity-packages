@@ -15,7 +15,20 @@ namespace Rubickanov.Config
             where T : Object
         {
             var handle = Addressables.LoadAssetAsync<T>(address);
-            await handle.WithCancellation(ct);
+            try
+            {
+                await handle.WithCancellation(ct);
+            }
+            catch
+            {
+                // Cancellation or a faulted load throws before the handle reaches the caller
+                // as a release token, so Release would never be called for it. Addressables
+                // requires releasing even faulted/cancelled handles — do it here before rethrowing.
+                if (handle.IsValid())
+                    Addressables.Release(handle);
+                throw;
+            }
+
             return (handle.Result, handle);
         }
 

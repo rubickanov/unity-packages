@@ -24,10 +24,18 @@ namespace Rubickanov.ACS.Runtime.Persistence
 
         public override void WriteValue(object value)
         {
-            _collection.Clear();
-            if (value == null) return;
+            if (value == null)
+            {
+                _collection.Clear();
+                return;
+            }
 
+            // Cast BEFORE clearing: a type-mismatched snapshot (e.g. Dictionary<string,long>
+            // for an ObservableDictionary<string,int>) throws InvalidCastException here, and the
+            // restore loop's catch keeps the live collection intact instead of leaving it wiped.
             var source = (IEnumerable<KeyValuePair<TKey, TValue>>)value;
+
+            _collection.Clear();
             foreach (var kvp in source)
                 _collection.Add(kvp.Key, kvp.Value);
         }

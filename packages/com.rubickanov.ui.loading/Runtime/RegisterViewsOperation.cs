@@ -63,6 +63,10 @@ namespace Rubickanov.UI.Loading
 
             progress.Report(0f);
 
+            // Bail before Begin(): opening a new scope auto-disposes the prior one, so a run
+            // cancelled here would otherwise tear down still-valid UI state for a no-op.
+            ct.ThrowIfCancellationRequested();
+
             var scope = _scopeService.Begin();
 
             for (int i = 0; i < _registrations.Count; i++)

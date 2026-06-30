@@ -4,13 +4,14 @@ using Rubickanov.GameplayTags;
 
 namespace Rubickanov.GAS
 {
-    public sealed class EffectController
+    public sealed class EffectController : IDisposable
     {
         private readonly AttributeSet _attributes;
         private readonly GameplayTagContainer _tags;
         private readonly List<ActiveEffect> _activeEffects = new();
         private readonly HashSet<GameplayTag> _dirtyAttributes = new();
         private int _nextHandleId = 1;
+        private bool _disposed;
 
         public IReadOnlyList<ActiveEffect> ActiveEffects => _activeEffects;
 
@@ -34,6 +35,19 @@ namespace Rubickanov.GAS
             _attributes = attributes;
             _tags = tags;
             _attributes.BaseValueChanged += OnBaseValueChanged;
+        }
+
+        /// <summary>
+        /// Detaches from <see cref="AttributeSet.BaseValueChanged"/>. Call when the controller
+        /// outlives its usefulness but the <see cref="AttributeSet"/> lives on (re-init, pooling,
+        /// respawn reusing the same attribute set), otherwise the stale controller stays
+        /// subscribed and is kept alive by the event. Idempotent.
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _attributes.BaseValueChanged -= OnBaseValueChanged;
         }
 
         public ActiveEffectHandle ApplyEffect(EffectSpec spec)
@@ -65,8 +79,9 @@ namespace Rubickanov.GAS
             {
                 ApplyInstantModifiers(spec);
                 CollectModifierAttributes(def.Modifiers, _dirtyAttributes);
+                var instantRemovedSnapshot = DetachRemoved(removedDuringApply);
                 RecalculateAttributes(_dirtyAttributes);
-                FireRemovedBatch(removedDuringApply);
+                FireRemoved(instantRemovedSnapshot);
                 return ActiveEffectHandle.Invalid;
             }
 
@@ -94,9 +109,10 @@ namespace Rubickanov.GAS
                 _tags.AddTag(tag);
 
             CollectModifierAttributes(def.Modifiers, _dirtyAttributes);
+            var removedSnapshot = DetachRemoved(removedDuringApply);
             RecalculateAttributes(_dirtyAttributes);
 
-            FireRemovedBatch(removedDuringApply);
+            FireRemoved(removedSnapshot);
             EffectApplied?.Invoke(activeEffect);
 
             return handle;
@@ -147,8 +163,9 @@ namespace Rubickanov.GAS
             int removedCount = removedEffects.Count;
             if (removedCount == 0) return 0;
 
+            var removedSnapshot = DetachRemoved(removedEffects);
             RecalculateAttributes(_dirtyAttributes);
-            FireRemovedBatch(removedEffects);
+            FireRemoved(removedSnapshot);
             return removedCount;
         }
 
@@ -170,8 +187,9 @@ namespace Rubickanov.GAS
             }
 
             _activeEffects.Clear();
+            var removedSnapshot = DetachRemoved(removedEffects);
             RecalculateAttributes(_dirtyAttributes);
-            FireRemovedBatch(removedEffects);
+            FireRemoved(removedSnapshot);
             return count;
         }
 
@@ -185,6 +203,7 @@ namespace Rubickanov.GAS
             bool dirty = false;
             var expired = _pendingRemoved;
             expired.Clear();
+            _dirtyAttributes.Clear();
 
             for (int i = _activeEffects.Count - 1; i >= 0; i--)
             {
@@ -201,10 +220,18 @@ namespace Rubickanov.GAS
                     if (periodicWindow > 0f)
                     {
                         effect.AdvancePeriod(periodicWindow);
+                        bool periodicFired = false;
                         while (effect.PeriodTimer >= effect.Def.Period)
                         {
                             effect.ConsumePeriod(effect.Def.Period);
                             ApplyPeriodicModifiers(effect);
+                            periodicFired = true;
+                        }
+
+                        if (periodicFired)
+                        {
+                            // Only the attributes this periodic modifier writes need recalculating.
+                            CollectModifierAttributes(effect.Def.Modifiers, _dirtyAttributes);
                             dirty = true;
                         }
                     }
@@ -215,6 +242,8 @@ namespace Rubickanov.GAS
                     effect.DecrementDuration(deltaTime);
                     if (effect.RemainingDuration <= 0f)
                     {
+                        // Removing this effect changes only the attributes its modifiers target.
+                        CollectModifierAttributes(effect.Def.Modifiers, _dirtyAttributes);
                         RevokeGrantedTags(effect);
                         _activeEffects.RemoveAt(i);
                         expired.Add(effect);
@@ -223,8 +252,11 @@ namespace Rubickanov.GAS
                 }
             }
 
-            if (dirty) RecalculateAllAttributes();
-            FireRemovedBatch(expired);
+            var expiredSnapshot = DetachRemoved(expired);
+            // Recalculate only the touched attributes (same targeted pattern as Apply/RemoveEffect),
+            // not the whole set: a single DoT/regen otherwise pays O(attributes × effects × modifiers).
+            if (dirty) RecalculateAttributes(_dirtyAttributes);
+            FireRemoved(expiredSnapshot);
         }
 
         private bool CheckApplicationConditions(EffectDef def)
@@ -301,8 +333,20 @@ namespace Rubickanov.GAS
 
         private void RecalculateAttributes(HashSet<GameplayTag> tags)
         {
+            int count = tags.Count;
+            if (count == 0) return;
+
+            // Snapshot the dirty tags before recalculating. RecalculateAttribute fires
+            // GameplayAttribute.ValueChanged, and a handler may reentrantly Apply/RemoveEffect,
+            // which clears the shared _dirtyAttributes. Iterating a local copy keeps this loop
+            // valid through that reentrancy instead of throwing "Collection was modified".
+            Span<GameplayTag> buffer = count <= 32 ? stackalloc GameplayTag[count] : new GameplayTag[count];
+            int i = 0;
             foreach (var tag in tags)
-                RecalculateAttribute(tag);
+                buffer[i++] = tag;
+
+            for (int j = 0; j < count; j++)
+                RecalculateAttribute(buffer[j]);
         }
 
         private void RecalculateAttribute(GameplayTag tag)
@@ -313,23 +357,21 @@ namespace Rubickanov.GAS
             attribute.SetCurrentValue(newValue);
         }
 
-        private void RecalculateAllAttributes()
+        // Detaches the pending-removed effects into an owned array and clears the shared buffer.
+        // Called BEFORE recalculation so a ValueChanged-triggered reentrant Apply/RemoveEffect
+        // (which reuses _pendingRemoved) cannot wipe this call's removals before they are fired.
+        private static ActiveEffect[] DetachRemoved(List<ActiveEffect> removed)
         {
-            foreach (var kvp in _attributes.All)
-            {
-                var attribute = kvp.Value;
-                float newValue = ModifierAggregator.Aggregate(attribute.BaseValue, kvp.Key, _activeEffects);
-                attribute.SetCurrentValue(newValue);
-            }
-        }
-
-        private void FireRemovedBatch(List<ActiveEffect> removed)
-        {
-            if (removed.Count == 0) return;
+            if (removed.Count == 0) return Array.Empty<ActiveEffect>();
             var snapshot = removed.ToArray();
             removed.Clear();
-            for (int i = 0; i < snapshot.Length; i++)
-                EffectRemoved?.Invoke(snapshot[i]);
+            return snapshot;
+        }
+
+        private void FireRemoved(ActiveEffect[] removed)
+        {
+            for (int i = 0; i < removed.Length; i++)
+                EffectRemoved?.Invoke(removed[i]);
         }
 
         private readonly List<ActiveEffect> _pendingRemoved = new();

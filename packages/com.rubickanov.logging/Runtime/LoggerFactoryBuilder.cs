@@ -44,6 +44,13 @@ namespace Rubickanov.Logging
                     options.PrettyStacktrace = settings.PrettyStacktrace;
                     ConfigureFormatter(options);
                 });
+
+                // UnityLogInterceptor forwards Application.logMessageReceived under the "Unity"
+                // category. Without this filter that re-enters the Unity Debug provider and calls
+                // Debug.Log again, so every original Debug.Log/LogError shows up a second time in
+                // the console. Drop the "Unity" category from the Debug provider ONLY — the file
+                // provider still captures intercepted Unity logs.
+                logging.AddFilter<ZLoggerUnityDebugLoggerProvider>("Unity", LogLevel.None);
 #elif UNITY_SERVER
                 logging.AddZLoggerConsole(options => ConfigureFormatter(options));
 #endif

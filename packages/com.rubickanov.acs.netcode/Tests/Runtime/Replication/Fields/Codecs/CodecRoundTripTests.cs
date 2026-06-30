@@ -1,3 +1,4 @@
+using System.Text;
 using NUnit.Framework;
 using Rubickanov.ACS.Runtime.Netcode;
 using Unity.Collections;
@@ -224,6 +225,62 @@ namespace Rubickanov.ACS.Runtime.Netcode.Tests
             Assert.AreEqual(input.x, result.x, 0f);
             Assert.AreEqual(input.y, result.y, 0f);
             Assert.AreEqual(input.z, result.z, 0f);
+        }
+
+        // ---- StringKeyCodec -----------------------------------------------------
+
+        private static string RoundTripKey(string value, out int bytesWritten)
+        {
+            var codec = StringKeyCodec.Instance;
+            var writer = new FastBufferWriter(1024, Allocator.Temp);
+            try
+            {
+                int before = writer.Position;
+                codec.Write(writer, value);
+                bytesWritten = writer.Position - before;
+
+                var reader = new FastBufferReader(writer, Allocator.Temp);
+                try { return codec.Read(reader); }
+                finally { reader.Dispose(); }
+            }
+            finally { writer.Dispose(); }
+        }
+
+        [Test]
+        public void StringKeyCodec_EmptyString_RoundTripsAsLengthPrefixOnly()
+        {
+            var result = RoundTripKey(string.Empty, out int bytes);
+            Assert.AreEqual(string.Empty, result);
+            Assert.AreEqual(sizeof(ushort), bytes);
+        }
+
+        [Test]
+        public void StringKeyCodec_ShortAsciiKey_RoundTrips()
+        {
+            var result = RoundTripKey("player_health", out int bytes);
+            Assert.AreEqual("player_health", result);
+            Assert.AreEqual(sizeof(ushort) + 13, bytes);
+        }
+
+        [Test]
+        public void StringKeyCodec_MultiByteUtf8Key_RoundTrips()
+        {
+            // Cyrillic (2 bytes/char) + emoji (4 bytes) — guards the GetByteCount/GetBytes
+            // pairing in the stack-buffer encode path against char-count vs byte-count bugs.
+            const string key = "урон_🔥";
+            var result = RoundTripKey(key, out int bytes);
+            Assert.AreEqual(key, result);
+            Assert.AreEqual(sizeof(ushort) + Encoding.UTF8.GetByteCount(key), bytes);
+        }
+
+        [Test]
+        public void StringKeyCodec_KeyLongerThanStackCap_RoundTrips()
+        {
+            // 300 bytes > the 256-byte stack-encode cap → exercises the heap-buffer fallback.
+            var key = new string('x', 300);
+            var result = RoundTripKey(key, out int bytes);
+            Assert.AreEqual(key, result);
+            Assert.AreEqual(sizeof(ushort) + 300, bytes);
         }
     }
 }

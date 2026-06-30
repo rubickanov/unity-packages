@@ -1,9 +1,11 @@
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using ObservableCollections;
 using R3;
 using Rubickanov.ACS.Runtime;
 using Rubickanov.ACS.Runtime.Persistence;
+using UnityEngine.TestTools;
 
 namespace Rubickanov.ACS.Tests.Persistence
 {
@@ -125,6 +127,70 @@ namespace Rubickanov.ACS.Tests.Persistence
             Assert.AreEqual(1, tags.Tags.Count);
             Assert.IsTrue(tags.Tags.Contains(7));
             Assert.IsFalse(tags.Tags.Contains(42));
+        }
+
+        [Test]
+        public void Restore_ObservableList_TypeMismatch_PreservesLiveCollection()
+        {
+            // Regression: WriteValue used to Clear() before the (IEnumerable<int>) cast, so a
+            // type-mismatched snapshot (here List<long> for an ObservableList<int>) left the live
+            // collection emptied — the cast threw after the wipe. Casting before Clear keeps the
+            // existing contents intact when the restore loop swallows the mismatch.
+            LogAssert.Expect(UnityEngine.LogType.Error, new Regex("type mismatch"));
+
+            var target = new Entity();
+            var inv = target.Require<InventoryAspect>();
+            inv.Items.Add(999);
+            inv.Items.Add(888);
+
+            var snap = new AspectSnapshot();
+            var data = new AspectData();
+            data.Fields["Items"] = new List<long> { 1, 2 };
+            snap.Aspects[typeof(InventoryAspect).FullName] = data;
+
+            target.Restore(snap);
+
+            CollectionAssert.AreEqual(new[] { 999, 888 }, inv.Items);
+        }
+
+        [Test]
+        public void Restore_ObservableDictionary_TypeMismatch_PreservesLiveCollection()
+        {
+            LogAssert.Expect(UnityEngine.LogType.Error, new Regex("type mismatch"));
+
+            var target = new Entity();
+            var cd = target.Require<CooldownsAspect>();
+            cd.Cooldowns["stale"] = 99f;
+
+            var snap = new AspectSnapshot();
+            var data = new AspectData();
+            data.Fields["Cooldowns"] = new Dictionary<string, int> { ["dash"] = 2 };
+            snap.Aspects[typeof(CooldownsAspect).FullName] = data;
+
+            target.Restore(snap);
+
+            Assert.AreEqual(1, cd.Cooldowns.Count);
+            Assert.AreEqual(99f, cd.Cooldowns["stale"]);
+        }
+
+        [Test]
+        public void Restore_ObservableHashSet_TypeMismatch_PreservesLiveCollection()
+        {
+            LogAssert.Expect(UnityEngine.LogType.Error, new Regex("type mismatch"));
+
+            var target = new Entity();
+            var tags = target.Require<TagsAspect>();
+            tags.Tags.Add(42);
+
+            var snap = new AspectSnapshot();
+            var data = new AspectData();
+            data.Fields["Tags"] = new HashSet<long> { 7 };
+            snap.Aspects[typeof(TagsAspect).FullName] = data;
+
+            target.Restore(snap);
+
+            Assert.AreEqual(1, tags.Tags.Count);
+            Assert.IsTrue(tags.Tags.Contains(42));
         }
 
         [Test]

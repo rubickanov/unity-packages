@@ -36,10 +36,15 @@ namespace Rubickanov.Netcode.Transports
             _isServer = true;
             _connectionStatusChanged = Callback<SteamNetConnectionStatusChangedCallback_t>.Create(OnConnectionStatusChanged);
 
+            // Steam fetches relay network config asynchronously; kick it off before opening the
+            // listen socket (as StartClient does) so the first incoming P2P connections don't
+            // stall waiting for the relay network to come online.
 #if UNITY_SERVER
+            SteamGameServerNetworkingUtils.InitRelayNetworkAccess();
             _listenSocket = SteamGameServerNetworkingSockets.CreateListenSocketP2P(0, 0, null);
             _pollGroup = SteamGameServerNetworkingSockets.CreatePollGroup();
 #else
+            SteamNetworkingUtils.InitRelayNetworkAccess();
             _listenSocket = SteamNetworkingSockets.CreateListenSocketP2P(0, 0, null);
             _pollGroup = SteamNetworkingSockets.CreatePollGroup();
 #endif
@@ -86,6 +91,10 @@ namespace Rubickanov.Netcode.Transports
             int sendFlags = networkDelivery switch
             {
                 NetworkDelivery.Unreliable => Constants.k_nSteamNetworkingSend_Unreliable,
+                // CAVEAT: Steam has no unreliable-sequenced primitive. NoNagle only disables Nagle
+                // batching — it does NOT drop stale/out-of-order packets, so NGO's "sequenced"
+                // contract (a newer packet supersedes an older one) is not honored here and a late
+                // packet can be applied after a newer one. Documented in the README delivery table.
                 NetworkDelivery.UnreliableSequenced => Constants.k_nSteamNetworkingSend_UnreliableNoNagle,
                 NetworkDelivery.Reliable => Constants.k_nSteamNetworkingSend_Reliable,
                 NetworkDelivery.ReliableSequenced => Constants.k_nSteamNetworkingSend_ReliableNoNagle,

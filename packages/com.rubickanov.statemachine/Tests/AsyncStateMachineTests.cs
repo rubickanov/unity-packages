@@ -514,6 +514,93 @@ namespace Rubickanov.StateMachine.Tests
         }
 
         [Test]
+        public async Task SetStateAsync_CancelledDuringOnEnter_FsmRecoversAndAcceptsNextTransition()
+        {
+            var cts = new CancellationTokenSource();
+            var c = NewState("C");
+
+            _fsm.AddState(Key.A, NewState("A"));
+            _fsm.AddState(Key.B, new AsyncCallbackState(onEnterAsync: ct =>
+            {
+                var tcs = new UniTaskCompletionSource();
+                ct.Register(() => tcs.TrySetCanceled());
+                return tcs.Task;
+            }));
+            _fsm.AddState(Key.C, c);
+            await _fsm.StartAsync(Key.A);
+
+            var transition = _fsm.SetStateAsync(Key.B, cts.Token);
+            cts.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await transition);
+
+            Assert.IsFalse(_fsm.HasPendingTransition);
+            await _fsm.SetStateAsync(Key.C);
+
+            Assert.AreEqual(Key.C, _fsm.CurrentKey);
+            Assert.AreEqual(1, c.EnterCount);
+        }
+
+        [Test]
+        public async Task SetStateAsync_CancelledDuringOnExit_FsmRecoversAndAcceptsNextTransition()
+        {
+            var cts = new CancellationTokenSource();
+            var c = NewState("C");
+
+            // The cancelled transition leaves the FSM still in A (OnExit aborted before the
+            // state advanced), so the recovery transition to C must exit A a second time. A's
+            // first exit blocks until cancelled; every later exit completes normally — otherwise
+            // the recovery exit (given a non-cancellable token) would hang forever.
+            int exitCalls = 0;
+            _fsm.AddState(Key.A, new AsyncCallbackState(onExitAsync: ct =>
+            {
+                if (++exitCalls > 1)
+                    return UniTask.CompletedTask;
+
+                var tcs = new UniTaskCompletionSource();
+                ct.Register(() => tcs.TrySetCanceled());
+                return tcs.Task;
+            }));
+            _fsm.AddState(Key.B, NewState("B"));
+            _fsm.AddState(Key.C, c);
+            await _fsm.StartAsync(Key.A);
+
+            var transition = _fsm.SetStateAsync(Key.B, cts.Token);
+            cts.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await transition);
+
+            Assert.IsFalse(_fsm.HasPendingTransition);
+            await _fsm.SetStateAsync(Key.C);
+
+            Assert.AreEqual(Key.C, _fsm.CurrentKey);
+            Assert.AreEqual(1, c.EnterCount);
+        }
+
+        [Test]
+        public async Task StartAsync_CancelledDuringInitialOnEnter_FsmCanBeStoppedAndRestarted()
+        {
+            var cts = new CancellationTokenSource();
+            var b = NewState("B");
+
+            _fsm.AddState(Key.A, new AsyncCallbackState(onEnterAsync: ct =>
+            {
+                var tcs = new UniTaskCompletionSource();
+                ct.Register(() => tcs.TrySetCanceled());
+                return tcs.Task;
+            }));
+            _fsm.AddState(Key.B, b);
+
+            var start = _fsm.StartAsync(Key.A, cts.Token);
+            cts.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await start);
+
+            await _fsm.StopAsync();
+            await _fsm.StartAsync(Key.B);
+
+            Assert.AreEqual(Key.B, _fsm.CurrentKey);
+            Assert.AreEqual(1, b.EnterCount);
+        }
+
+        [Test]
         public async Task StopAsync_CancelledDuringOnExitAwait_PropagatesCancellation()
         {
             var cts = new CancellationTokenSource();

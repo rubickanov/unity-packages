@@ -59,6 +59,9 @@ namespace Rubickanov.UI.UIToolkit
 
             if (_delay <= 0f)
             {
+                // CancelScheduledShow() above set _cancelled = true; clear it so the immediate
+                // ShowTooltip() isn't swallowed by its own `if (_cancelled) return;` guard.
+                _cancelled = false;
                 ShowTooltip();
                 return;
             }

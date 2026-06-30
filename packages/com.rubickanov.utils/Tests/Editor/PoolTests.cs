@@ -185,6 +185,26 @@ namespace Rubickanov.Utils.Tests
         }
 
         [Test]
+        public void Constructor_NonPositiveMaxActive_ThrowsArgumentOutOfRange()
+        {
+            var prefab = CreatePrefab();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => _ = new EvictingPool<BoxCollider>(prefab, maxActive: 0));
+
+            DestroyImmediate(prefab);
+        }
+
+        [Test]
+        public void Constructor_NegativeEvictBuffer_ThrowsArgumentOutOfRange()
+        {
+            var prefab = CreatePrefab();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => _ = new EvictingPool<BoxCollider>(prefab, maxActive: 2, evictBuffer: -1));
+
+            DestroyImmediate(prefab);
+        }
+
+        [Test]
         public void Get_AtCapacity_EvictsOldestFIFO()
         {
             // Unity ObjectPool is a LIFO stack: the evicted 'a' is returned to the pool and

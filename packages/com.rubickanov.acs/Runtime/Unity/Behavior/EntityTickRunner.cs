@@ -18,6 +18,8 @@ namespace Rubickanov.ACS.Runtime
         // sibling mid-Tick doesn't corrupt iteration. Reusing _scratch avoids
         // the per-frame allocation that a fresh ToArray() would introduce.
         private readonly List<ITickable> _scratch = new();
+        // Rebuild _scratch only when the set actually changed, not every frame.
+        private bool _scratchDirty;
 
         /// <summary>
         /// Registers <paramref name="tickable"/> so it receives <see cref="ITickable.Tick"/>
@@ -32,6 +34,7 @@ namespace Rubickanov.ACS.Runtime
             if (tickable == null) return;
             if (_tickables.Contains(tickable)) return;
             _tickables.Add(tickable);
+            _scratchDirty = true;
         }
 
         /// <summary>
@@ -45,7 +48,8 @@ namespace Rubickanov.ACS.Runtime
         public void Unregister(ITickable tickable)
         {
             if (tickable == null) return;
-            _tickables.Remove(tickable);
+            if (_tickables.Remove(tickable))
+                _scratchDirty = true;
         }
 
         private void Update()
@@ -54,8 +58,15 @@ namespace Rubickanov.ACS.Runtime
             // e.g. a tickable unregistering itself after its work, or spawning
             // a sibling — do not corrupt iteration for the current frame.
             // A freshly registered tickable is picked up next frame.
-            _scratch.Clear();
-            _scratch.AddRange(_tickables);
+            // Rebuild only when the set changed since the last snapshot; otherwise
+            // _scratch already equals _tickables, so skip the per-frame copy. Cleared
+            // before iterating, so a mutation during Tick re-dirties for next frame.
+            if (_scratchDirty)
+            {
+                _scratch.Clear();
+                _scratch.AddRange(_tickables);
+                _scratchDirty = false;
+            }
 
             float dt = Time.deltaTime;
             for (int i = 0; i < _scratch.Count; i++)

@@ -11,6 +11,7 @@ namespace Rubickanov.DevConsole
         private static CommandBindings? _instance;
 
         private readonly Dictionary<Key, string> _bindings = new();
+        private readonly List<string> _pendingExecute = new();
         private const string PrefsKey = "DevConsole_Bindings";
 
         /// <summary>All registered bindings.</summary>
@@ -59,11 +60,17 @@ namespace Rubickanov.DevConsole
             if (DevConsoleIMGUI.IsOpen) return;
             if (DevConsoleUIToolkit.Instance != null && DevConsoleUIToolkit.Instance.IsVisible) return;
 
+            // Collect first, then execute. A bound command may be `bind`/`unbind`, which mutates
+            // _bindings — executing inside the foreach would throw "Collection was modified".
+            _pendingExecute.Clear();
             foreach (var kvp in _bindings)
             {
                 if (Keyboard.current[kvp.Key].wasPressedThisFrame)
-                    CommandRegistry.Instance.Execute(kvp.Value);
+                    _pendingExecute.Add(kvp.Value);
             }
+
+            for (int i = 0; i < _pendingExecute.Count; i++)
+                CommandRegistry.Instance.Execute(_pendingExecute[i]);
         }
 
         /// <summary>Binds a key to a command string.</summary>
