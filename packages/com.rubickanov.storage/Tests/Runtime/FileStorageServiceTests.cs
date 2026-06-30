@@ -101,6 +101,30 @@ namespace Rubickanov.Storage.Tests
         }
 
         [Test]
+        public async Task Save_SwapsTempFileIn_LeavesNoTempBehind()
+        {
+            var service = new FileStorageService(_filePath);
+            await service.SetString("a", "1").AsTask();
+
+            Assert.IsTrue(File.Exists(_filePath));
+            Assert.IsFalse(File.Exists(_filePath + ".tmp"), "Temp file should be swapped in, not left behind.");
+        }
+
+        [Test]
+        public async Task Save_OverExistingFile_ReplacesContentAndKeepsNoTemp()
+        {
+            var first = new FileStorageService(_filePath);
+            await first.SetString("a", "1").AsTask();
+
+            var second = new FileStorageService(_filePath);
+            await second.SetString("a", "2").AsTask();
+
+            Assert.IsFalse(File.Exists(_filePath + ".tmp"));
+            var reloaded = new FileStorageService(_filePath);
+            Assert.AreEqual("2", reloaded.GetString("a"));
+        }
+
+        [Test]
         public async Task Clear_WipesAllKeysOnDisk()
         {
             var service = new FileStorageService(_filePath);

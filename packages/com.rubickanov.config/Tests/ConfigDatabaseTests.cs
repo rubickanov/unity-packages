@@ -173,6 +173,19 @@ namespace Rubickanov.Config.Tests
         }
 
         [Test]
+        public void Get_DuplicateIds_ThrowsOnEverySubsequentCall()
+        {
+            _database.SetItems(new List<TestData>
+            {
+                CreateTestData("dup", 1),
+                CreateTestData("dup", 3)
+            });
+
+            Assert.Throws<InvalidOperationException>(() => _database.Get("dup"));
+            Assert.Throws<InvalidOperationException>(() => _database.Get("dup"));
+        }
+
+        [Test]
         public void Get_NullId_ReturnsNull()
         {
             _database.SetItems(new List<TestData>

@@ -91,7 +91,11 @@ namespace Rubickanov.Config
 
         private void BuildLookup()
         {
-            _lookup = new Dictionary<string, TData>(_items.Count);
+            // Build into a local and publish to _lookup only after the duplicate check passes.
+            // Assigning a partial dictionary up front means a later throw still leaves _lookup
+            // non-null, so every subsequent Get would skip the rebuild and silently succeed —
+            // same input throwing once then succeeding.
+            var lookup = new Dictionary<string, TData>(_items.Count);
             List<string>? duplicates = null;
 
             for (int i = 0; i < _items.Count; i++)
@@ -103,7 +107,7 @@ namespace Rubickanov.Config
                     continue;
                 }
 
-                if (!_lookup.TryAdd(id, item))
+                if (!lookup.TryAdd(id, item))
                 {
                     duplicates ??= new List<string>();
                     duplicates.Add(id);
@@ -115,6 +119,8 @@ namespace Rubickanov.Config
                 throw new InvalidOperationException(
                     $"{GetType().Name} has duplicate Id(s): {string.Join(", ", duplicates)}");
             }
+
+            _lookup = lookup;
         }
     }
 }

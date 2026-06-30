@@ -3,6 +3,7 @@
     "rootNamespace": "Rubickanov.Localization.Tests",
     "references": [
         "Rubickanov.Localization.Runtime",
+        "Rubickanov.Localization.Editor",
         "Unity.Localization",
         "UniTask"
     ],

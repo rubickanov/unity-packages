@@ -38,15 +38,44 @@ namespace Rubickanov.Loading
 
             _asyncOp.allowSceneActivation = false;
 
-            while (_asyncOp.progress < 0.9f)
+            try
             {
-                ct.ThrowIfCancellationRequested();
-                progress.Report(_asyncOp.progress / 0.9f);
-                await UniTask.Yield(ct);
+                while (_asyncOp.progress < 0.9f)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    progress.Report(_asyncOp.progress / 0.9f);
+                    await UniTask.Yield(ct);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // The scene is ~90% loaded but never activated. Without cleanup it leaks for the
+                // rest of the session (esp. Additive — nothing later evicts it). Activate it so the
+                // async op can finish, then unload it, before propagating the cancellation.
+                await UnloadPartialScene();
+                throw;
             }
 
             progress.Report(1f);
             _readyToActivate = true;
+        }
+
+        private async UniTask UnloadPartialScene()
+        {
+            var op = _asyncOp;
+            _asyncOp = null;
+            _readyToActivate = false;
+            if (op == null)
+                return;
+
+            op.allowSceneActivation = true;
+            await UniTask.WaitUntil(() => op.isDone);
+
+            // Unity forbids unloading the last remaining scene. In Single mode the activated scene
+            // has already replaced the previous one, so there's nothing safe to unload anyway.
+            var scene = SceneManager.GetSceneByName(_sceneName);
+            if (scene.IsValid() && scene.isLoaded && SceneManager.sceneCount > 1)
+                await SceneManager.UnloadSceneAsync(scene);
         }
 
         public async UniTask Activate(CancellationToken ct)

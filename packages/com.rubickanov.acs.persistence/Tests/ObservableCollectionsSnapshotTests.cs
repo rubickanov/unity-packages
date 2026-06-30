@@ -174,6 +174,34 @@ namespace Rubickanov.ACS.Tests.Persistence
         }
 
         [Test]
+        public void Restore_ObservableDictionary_DuplicateKeySource_UpsertsWithoutAborting()
+        {
+            // Regression: WriteValue used to Add() each pair, so a duplicate-key source (a
+            // list-of-pairs shape the permissive cast intentionally accepts) threw
+            // ArgumentException on the 2nd Add. That escapes the per-field restore catch
+            // (InvalidCast/NRE only), aborting the whole entity+world restore with the dict
+            // half-populated. Upserting via the indexer instead: last value wins, no throw.
+            var target = new Entity();
+            var cd = target.Require<CooldownsAspect>();
+            cd.Cooldowns["stale"] = 99f;
+
+            var snap = new AspectSnapshot();
+            var data = new AspectData();
+            data.Fields["Cooldowns"] = new List<KeyValuePair<string, float>>
+            {
+                new("dash", 1f),
+                new("dash", 2f),
+            };
+            snap.Aspects[typeof(CooldownsAspect).FullName] = data;
+
+            Assert.DoesNotThrow(() => target.Restore(snap));
+
+            Assert.AreEqual(1, cd.Cooldowns.Count);
+            Assert.AreEqual(2f, cd.Cooldowns["dash"]);
+            Assert.IsFalse(cd.Cooldowns.ContainsKey("stale"));
+        }
+
+        [Test]
         public void Restore_ObservableHashSet_TypeMismatch_PreservesLiveCollection()
         {
             LogAssert.Expect(UnityEngine.LogType.Error, new Regex("type mismatch"));

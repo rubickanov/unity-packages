@@ -131,7 +131,16 @@ namespace Rubickanov.Storage
 
             try
             {
-                await File.WriteAllTextAsync(filePath, json, Encoding.UTF8).ConfigureAwait(false);
+                // Write to a sibling temp file then swap it in, so a crash mid-write truncates
+                // the throwaway temp instead of the live file. File.Replace is atomic where the
+                // platform supports it; Move covers the first-ever save (no file to replace).
+                var tmpPath = filePath + ".tmp";
+                await File.WriteAllTextAsync(tmpPath, json, Encoding.UTF8).ConfigureAwait(false);
+
+                if (File.Exists(filePath))
+                    File.Replace(tmpPath, filePath, null);
+                else
+                    File.Move(tmpPath, filePath);
             }
             catch (Exception ex)
             {

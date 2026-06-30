@@ -641,7 +641,13 @@ namespace Rubickanov.Audio
                     await UniTask.Yield(ct);
                 }
             }
-            catch (OperationCanceledException) { return; }
+            catch (OperationCanceledException)
+            {
+                // A cancelled duck (superseded by another DuckSFX or torn down) must not leave the
+                // shared SFX mixer param attenuated — restore the baseline before bailing.
+                ApplyVolume(_sfxVolumeParam, _sfxVolume);
+                return;
+            }
             catch (Exception ex) { Debug.LogException(ex); }
 
             ApplyVolume(_sfxVolumeParam, _sfxVolume);
@@ -651,8 +657,17 @@ namespace Rubickanov.Audio
         {
             _crossfadeCts?.Cancel();
             _crossfadeCts?.Dispose();
-            _duckCts?.Cancel();
-            _duckCts?.Dispose();
+
+            if (_duckCts != null)
+            {
+                // The duck coroutine's cancellation handler runs on a later frame (async), but the
+                // mixer is externally owned and outlives this service — restore the SFX param
+                // synchronously so disposing mid-duck doesn't leave it permanently attenuated.
+                _duckCts.Cancel();
+                _duckCts.Dispose();
+                _duckCts = null;
+                ApplyVolume(_sfxVolumeParam, _sfxVolume);
+            }
 
             foreach (var kvp in _sourceWatchers)
             {

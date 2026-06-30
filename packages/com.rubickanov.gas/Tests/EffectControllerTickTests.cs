@@ -181,6 +181,32 @@ namespace Rubickanov.GAS.Tests
         }
 
         [Test]
+        public void Tick_PeriodicEffect_CurrentValueDoesNotDoubleCountModifier()
+        {
+            var def = GasTestFixtures.MakeEffect(
+                DurationPolicy.Duration,
+                durationSeconds: 10f,
+                period: 1f,
+                modifiers: new[] { GasTestFixtures.Mod("Attribute.Health", ModifierOp.Add, -3f) });
+            var health = _attributes.Get(GasTestFixtures.Tag("Attribute.Health"))!;
+
+            _controller.ApplyEffect(new EffectSpec(def));
+
+            // No tick yet: the periodic modifier has not fired, so it must affect neither
+            // BaseValue nor CurrentValue. Under the double-count bug CurrentValue was 97 here
+            // (the aggregate folded the -3 a periodic effect realizes only via BaseValue).
+            Assert.That(health.BaseValue, Is.EqualTo(100f).Within(GasTestFixtures.FloatTolerance));
+            Assert.That(health.CurrentValue, Is.EqualTo(100f).Within(GasTestFixtures.FloatTolerance));
+
+            _controller.Tick(1f);
+
+            // One period applied -3 to BaseValue; CurrentValue must equal BaseValue exactly,
+            // not BaseValue - 3 again. Buggy code produced 94.
+            Assert.That(health.BaseValue, Is.EqualTo(97f).Within(GasTestFixtures.FloatTolerance));
+            Assert.That(health.CurrentValue, Is.EqualTo(97f).Within(GasTestFixtures.FloatTolerance));
+        }
+
+        [Test]
         public void Tick_PeriodicOnOneAttribute_LeavesUnrelatedAttributeIntact()
         {
             var speedBuff = GasTestFixtures.MakeEffect(

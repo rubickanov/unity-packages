@@ -17,6 +17,10 @@ namespace Rubickanov.GAS
             {
                 var effect = effects[i];
                 if (effect.Def.Duration == DurationPolicy.Instant) continue;
+                // Periodic effects realize their modifiers by writing BaseValue each period
+                // (ApplyPeriodicModifiers -> ApplyInstant). Folding them into the continuous
+                // aggregate too would double-count, so they contribute only through BaseValue.
+                if (effect.Def.Period > 0f) continue;
 
                 var modifiers = effect.Def.Modifiers;
                 for (int j = 0; j < modifiers.Count; j++)

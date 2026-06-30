@@ -154,6 +154,39 @@ namespace Rubickanov.Utils.Tests
         }
 
         [Test]
+        public void Int_FullIntRange_StaysInBounds([Range(0u, 200u, 1u)] uint a)
+        {
+            int value = DeterministicRandom.Int(a, 13, int.MinValue, int.MaxValue);
+
+            Assert.GreaterOrEqual(value, int.MinValue);
+            Assert.Less(value, int.MaxValue);
+        }
+
+        [Test]
+        public void Int_RangeWiderThanIntMaxValue_StaysInBounds([Range(0u, 200u, 1u)] uint a)
+        {
+            const int min = -2_000_000_000;
+            const int maxExclusive = 2_000_000_000;
+
+            int value = DeterministicRandom.Int(a, 17, min, maxExclusive);
+
+            Assert.GreaterOrEqual(value, min);
+            Assert.Less(value, maxExclusive);
+        }
+
+        [Test]
+        public void Int3_RangeWiderThanIntMaxValue_StaysInBounds([Range(0u, 200u, 1u)] uint a)
+        {
+            const int min = -2_000_000_000;
+            const int maxExclusive = 2_000_000_000;
+
+            int value = DeterministicRandom.Int(a, 17, 29, min, maxExclusive);
+
+            Assert.GreaterOrEqual(value, min);
+            Assert.Less(value, maxExclusive);
+        }
+
+        [Test]
         public void Bool_Deterministic()
         {
             bool a = DeterministicRandom.Bool(42, 7);

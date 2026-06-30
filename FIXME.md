@@ -133,8 +133,11 @@ the docs site so published docs aren't broken.
   `Dictionary`/`HashSet`/`RingBuffer` are fully delta-replicated. `README.md:87`.
 - [ ] **ui** — README uses non-existent `IUIService` methods (`ShowScreen`/`HideScreen`/…),
   `DialogResult.InputValue` (should be `InputText`). `README.md:82-83,135-146,212`.
-  - [ ] *(minor)* `UIService.HideAll` fires visibility callback even when nothing was visible.
+  - [x] *(minor)* `UIService.HideAll` fires visibility callback even when nothing was visible.
     `Runtime/UIService.cs:199-211`.
+    Fixed: `HideAll` early-returns when nothing is shown (mirrors `HideAllAsync`), so no spurious
+    `false` reaches the visibility consumer. Regression test
+    `HideAll_EmptyState_DoesNotFireVisibilityCallback`.
 - [ ] **ui.loading** — README calls non-existent `_loadingPipeline.Run(op)`; real API is
   `Load(IReadOnlyList<ILoadingOperation>, …)`. `README.md:21`.
 - [ ] **ui.localization** — README advertises UniTask but the package neither references nor
@@ -294,7 +297,7 @@ statemachine, steam-transport, ui, ui.animations, ui.loading, ui.localization.
 
 ### Major
 
-- [ ] **gas** — *(gameplay correctness)* Periodic Duration/Infinite effects **double-count**
+- [x] **gas** — *(gameplay correctness)* Periodic Duration/Infinite effects **double-count**
   their modifiers: applied to `BaseValue` every period AND simultaneously folded into the
   `CurrentValue` aggregate. `ModifierAggregator.Aggregate` skips only `Instant` effects, not
   `Period > 0` ones. Canonical Poison (Dur 5s/Period 1s/Health -3): CurrentValue drops to 97
@@ -302,7 +305,10 @@ statemachine, steam-transport, ui, ui.animations, ui.loading, ui.localization.
   expiry (sign flips for a HoT). Gameplay reads CurrentValue (death checks) → wrong values.
   `Runtime/Calculation/ModifierAggregator.cs:16-19`. Fix: add `if (effect.Def.Period > 0f) continue;`
   next to the `Instant` skip — periodic effects contribute only via their periodic BaseValue writes.
-- [ ] **devconsole.netcode** — *(security / remote DoS)* The cheat-protection fix is solid, but
+  Fixed: `Period > 0f` skip added in `Aggregate`; regression test
+  `EffectControllerTickTests.Tick_PeriodicEffect_CurrentValueDoesNotDoubleCountModifier` asserts
+  CurrentValue == BaseValue immediately after apply and after one period (no phantom −3).
+- [x] **devconsole.netcode** — *(security / remote DoS)* The cheat-protection fix is solid, but
   `ExecuteOnServerRpc`'s server-side `FilterCommand` only special-cases the **Server** domain; for
   a Client/Shared-domain command it returns "execute locally", so the server runs it. A modified
   client can `ExecuteOnServerRpc("disconnect")` → `disconnect` is Client-domain and calls
@@ -310,60 +316,109 @@ statemachine, steam-transport, ui, ui.animations, ui.loading, ui.localization.
   command becomes server-executable. `Runtime/NetworkCommandBridge.cs:111-137` +
   `Runtime/Commands/NetworkCommands.cs:102-115`. Fix: in the RPC, reject any command whose resolved
   `_domains` value is not `Server` (send an error) before calling `Execute`.
-- [ ] **config** — *(invariant violation)* Duplicate-Id `ConfigDatabase` throws only on the
+  Fixed: `FilterCommand`'s Client/Shared branch now returns an Error when `ExecutingClientId` is set
+  (i.e. the command arrived via `ExecuteOnServerRpc`), so only Server-domain commands run on the
+  server for a remote client. Checked against the resolved command → alias-safe. Local/host
+  execution (`ExecutingClientId == null`) is unaffected. No test (package has no Tests/ folder).
+- [x] **config** — *(invariant violation)* Duplicate-Id `ConfigDatabase` throws only on the
   **first** `Get`: `BuildLookup` assigns `_lookup` to its partially-built dictionary *before* the
   post-loop duplicate check throws, so `_lookup != null` afterwards and every later `Get` skips
   the build and silently returns the first-seen item. Same input → throw, then succeed.
   `Runtime/ConfigDatabase.cs:92-118`. Fix: build into a local and assign `_lookup` only after the
   duplicate check passes (or null `_lookup` before throwing).
-- [ ] **devconsole** — *(crash)* `GetSuggestions` only early-returns for `IsNullOrEmpty(input)`;
+  Fixed: `BuildLookup` builds into a local `lookup` and assigns `_lookup` only after the duplicate
+  check passes, so a duplicate-Id database throws on *every* `Get` (never silently succeeds).
+  Regression test `Get_DuplicateIds_ThrowsOnEverySubsequentCall` covers the repeat-call invariant.
+- [x] **devconsole** — *(crash)* `GetSuggestions` only early-returns for `IsNullOrEmpty(input)`;
   an input that tokenizes to zero tokens (leading space `" "`, or a quote char first) leaves the
   token buffer empty and `_tokenBuffer[0]` throws `IndexOutOfRangeException` — fires on a normal
   keystroke from both frontends. `Runtime/Core/CommandRegistry.cs:554`. Fix: `if (_tokenBuffer.Count == 0) return;`
   after `Tokenize`.
-- [ ] **loading** — *(resource leak)* Cancelling a `LoadSceneOperation` (a first-class flow)
+  Fixed: zero-token guard added right after `Tokenize`; regression test
+  `GetSuggestionsTests.GetSuggestions_WhitespaceOrQuoteOnlyInput_DoesNotThrow` covers `" "` and `"\""`.
+- [x] **loading** — *(resource leak)* Cancelling a `LoadSceneOperation` (a first-class flow)
   throws out of the `progress < 0.9f` spin with `_asyncOp` holding a ~90%-loaded, never-activated,
   never-unloaded scene. Permanent for `Additive` (no later Single-load evicts it); repeated
   cancels accumulate. `Runtime/LoadSceneOperation.cs:34-50`. Fix: on cancel, set
   `allowSceneActivation = true`, await `isDone`, `UnloadSceneAsync`, then rethrow.
-- [ ] **localization** — *(editor codegen, uncompilable output)* The key generator does no
+  Fixed: the spin loop now catches `OperationCanceledException` and calls `UnloadPartialScene` —
+  activates the partial scene (so the async op can finish), awaits `isDone`, then
+  `UnloadSceneAsync` before rethrowing. Guarded with `sceneCount > 1` so it never tries to unload
+  the last scene (Unity forbids it; in Single mode the activated scene already replaced the prior
+  one). No test — `SceneManager` needs the live Unity runtime the EditMode suite can't harness.
+- [x] **localization** — *(editor codegen, uncompilable output)* The key generator does no
   per-scope identifier de-duplication, so realistic table layouts emit duplicate member names
   (CS0102): leaf-vs-nested-class (`menu.settings` + `menu.settings.volume`), case-differing
   siblings (`item.fire` + `item.Fire`), `my-key` + `my_key`. This is the exact bug fixed in
   `gameplaytags` (`MakeUniqueIdentifier`) but never ported here. `Editor/LocalizationKeysGenerator.cs:141-197`.
   Fix: mirror gameplaytags' per-scope `usedNames` + `MakeUniqueIdentifier`.
+  Fixed: ported `MakeUniqueIdentifier` + a per-scope `usedNames` set covering the `Table` const,
+  leaf fields, and nested child classes (plus a separate set for the table classes themselves);
+  member names re-sorted Ordinal for cross-machine determinism. `GenerateCode` extracted to a pure
+  `(IReadOnlyDictionary tables, LocalizationCodeOptions)` overload so it's unit-testable. Folds in
+  the minor `Table`-collision item below. Regression tests cover all four collision shapes +
+  determinism in `LocalizationKeysGeneratorTests`.
 
 ### Minor
 
-- [ ] **storage** — Saves rewrite the whole file in place (`File.WriteAllTextAsync`, no temp+rename).
+- [x] **storage** — Saves rewrite the whole file in place (`File.WriteAllTextAsync`, no temp+rename).
   A crash mid-write truncates the file → next load can't parse it → renamed `.corrupt.bak`, save
   lost entirely. `Runtime/FileStorageService.cs:134`. Fix: write to `.tmp` then `File.Replace`/`Move`.
-- [ ] **acs.persistence** — Dictionary restore from a duplicate-key source (a list-of-pairs shape
+  Fixed: `ChainSave` writes to `<file>.tmp` then swaps it in via `File.Replace` (atomic where
+  supported) — or `File.Move` for the first-ever save — so a crash mid-write truncates the temp,
+  never the live file. Regression tests assert no `.tmp` lingers and an over-write replaces content.
+- [x] **acs.persistence** — Dictionary restore from a duplicate-key source (a list-of-pairs shape
   the permissive cast intentionally accepts) throws `ArgumentException` on the 2nd `Add`, which is
   NOT in the per-field restore catch filter (only `InvalidCastException`/`NRE`) → aborts the whole
   entity *and* world restore, leaving the dict half-populated. `Runtime/Bindings/PersistedDictionaryBinding.cs:38-40`.
   Fix: upsert (`_collection[k]=v`) instead of `Add`, or widen the catch filter.
-- [ ] **config** — `Dispose()` racing an in-flight `LoadAsync` re-populates `_cache` after release
+  Fixed: `WriteValue` upserts via the indexer (`_collection[k]=v`) instead of `Add`, so a
+  duplicate-key source can't throw mid-restore (last value wins). Regression test
+  `Restore_ObservableDictionary_DuplicateKeySource_UpsertsWithoutAborting` covers it.
+- [x] **config** — `Dispose()` racing an in-flight `LoadAsync` re-populates `_cache` after release
   → that Addressables handle leaks for the process lifetime. `Runtime/ConfigService.cs:93-143`.
   Fix: cancel in-flight loads in Dispose, or re-check `_disposed` after the await and release.
-- [ ] **config** — Coalesced `LoadAsync` callers share the *first* caller's cancellation token; if
+  Fixed: `LoadInternalAsync` re-checks `_disposed` after the load await — if `Dispose` ran during
+  the load it releases the fresh handle and throws `ObjectDisposedException` instead of caching it.
+  No unit test — needs the live Addressables runtime to drive a real in-flight handle.
+- [x] **config** — Coalesced `LoadAsync` callers share the *first* caller's cancellation token; if
   caller A cancels, caller B's un-cancelled load also fails. `Runtime/ConfigService.cs:48-56,104-121`.
   Fix: linked/ref-counted token, or document the shared-cancellation semantics.
-- [ ] **audio** — `DuckSFX` doesn't restore the SFX mixer param on cancel / `Dispose` mid-duck →
+  Fixed: the coalesced load now runs on `CancellationToken.None`; each caller (initiator and
+  joiners) attaches its own token via `AttachExternalCancellation(ct)`, so one caller cancelling
+  only faults its own await — the shared load runs to completion and caches for the others.
+- [x] **audio** — `DuckSFX` doesn't restore the SFX mixer param on cancel / `Dispose` mid-duck →
   the shared `AudioMixer` is left attenuated. `Runtime/UnityAudioService.cs:644,650-678`. Fix:
   re-apply `_sfxVolume` in the `OperationCanceledException` branch and after cancelling `_duckCts`
   in Dispose.
-- [ ] **gameplaytags** — Generator emits a duplicate `Tag` member when a branch tag has a child
+  Fixed: `DuckAsync`'s `OperationCanceledException` branch now restores `_sfxVolume` before
+  bailing; `Dispose` cancels `_duckCts` and re-applies `_sfxVolume` synchronously (the externally
+  owned mixer outlives the service, so the async restore alone could leave it attenuated). No test
+  — the duck path needs a live `AudioMixer` asset the suite's null-mixer config can't provide.
+- [x] **gameplaytags** — Generator emits a duplicate `Tag` member when a branch tag has a child
   segment that sanitizes to `Tag` (e.g. path `Damage.Tag`): the auto-emitted `Tag` field isn't in
   the child scope's `usedNames`. `Editor/GameplayTagsGenerator.cs:147-167`. Fix: seed the child
   scope's reserved set with `"Tag"`.
-- [ ] **localization** — A leaf/child key that sanitizes to `Table` collides with the reserved
+  Fixed: `WriteNode` takes a `reserveTag` flag — recursive (nested-class) scopes seed `usedNames`
+  with `"Tag"` so a child segment sanitizing to `Tag` gets `MakeUniqueIdentifier`-suffixed
+  (`Tag_2`) instead of colliding; the top-level class scope (no emitted `Tag` field) passes false.
+  Regression test `GenerateCode_ChildSegmentSanitizingToTag_DoesNotCollideWithEmittedTagField`.
+- [x] **localization** — A leaf/child key that sanitizes to `Table` collides with the reserved
   `private const string Table`. `Editor/LocalizationKeysGenerator.cs:149,156`. Fix: rename the
   const (`__Table`) or reserve it in the per-scope set (folds into the Major localization fix).
-- [ ] **loading** — Linked `CancellationTokenSource` isn't disposed after a `Load` completes,
+  Fixed as part of the Major localization fix above: scopes that emit the `Table` const seed their
+  per-scope `usedNames` with `"Table"`, so a colliding key is `MakeUniqueIdentifier`-suffixed
+  (`Table_2`). Covered by `GenerateCode_KeySanitizingToTable_DoesNotCollideWithTableConst`.
+- [x] **loading** — Linked `CancellationTokenSource` isn't disposed after a `Load` completes,
   leaving one registration on the caller's token until the next Load/Dispose.
   `Runtime/LoadingService.cs:53-55,91-96`. Fix: dispose+null `_cts` in the Load finally when the
   generation still matches.
-- [ ] **utils** — `DeterministicRandom.Int(...)` overflows when `maxExclusive - min > int.MaxValue`
+  Fixed: the `Load` finally disposes+nulls `_cts` when `_loadGeneration == generation` (the latest
+  Load owns it; a newer Load has already cancelled+replaced it), so the linked registration on the
+  caller's token is released as soon as the Load resolves.
+- [x] **utils** — `DeterministicRandom.Int(...)` overflows when `maxExclusive - min > int.MaxValue`
   (int subtraction before the uint cast) → out-of-range result. `Runtime/DeterministicRandom.cs:76,87`.
   Fix: compute the range as `(uint)((long)maxExclusive - min)`.
+  Fixed: both `Int` overloads widen the range to `(uint)((long)maxExclusive - min)` before the
+  modulo; unchecked `min + (int)(...)` wraps back into `[min, maxExclusive)`. Regression tests
+  cover the full int range and a range wider than `int.MaxValue` for both overloads.

@@ -88,7 +88,19 @@ namespace Rubickanov.DevConsole.Netcode
 
             // Client and Shared commands always execute locally
             if (domain is CommandDomain.Client or CommandDomain.Shared)
+            {
+                // SECURITY: a command reaching here with ExecutingClientId set arrived via
+                // ExecuteOnServerRpc from a (possibly modified) client. The only command a
+                // client may legitimately run on the server is a Server-domain one — reject
+                // every other domain so a crafted RPC can't run Client/Shared commands on the
+                // server (e.g. `disconnect`, which calls NetworkManager.Shutdown() with no
+                // server guard → remote DoS). Checked against the resolved command, so aliases
+                // can't slip past. Local (host) execution has ExecutingClientId == null.
+                if (ExecutingClientId.HasValue)
+                    return CommandRegistry.ExecutionResult.Error(
+                        $"'{cmd.Name}' is not a server command and cannot be executed remotely.");
                 return null;
+            }
 
             // Server commands: host executes locally, clients send RPC
             if (domain == CommandDomain.Server)

@@ -198,6 +198,8 @@ namespace Rubickanov.UI
 
         public void HideAll()
         {
+            if (_activeScreen == null && _popupStack.Count == 0) return;
+
             _activeScreen?.Hide();
             _activeScreen = null;
 

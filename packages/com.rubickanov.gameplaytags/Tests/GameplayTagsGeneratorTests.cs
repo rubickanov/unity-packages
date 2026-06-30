@@ -45,6 +45,15 @@ namespace Rubickanov.GameplayTags.Tests
         }
 
         [Test]
+        public void GenerateCode_ChildSegmentSanitizingToTag_DoesNotCollideWithEmittedTagField()
+        {
+            var code = GameplayTagsGenerator.GenerateCode(new[] { "Damage", "Damage.Tag" }, DefaultOptions());
+
+            StringAssert.Contains("public static readonly GameplayTag Tag = GameplayTagRegistry.Instance.Get(\"Damage\");", code);
+            StringAssert.Contains("public static readonly GameplayTag Tag_2 = GameplayTagRegistry.Instance.Get(\"Damage.Tag\");", code);
+        }
+
+        [Test]
         public void GenerateCode_InternalAccessModifier_AppliesToAllDeclarations()
         {
             var options = DefaultOptions();
