@@ -83,6 +83,12 @@
       "source": "local",
       "dependencies": {}
     },
+    "com.rubickanov.behaviortree": {
+      "version": "file:../../packages/com.rubickanov.behaviortree",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "com.rubickanov.codegen": {
       "version": "file:../../packages/com.rubickanov.codegen",
       "depth": 0,
@@ -120,6 +126,12 @@
         "com.rubickanov.devconsole": "1.0.0",
         "com.unity.netcode.gameobjects": "2.0.0"
       }
+    },
+    "com.rubickanov.eqs": {
+      "version": "file:../../packages/com.rubickanov.eqs",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
     },
     "com.rubickanov.gameplaytags": {
       "version": "file:../../packages/com.rubickanov.gameplaytags",
