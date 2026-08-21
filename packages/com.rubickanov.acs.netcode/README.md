@@ -4,6 +4,8 @@ Declarative replication, prediction, and events for [ACS](../com.rubickanov.acs/
 
 ## Dependencies
 
+> `R3` and `ObservableCollections` come from NuGet, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - `com.rubickanov.acs` — aspect/component entities. Replicated fields live on aspects.
 - `com.unity.netcode.gameobjects` — underlying transport, `NetworkObject` / `NetworkBehaviour` lifecycle, named messages.
 - `Unity.Collections` — unmanaged buffers used by the batch writer/reader.

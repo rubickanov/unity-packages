@@ -24,6 +24,37 @@ Pin to a specific commit by appending `#<hash>`:
 git+ssh://git@github.com/rubickanov-org/unity-packages.git?path=packages/com.rubickanov.ui#a1b2c3d
 ```
 
+## Third-party dependencies
+
+Each package's own README lists what it needs under **Dependencies**. Sibling
+`com.rubickanov.*` packages and registry packages (`com.unity.*`) resolve
+automatically from `package.json`. The rest do not — UPM's `dependencies` field
+only resolves from a registry, so anything installed from a git URL or from NuGet
+has to be present in the consuming project *before* the package will compile.
+
+Install these first:
+
+| Dependency | Channel | How |
+|---|---|---|
+| `R3` | NuGet | [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity) → install `R3` |
+| `ObservableCollections`, `ObservableCollections.R3` | NuGet | NuGetForUnity → install `ObservableCollections.R3` (pulls the base package) |
+| `UniTask` | git URL | `https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask` |
+| `ZLogger` | git URL | `https://github.com/Cysharp/ZLogger.git?path=src/ZLogger.Unity/Assets/ZLogger.Unity` |
+| `LitMotion` | git URL | `https://github.com/annulusgames/LitMotion.git?path=src/LitMotion/Assets/LitMotion` |
+
+Which package needs what:
+
+| Needs | Packages |
+|---|---|
+| `R3` | `acs`, `acs.debug`, `acs.netcode`, `acs.persistence`, `acs.reactive` |
+| `ObservableCollections` | `acs`, `acs.debug`, `acs.netcode`, `acs.persistence` |
+| `UniTask` | `audio`, `config`, `eqs` (optional asm), `loading`, `statemachine` (async asm), `storage`, `ui`, `ui.animations`, `ui.loading` |
+| `ZLogger` | `logging` |
+| `LitMotion` | `ui.animations` |
+
+`unity-project-pckgs/Packages/manifest.json` is the reference — it has every one
+of these wired up and is the configuration all packages are developed against.
+
 ## Linking into a Unity project (`link.sh`)
 
 `link.sh` rewrites a consumer Unity project's `Packages/manifest.json` to point

@@ -9,6 +9,7 @@
   "keywords": ["localization", "i18n", "reactive", "locale"],
   "dependencies": {
     "com.rubickanov.storage": "1.0.0",
-    "com.rubickanov.codegen": "1.0.0"
+    "com.rubickanov.codegen": "1.0.0",
+    "com.unity.addressables": "2.9.1"
   }
 }

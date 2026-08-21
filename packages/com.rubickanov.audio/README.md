@@ -4,6 +4,8 @@ Audio service with SFX source pooling, music crossfade, ducking, fade in/out, mi
 
 ## Dependencies
 
+> `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - `com.rubickanov.storage` — optional volume persistence via `IStorageService`
 - `UniTask` — async crossfade, fades, ducking, and source lifecycle watchers
 

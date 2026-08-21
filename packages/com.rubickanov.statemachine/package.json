@@ -1,11 +1,10 @@
 {
   "name": "com.rubickanov.statemachine",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "license": "MIT",
   "displayName": "State Machine",
   "description": "Generic finite state machine with hierarchical support, deferred transitions, and zero-allocation runtime.",
   "unity": "6000.0",
   "author": { "name": "rubickanov" },
-  "keywords": ["fsm", "statemachine", "hsm"],
-  "testables": []
+  "keywords": ["fsm", "statemachine", "hsm"]
 }

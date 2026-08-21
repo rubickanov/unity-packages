@@ -8,18 +8,21 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-All at version `1.0.0` unless noted:
+All at version `1.0.0`:
 
 | Package | Purpose |
 |---|---|
 | `acs` | Aspect/component entity framework. Aspects hold reactive data, components hold behavior. |
+| `acs.debug` | Editor window listing live entities in the active `World` with their aspect field values. Editor-only. |
 | `acs.netcode` | NGO networking layer for ACS. Declarative via `[Replicated]` / `[ReplicatedEvent]` attributes on aspect fields. |
+| `acs.persistence` | Snapshot/restore for ACS aspects. Collects `[PersistedState]` fields into a POCO; stable keys, migrations. No storage backend. |
+| `acs.reactive` | Computed (derived) reactive properties for ACS aspects. |
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
 | `behaviortree` | Serializable BT with visual editor, blackboard, subtrees. |
-| `character-motor` | Modular character motor, pure C# simulation (Rigidbody + Kinematic). |
 | `codegen` | Centralized Editor codegen: shared identifier sanitization, idempotent writes, generator registry + Project Settings panel. Built-in generators for scenes/layers/tags/sorting-layers/animator-params/resources/streaming-assets/shader-props/uitoolkit-names; `localization` and `gameplaytags` generators ride on it. |
 | `config` | Type-safe config loading via Addressables, caching, validation. |
 | `devconsole` | In-game dev console with auto-discovery and autocomplete. |
+| `devconsole.config` | Resolves `config` database items by `Id` in console command arguments. |
 | `devconsole.netcode` | NGO extension for devconsole. |
 | `eqs` | Environment Query System — data-driven spatial queries for AI. |
 | `gameplaytags` | Hierarchical gameplay tags (Unreal-style). |
@@ -27,7 +30,7 @@ All at version `1.0.0` unless noted:
 | `loading` | Generic loading pipeline: sequential ops, progress, presenters. |
 | `localization` | Localization service, reactive, strongly-typed keys. |
 | `logging` | ZLogger-based factory with file rotation and platform outputs. |
-| `statemachine` (**2.0.0**) | Generic FSM, hierarchical, deferred transitions, zero-alloc. |
+| `statemachine` | Generic FSM, hierarchical, deferred transitions, zero-alloc. |
 | `steam-transport` | NGO transport over Steam Networking Sockets P2P. |
 | `storage` | Key-value storage with pluggable backends (PlayerPrefs / file / encrypted). |
 | `ui` | Backend-agnostic UI framework: views, layers, dialogs. |

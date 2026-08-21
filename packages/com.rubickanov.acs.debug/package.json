@@ -2,7 +2,7 @@
     "name": "com.rubickanov.acs.debug",
     "version": "1.0.0",
     "license": "MIT",
-    "displayName": "ACS - Debug",
+    "displayName": "ACS — Debug Extension",
     "description": "Editor window that lists every live entity in the active World and shows its aspect fields with live values. Editor-only, no runtime cost.",
     "unity": "6000.0",
     "keywords": ["acs", "debug", "inspector", "editor"],

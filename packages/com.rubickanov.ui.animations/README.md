@@ -4,6 +4,8 @@ LitMotion-based view animations for the [UI](../com.rubickanov.ui/) package. Imp
 
 ## Dependencies
 
+> `UniTask` and `LitMotion` come from git URLs, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - `com.rubickanov.ui` — base package: `IViewAnimation`, `IAnimationTarget`, `NoneAnimation`, `UIToolkitView<>`
 - `UniTask` — `PlayShowAsync` / `PlayHideAsync` return `UniTask`
 - `LitMotion` — tween engine (`LMotion.Create(...).Bind(...)`)
