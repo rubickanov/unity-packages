@@ -170,6 +170,47 @@ namespace Rubickanov.ACS.Tests
             Object.DestroyImmediate(go);
         }
 
+        [Test]
+        public void ResetAllOnPlayStart_AfterAwake_NullsInstance()
+        {
+            // End-to-end path the play-start hook actually takes: Awake self-registers the
+            // type's reset with the non-generic dispatcher, and the dispatcher nulls Instance.
+            // Replaces the old design where the dispatcher discovered types by walking every
+            // assembly's GetTypes() before the first frame.
+            var go = new GameObject("original");
+            var singleton = go.AddComponent<TestSingleton>();
+            InvokeAwake(singleton);
+            Assert.AreSame(singleton, TestSingleton.Instance, "Precondition: Awake set Instance.");
+
+            SingletonMonoEntityResetter.ResetAllOnPlayStart();
+
+            Assert.IsNull(TestSingleton.Instance);
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void Awake_SecondInstanceOfSameType_DoesNotRegisterASecondReset()
+        {
+            // The registration guard is per closed generic type. Asserted as a delta because
+            // the dispatcher's list is process-wide and other fixtures contribute to it.
+            var firstGo = new GameObject("first");
+            var first = firstGo.AddComponent<TestSingleton>();
+            InvokeAwake(first);
+
+            int before = SingletonMonoEntityResetter.RegisteredCountForTests;
+
+            var secondGo = new GameObject("second");
+            var second = secondGo.AddComponent<TestSingleton>();
+            LogAssert.Expect(LogType.Error, EditModeDestroyError);
+            InvokeAwake(second);
+
+            Assert.AreEqual(before, SingletonMonoEntityResetter.RegisteredCountForTests);
+
+            Object.DestroyImmediate(secondGo);
+            Object.DestroyImmediate(firstGo);
+        }
+
         private static void InvokeAwake(TestSingleton entity)
         {
             typeof(SingletonMonoEntity<TestSingleton>)

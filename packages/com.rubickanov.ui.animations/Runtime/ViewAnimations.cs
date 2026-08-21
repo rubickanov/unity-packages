@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace Rubickanov.UI.Animations
 {
     /// <summary>
@@ -15,6 +17,13 @@ namespace Rubickanov.UI.Animations
 
         /// <summary>Default animation applied when a view does not specify one explicitly. Mutable singleton slot.</summary>
         public static IViewAnimation Default { get; set; } = FadeAnimation.Instance;
+
+        // The only mutable slot on this type — every other accessor hands back a stateless
+        // readonly singleton. With Domain Reload disabled in Project Settings → Enter Play
+        // Mode, an assignment made by last session's bootstrap survives into the next one,
+        // and a custom IViewAnimation that captured scene objects keeps them alive.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => Default = FadeAnimation.Instance;
 
         /// <summary>Instant show/hide with no tween — only toggles animation state.</summary>
         public static IViewAnimation None => NoneAnimation.Instance;
