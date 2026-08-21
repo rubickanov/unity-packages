@@ -116,7 +116,13 @@ while IFS= read -r readme_path; do
         fi
     fi
 
-    cp "$readme_path" "$DOCS_DIR/guides/$slug.md"
+    # Rewrite cross-package links while copying. In the repo a README links to a
+    # sibling package by folder — `[UI](../com.rubickanov.ui/)` — which is what a
+    # reader browsing GitHub needs. Here every README becomes guides/<slug>.md, so
+    # that path resolves to nothing and DocFX reports InvalidFileLink. Point it at
+    # the sibling guide instead. Trailing slash and #anchor are both optional.
+    sed -E 's|\]\(\.\./com\.rubickanov\.([a-z0-9.-]+)/?(#[^)]*)?\)|](\1.md\2)|g' \
+        "$readme_path" > "$DOCS_DIR/guides/$slug.md"
     guide_toc_entries+=("- name: $display_name"$'\n'"  href: $slug.md")
 
     echo "  Guide: $display_name ($slug.md)"
