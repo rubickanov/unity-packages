@@ -1,25 +1,11 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEngine;
 
 namespace Rubickanov.ACS.Runtime.Persistence
 {
     public static class EntityPersistenceExtensions
     {
-        // Cached Require<T> generic method — one MethodInfo per aspect type. ConcurrentDictionary
-        // so concurrent Restore() calls from different threads share a lock-free hit path.
-        private static readonly ConcurrentDictionary<Type, MethodInfo> RequireMethods = new();
-        private static readonly MethodInfo RequireOpen = typeof(IEntity).GetMethod(nameof(IEntity.Require))
-            ?? throw new InvalidOperationException("IEntity.Require<T>() not found via reflection.");
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStatics()
-        {
-            RequireMethods.Clear();
-        }
-
         /// <summary>
         /// Collects the values of every <c>[PersistedState]</c> field on every aspect this
         /// entity currently carries. Aspects with no persisted fields are omitted. The
@@ -204,16 +190,18 @@ namespace Rubickanov.ACS.Runtime.Persistence
                 return null;
             }
 
-            var method = RequireMethods.GetOrAdd(aspectType, static t => RequireOpen.MakeGenericMethod(t));
-
             try
             {
-                return method.Invoke(entity, null);
+                return AspectResolver.Require(entity, aspectType);
             }
-            catch (TargetInvocationException ex)
+            // AspectResolver dispatches through a cached generic class rather than
+            // MethodInfo.Invoke, so exceptions from inside Require<T> now arrive unwrapped
+            // instead of as TargetInvocationException. Catching broadly preserves the
+            // previous behaviour: log the entry and keep restoring the rest of the snapshot.
+            catch (Exception ex)
             {
                 Debug.LogError(
-                    $"[acs.persistence] Restore: IEntity.Require<{aspectType.Name}>() threw. {ex.InnerException?.Message ?? ex.Message}");
+                    $"[acs.persistence] Restore: IEntity.Require<{aspectType.Name}>() threw. {ex.Message}");
                 return null;
             }
         }
