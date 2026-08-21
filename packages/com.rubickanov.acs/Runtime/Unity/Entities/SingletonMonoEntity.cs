@@ -24,12 +24,17 @@ namespace Rubickanov.ACS.Runtime
         //
         // [RuntimeInitializeOnLoadMethod] cannot live on a method in an open generic class —
         // Unity logs "methods cannot be in generic classes" and skips the hook. The dispatch
-        // lives in SingletonMonoEntityResetter (non-generic): at SubsystemRegistration it walks
-        // every concrete subclass of SingletonMonoEntity&lt;T&gt; via reflection and invokes this
-        // method reflectively on each closed generic base. The test
+        // lives in SingletonMonoEntityResetter (non-generic), which invokes whatever resets
+        // have registered themselves. The test
         // SingletonMonoEntityTests.ResetInstanceOnPlayStart_WithLiveInstance_NullsInstance
-        // pins the name "ResetInstanceOnPlayStart" so both reflection call sites stay in sync.
+        // reaches this method by name via reflection, so keep the two in sync.
         private static void ResetInstanceOnPlayStart() => Instance = null;
+
+        // Set once per closed T, never cleared: this flag and the resetter's list share one
+        // static lifetime, so a session that finds the flag already true also finds its reset
+        // still registered. Registering from Awake rather than a static constructor keeps
+        // `Instance` free of a type-initializer check on every access.
+        private static bool _resetHookRegistered;
 
         // A duplicate instance never becomes Instance, never registers aspects, and
         // never gets observed by Destroyed subscribers — so when Unity finally invokes
@@ -41,6 +46,12 @@ namespace Rubickanov.ACS.Runtime
 
         protected override void Awake()
         {
+            if (!_resetHookRegistered)
+            {
+                _resetHookRegistered = true;
+                SingletonMonoEntityResetter.Register(ResetInstanceOnPlayStart);
+            }
+
             if (Instance != null && Instance != this)
             {
                 _destroyedAsDuplicate = true;

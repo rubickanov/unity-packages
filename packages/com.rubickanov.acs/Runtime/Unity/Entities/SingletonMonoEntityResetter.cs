@@ -1,5 +1,5 @@
 using System;
-using System.Reflection;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Rubickanov.ACS.Runtime
@@ -7,64 +7,56 @@ namespace Rubickanov.ACS.Runtime
     /// <summary>
     /// Non-generic dispatcher for <see cref="SingletonMonoEntity{T}"/> play-start resets.
     /// Unity refuses <c>[RuntimeInitializeOnLoadMethod]</c> on methods declared inside an
-    /// open generic class, so we hang the hook here and walk every concrete subclass of
-    /// <see cref="SingletonMonoEntity{T}"/> to invoke its private
-    /// <c>ResetInstanceOnPlayStart</c> reflectively on the closed generic base.
+    /// open generic class, so the hook hangs here and fans out to each closed generic base.
     /// <para/>
-    /// One-shot cost at <see cref="RuntimeInitializeLoadType.SubsystemRegistration"/>
-    /// — the reflection walk runs once per play session.
+    /// Each <see cref="SingletonMonoEntity{T}"/> registers its own reset delegate the first
+    /// time one of its instances awakes, so this list holds exactly the singleton types the
+    /// game actually uses — no type discovery, no reflection.
+    /// <para/>
+    /// <b>Why not a type scan.</b> This used to walk
+    /// <see cref="AppDomain.GetAssemblies"/> → <c>Assembly.GetTypes()</c> at
+    /// <see cref="RuntimeInitializeLoadType.SubsystemRegistration"/> to find every concrete
+    /// subclass. That materialises every <see cref="Type"/> in every loaded assembly before
+    /// the first frame, on every launch, in player builds too — and its whole purpose (a
+    /// stale static surviving into the next play session) can only happen in the Editor with
+    /// Domain Reload disabled. Self-registration costs one delegate per singleton type and
+    /// runs the reset correctly everywhere, including when the Unity runtime is restarted
+    /// in-process (Unity as a Library), where an Editor-only guard would have skipped it.
     /// </summary>
     internal static class SingletonMonoEntityResetter
     {
+        // Deliberately not cleared by the play-start hook: this list and the per-type
+        // `_resetHookRegistered` flags in SingletonMonoEntity<T> share the same static
+        // lifetime, so clearing one without the other would leave later sessions unreset.
+        private static readonly List<Action> Resetters = new();
+
+        /// <summary>
+        /// Registers a per-closed-type reset. Called once per <typeparamref name="T"/> from
+        /// <see cref="SingletonMonoEntity{T}"/>'s first <c>Awake</c>; the caller guards
+        /// against duplicate registration.
+        /// </summary>
+        internal static void Register(Action reset)
+        {
+            Resetters.Add(reset);
+        }
+
+        /// <summary>
+        /// Nulls the <c>Instance</c> slot of every singleton type registered so far.
+        /// Internal rather than private so edit-mode tests can drive it directly.
+        /// </summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetAllOnPlayStart()
+        internal static void ResetAllOnPlayStart()
         {
-            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            for (int i = 0; i < assemblies.Length; i++)
-            {
-                Type?[] types;
-                try
-                {
-                    types = assemblies[i].GetTypes();
-                }
-                catch (ReflectionTypeLoadException ex)
-                {
-                    // Partially-loadable assemblies (e.g. Editor-only refs missing in Player
-                    // builds) still expose the types they managed to resolve.
-                    types = ex.Types;
-                }
-
-                for (int t = 0; t < types.Length; t++)
-                {
-                    var type = types[t];
-                    if (type == null || type.IsAbstract || type.IsGenericTypeDefinition) continue;
-
-                    var closedBase = FindClosedSingletonBase(type);
-                    if (closedBase == null) continue;
-
-                    // The ResetInstanceOnPlayStart method lives on the closed generic base —
-                    // each distinct T has its own static Instance slot to null.
-                    var reset = closedBase.GetMethod(
-                        "ResetInstanceOnPlayStart",
-                        BindingFlags.NonPublic | BindingFlags.Static);
-                    reset?.Invoke(null, null);
-                }
-            }
+            for (int i = 0; i < Resetters.Count; i++)
+                Resetters[i].Invoke();
         }
 
-        private static Type? FindClosedSingletonBase(Type type)
-        {
-            var baseType = type.BaseType;
-            while (baseType != null && baseType != typeof(object))
-            {
-                if (baseType.IsGenericType &&
-                    baseType.GetGenericTypeDefinition() == typeof(SingletonMonoEntity<>))
-                {
-                    return baseType;
-                }
-                baseType = baseType.BaseType;
-            }
-            return null;
-        }
+        /// <summary>
+        /// Test-only observation hook. Read-only on purpose — there is no matching "clear",
+        /// because dropping registrations without also clearing every type's
+        /// <c>_resetHookRegistered</c> flag would leave those types silently unreset.
+        /// Tests assert on the delta across an action, never on the absolute value.
+        /// </summary>
+        internal static int RegisteredCountForTests => Resetters.Count;
     }
 }
