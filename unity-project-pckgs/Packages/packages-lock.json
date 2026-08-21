@@ -9,14 +9,14 @@
         "com.unity.collections": "1.5.1",
         "com.unity.mathematics": "1.0.1"
       },
-      "hash": "2053ef5c23f2ae755dd85d5865b698c542c351b6"
+      "hash": "ab6e92bfe78ff911def2fd3c4e9c79bb5a186946"
     },
     "com.cysharp.unitask": {
       "version": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
       "depth": 0,
       "source": "git",
       "dependencies": {},
-      "hash": "e5acc106ee196bc5a32fb14cdf2987b0f96d11e0"
+      "hash": "ceac8d6946b1125fe782cd171fbcb245b567dbf9"
     },
     "com.cysharp.zlogger": {
       "version": "https://github.com/Cysharp/ZLogger.git?path=src/ZLogger.Unity/Assets/ZLogger.Unity",
@@ -58,7 +58,8 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.rubickanov.acs": "1.0.0"
+        "com.rubickanov.acs": "1.0.0",
+        "com.unity.netcode.gameobjects": "2.13.1"
       }
     },
     "com.rubickanov.acs.persistence": {
@@ -99,7 +100,9 @@
       "version": "file:../../packages/com.rubickanov.config",
       "depth": 0,
       "source": "local",
-      "dependencies": {}
+      "dependencies": {
+        "com.unity.addressables": "2.9.1"
+      }
     },
     "com.rubickanov.devconsole": {
       "version": "file:../../packages/com.rubickanov.devconsole",
@@ -161,7 +164,8 @@
       "source": "local",
       "dependencies": {
         "com.rubickanov.storage": "1.0.0",
-        "com.rubickanov.codegen": "1.0.0"
+        "com.rubickanov.codegen": "1.0.0",
+        "com.unity.addressables": "2.9.1"
       }
     },
     "com.rubickanov.logging": {
@@ -195,7 +199,9 @@
       "version": "file:../../packages/com.rubickanov.ui",
       "depth": 0,
       "source": "local",
-      "dependencies": {}
+      "dependencies": {
+        "com.unity.ugui": "2.0.0"
+      }
     },
     "com.rubickanov.ui.animations": {
       "version": "file:../../packages/com.rubickanov.ui.animations",
@@ -211,7 +217,7 @@
       "source": "local",
       "dependencies": {
         "com.rubickanov.ui": "1.0.0",
-        "com.rubickanov.loading": "1.1.0"
+        "com.rubickanov.loading": "1.0.0"
       }
     },
     "com.rubickanov.ui.localization": {
@@ -259,7 +265,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.burst": {
-      "version": "1.8.29",
+      "version": "1.8.30",
       "depth": 1,
       "source": "registry",
       "dependencies": {
@@ -316,7 +322,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.inputsystem": {
-      "version": "1.19.0",
+      "version": "1.20.0",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -325,7 +331,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.localization": {
-      "version": "1.5.11",
+      "version": "1.5.12",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -358,7 +364,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.multiplayer.tools": {
-      "version": "2.2.8",
+      "version": "2.2.10",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -373,7 +379,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.netcode.gameobjects": {
-      "version": "2.12.0",
+      "version": "2.13.1",
       "depth": 0,
       "source": "registry",
       "dependencies": {
