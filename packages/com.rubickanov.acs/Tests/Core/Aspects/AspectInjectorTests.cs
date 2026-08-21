@@ -128,10 +128,11 @@ namespace Rubickanov.ACS.Tests
         public void Inject_ReadonlyField_AssignsThroughReflectionSet()
         {
             // Regression guard: AspectInjector must keep using FieldInfo.SetValue for the
-            // write, because every [Aspect] field is declared `readonly` and Expression.Assign
-            // on a Field node throws ArgumentException for initonly fields at Compile() time.
-            // If this test starts failing with an ArgumentException from Expression.Lambda.Compile,
-            // the injector has been "optimized" into a path that can't set readonly fields.
+            // write, because every [Aspect] field is declared `readonly` (initonly in IL) and
+            // no AOT-safe alternative can assign one — Expression.Assign rejects initonly
+            // fields outright, and DynamicMethod + stfld has no IL emitter under IL2CPP.
+            // If this test starts failing, the injector has been "optimized" into a path that
+            // can't set readonly fields.
             var expected = _context.Require<TestAspectA>();
             var host = new SingleFieldHost();
 

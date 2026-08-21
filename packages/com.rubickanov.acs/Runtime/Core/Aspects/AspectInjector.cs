@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq.Expressions;
 using System.Reflection;
 
 namespace Rubickanov.ACS.Runtime
@@ -10,49 +9,39 @@ namespace Rubickanov.ACS.Runtime
     /// Injects aspect instances into fields marked with <see cref="AspectAttribute"/>.
     /// Caches reflection data per component type for performance.
     /// <para/>
-    /// Caches are <see cref="ConcurrentDictionary{TKey,TValue}"/> so future headless
+    /// The cache is a <see cref="ConcurrentDictionary{TKey,TValue}"/> so future headless
     /// simulations can run injection across threads without racing on cache population.
     /// Under Unity's single-threaded player loop the overhead is negligible.
+    /// <para/>
+    /// The <c>Require&lt;T&gt;</c> call itself lives in <see cref="AspectResolver"/>, shared
+    /// with the persistence package so there is one runtime-typed aspect lookup in the
+    /// framework rather than one per consumer.
     /// </summary>
     public static class AspectInjector
     {
         private static readonly ConcurrentDictionary<Type, FieldInfo[]> FieldCache = new();
-        private static readonly ConcurrentDictionary<Type, Func<IEntity, object>> RequireDelegateCache = new();
 
-        // Target IEntity rather than MonoEntity so the injector works for both the
-        // Unity-bound context and pure POCO Entity — same reflection path, no
-        // UnityEngine dependency leaking into the lookup.
-        private static readonly MethodInfo RequireMethod =
-            typeof(IEntity).GetMethod(nameof(IEntity.Require))!;
+        // Cached so GetOrAdd doesn't allocate a fresh delegate from the method group on every
+        // call — C# 10 has no method-group conversion caching.
+        private static readonly Func<Type, FieldInfo[]> CollectAspectFieldsDelegate = CollectAspectFields;
 
         public static void Inject(IEntity context, object component)
         {
             var componentType = component.GetType();
-            var fields = FieldCache.GetOrAdd(componentType, CollectAspectFields);
+            var fields = FieldCache.GetOrAdd(componentType, CollectAspectFieldsDelegate);
 
             for (int i = 0; i < fields.Length; i++)
             {
                 var field = fields[i];
-                var aspect = GetOrBuildRequireDelegate(field.FieldType)(context);
+                var aspect = AspectResolver.Require(context, field.FieldType);
                 // FieldInfo.SetValue is kept instead of Expression.Assign(Field, …) because
                 // every [Aspect] field in real usage is declared `readonly` (initonly in IL),
                 // which Expression.Assign rejects at Compile() time. DynamicMethod + stfld
-                // would work but breaks under IL2CPP. The main hot-path win comes from
-                // eliminating MethodInfo.Invoke above — that dominates the per-field cost.
+                // would work but breaks under IL2CPP. With the Require call now going through
+                // AspectResolver's cached dispatcher, this write is what dominates the
+                // per-field cost — and there is no AOT-safe way to beat it.
                 field.SetValue(component, aspect);
             }
-        }
-
-        private static Func<IEntity, object> GetOrBuildRequireDelegate(Type aspectType)
-            => RequireDelegateCache.GetOrAdd(aspectType, BuildRequireDelegate);
-
-        private static Func<IEntity, object> BuildRequireDelegate(Type aspectType)
-        {
-            var closed = RequireMethod.MakeGenericMethod(aspectType);
-            var ctxParam = Expression.Parameter(typeof(IEntity), "ctx");
-            // Require<T>() returns T (reference type); Convert to object is a no-op reference cast.
-            var body = Expression.Convert(Expression.Call(ctxParam, closed), typeof(object));
-            return Expression.Lambda<Func<IEntity, object>>(body, ctxParam).Compile();
         }
 
         private static FieldInfo[] CollectAspectFields(Type type)

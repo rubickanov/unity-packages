@@ -4,6 +4,8 @@ Entity composition framework for Unity. Aspects hold reactive data, components d
 
 ## Dependencies
 
+> `R3` and `ObservableCollections` come from NuGet, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - `R3` — reactive primitives (`ReactiveProperty<T>`, `Subject<T>`, `DisposableBag`)
 - `ObservableCollections` + `ObservableCollections.R3` — reactive collections for aspect fields (`ObservableList<T>`, `ObservableDictionary<TKey,TValue>`, `ObservableHashSet<T>`, `ObservableRingBuffer<T>`)
 
@@ -133,7 +135,7 @@ protected override void OnSubscribe(ref DisposableBag disposables)
 
 ### Injecting Aspects into Components
 
-Mark fields with `[Aspect]` — injection happens in `EntityComponent.Awake` via reflection (cached per component type, compiled `Expression` delegates for the `Require<T>` call). Multiple components requesting the same type share the same instance:
+Mark fields with `[Aspect]` — injection happens in `EntityComponent.Awake` via reflection: the `FieldInfo[]` is cached per component type, and the `Require<T>` call goes through `AspectResolver`, which caches one generic dispatcher per aspect type. No runtime IL generation is involved, so the path is IL2CPP-safe. Multiple components requesting the same type share the same instance:
 
 ```csharp
 public class CharacterController : EntityComponent
@@ -154,6 +156,30 @@ For non-component consumers (plain C# classes) call the injector directly:
 ```csharp
 AspectInjector.Inject(context, myPlainClassInstance);
 ```
+
+To resolve an aspect whose type is only known at runtime — tooling, save data, editor inspectors — use `AspectResolver` instead of hand-rolling the reflection:
+
+```csharp
+object aspect = AspectResolver.Require(entity, aspectType);
+```
+
+It is the runtime-typed equivalent of `entity.Require<T>()`, with the same idempotency. If `aspectType` can't satisfy the `where T : class, IEntityAspect, new()` constraint it throws an `InvalidOperationException` naming the type and the rule it broke.
+
+### IL2CPP
+
+Aspects are resolved through `MakeGenericType`, never through runtime IL generation, so no `AotHints`-style preserve class is needed: IL2CPP shares generic code across reference types and aspects are always reference types.
+
+The one requirement is that the aspect type and its public parameterless constructor survive managed stripping. In practice they do — aspects are named directly in user code (`Require<HealthAspect>()`, `[Aspect] private HealthAspect _health`), which keeps them reachable. If an aspect is only ever reached by name or from data, preserve it explicitly:
+
+```xml
+<linker>
+  <assembly fullname="MyGame.Runtime">
+    <type fullname="MyGame.Aspects.HealthAspect" preserve="all" />
+  </assembly>
+</linker>
+```
+
+A stripped aspect surfaces as an `InvalidOperationException` from `AspectResolver` that points back at `link.xml` rather than as an opaque reflection failure.
 
 ### Component Lifecycle
 
