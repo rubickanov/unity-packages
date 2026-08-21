@@ -9,6 +9,6 @@
   "keywords": [ "ui", "loading" ],
   "dependencies": {
     "com.rubickanov.ui": "1.0.0",
-    "com.rubickanov.loading": "1.1.0"
+    "com.rubickanov.loading": "1.0.0"
   }
 }

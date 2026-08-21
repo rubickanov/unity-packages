@@ -4,6 +4,8 @@ Snapshot and restore for ACS aspects. Collects `[PersistedState]` fields into a 
 
 ## Dependencies
 
+> `R3` and `ObservableCollections` come from NuGet, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - `com.rubickanov.acs` — the aspect framework this snapshots
 - `R3` — `ReactiveProperty<T>`, the scalar field shape
 - `ObservableCollections` — `ObservableList` / `ObservableDictionary` / `ObservableHashSet` field shapes

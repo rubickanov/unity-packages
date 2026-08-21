@@ -2,7 +2,7 @@
     "name": "com.rubickanov.acs.reactive",
     "version": "1.0.0",
     "license": "MIT",
-    "displayName": "ACS - Reactive Extension",
+    "displayName": "ACS — Reactive Extension",
     "description": "Computed (derived) reactive properties for ACS aspects. Recompute automatically when their sources change; dispose to release source subscriptions.",
     "unity": "6000.0",
     "keywords": ["acs", "reactive", "computed", "derived"],

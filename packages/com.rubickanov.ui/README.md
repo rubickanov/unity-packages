@@ -4,6 +4,8 @@ Backend-agnostic UI framework with view lifecycle, layer management, dialogs, to
 
 ## Dependencies
 
+> `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - `UniTask` — async view lifecycle (register / show / hide, animations)
 - `R3` — reactive properties and commands in `ViewModelBase`, two-way bindings in the UI Toolkit backend
 - `UnityEngine.UI`, `Unity.TextMeshPro` — referenced by the UGUI backend only

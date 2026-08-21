@@ -4,6 +4,8 @@ Generic finite state machine with hierarchical support, deferred transitions, an
 
 ## Dependencies
 
+> `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - Sync runtime (`Rubickanov.StateMachine.Runtime`) — none.
 - Async runtime (`Rubickanov.StateMachine.Async`) — [UniTask](https://github.com/Cysharp/UniTask), for awaitable enter/exit.
 

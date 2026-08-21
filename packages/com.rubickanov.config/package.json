@@ -6,5 +6,8 @@
   "description": "Type-safe config loading via Addressables with caching, validation, and catalog refresh.",
   "unity": "6000.0",
   "author": { "name": "rubickanov" },
-  "keywords": ["config", "addressables", "scriptableobject"]
+  "keywords": ["config", "addressables", "scriptableobject"],
+  "dependencies": {
+    "com.unity.addressables": "2.9.1"
+  }
 }

@@ -4,6 +4,8 @@ Computed (derived) reactive properties for ACS aspects. Extension for [ACS](../c
 
 ## Dependencies
 
+> `R3` comes from NuGet, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - `com.rubickanov.acs` — aspects that host the computed fields
 - `R3` — `ReactiveProperty<T>` / `ReadOnlyReactiveProperty<T>` the values are built from
 

@@ -6,6 +6,5 @@
   "description": "Shared utilities: deterministic random, circular buffer, object pooling, description attribute with custom inspector.",
   "unity": "6000.0",
   "author": { "name": "rubickanov" },
-  "keywords": ["utils", "pool", "random", "deterministic"],
-  "testables": []
+  "keywords": ["utils", "pool", "random", "deterministic"]
 }

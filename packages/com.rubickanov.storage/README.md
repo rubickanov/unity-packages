@@ -4,6 +4,8 @@ Key-value storage service with pluggable backends. Sync reads, async writes.
 
 ## Dependencies
 
+> `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+
 - `UniTask` — return type for write operations
 - `Microsoft.Extensions.Logging.Abstractions` — optional `ILogger<T>` passed into `FileStorageService` / `EncryptedStorageService` for write and decryption errors
 
