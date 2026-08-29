@@ -2,6 +2,20 @@
 
 In-game developer console with attribute-based command auto-discovery, autocomplete, subcommands, and persistent history.
 
+## Enabling
+
+Every assembly in this package is constrained to the `ENABLE_CONSOLE` scripting define.
+Without it nothing here compiles — not the runtime, not the editor window, not the tests —
+so a console cannot reach a player build by being forgotten. Add `ENABLE_CONSOLE` to the
+scripting defines of the build profiles that should have one (Project Settings → Player →
+Scripting Define Symbols, or per profile in Build Profiles).
+
+Two consequences worth knowing. Code that names types from this package has to live in an
+assembly carrying the same constraint, or it will fail to compile when the define is absent.
+And a console placed in a scene by hand becomes a missing script in builds without the
+define, because scene data is not gated by defines — create it from a constrained assembly
+instead.
+
 ## Dependencies
 
 - `com.unity.inputsystem` — keyboard input for the toggle key and key bindings

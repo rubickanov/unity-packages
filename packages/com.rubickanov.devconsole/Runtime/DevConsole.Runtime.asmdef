@@ -1,14 +1,18 @@
 {
     "name": "Rubickanov.DevConsole.Runtime",
     "rootNamespace": "Rubickanov.DevConsole",
-    "references": ["Unity.InputSystem"],
+    "references": [
+        "Unity.InputSystem"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,
-    "defineConstraints": [],
+    "defineConstraints": [
+        "ENABLE_CONSOLE"
+    ],
     "versionDefines": [],
     "noEngineReferences": false
 }
