@@ -7,13 +7,13 @@ Shared Unity packages.
 Unity Package Manager → Add package from git URL:
 
 ```
-git+ssh://git@github.com/rubickanov-org/unity-packages.git?path=packages/com.rubickanov.<NAME>
+git+ssh://git@github.com/rubickanov/unity-packages.git?path=packages/com.rubickanov.<NAME>
 ```
 
 Or HTTPS:
 
 ```
-https://github.com/rubickanov-org/unity-packages.git?path=packages/com.rubickanov.<NAME>
+https://github.com/rubickanov/unity-packages.git?path=packages/com.rubickanov.<NAME>
 ```
 
 Replace `<NAME>` with a package folder under `packages/` (e.g. `ui`).
@@ -21,7 +21,7 @@ Replace `<NAME>` with a package folder under `packages/` (e.g. `ui`).
 Pin to a specific commit by appending `#<hash>`:
 
 ```
-git+ssh://git@github.com/rubickanov-org/unity-packages.git?path=packages/com.rubickanov.ui#a1b2c3d
+git+ssh://git@github.com/rubickanov/unity-packages.git?path=packages/com.rubickanov.ui#a1b2c3d
 ```
 
 ## Third-party dependencies

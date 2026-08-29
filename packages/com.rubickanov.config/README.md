@@ -4,7 +4,7 @@ Type-safe config loading with caching, validation, and catalog refresh for remot
 
 ## Dependencies
 
-> `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+> `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
 - `UniTask` — async load operations
 - `Unity.Addressables` / `Unity.ResourceManager` — default asset loader backend

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGES_DIR="$SCRIPT_DIR/packages"
-REMOTE_BASE="git+ssh://git@github.com/rubickanov-org/unity-packages.git?path=packages"
+REMOTE_BASE="git+ssh://git@github.com/rubickanov/unity-packages.git?path=packages"
 
 # --- Usage ---
 
