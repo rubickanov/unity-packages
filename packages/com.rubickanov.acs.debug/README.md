@@ -5,7 +5,7 @@ live values. Extension for [ACS](../com.rubickanov.acs/).
 
 ## Dependencies
 
-> `R3` and `ObservableCollections` come from NuGet, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+> `R3` and `ObservableCollections` come from NuGet, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
 - `com.rubickanov.acs` — reads `World.Current` and reuses `RuntimeAspectDrawer` for field rendering
 - `R3` — pulled in transitively for reactive field inspection

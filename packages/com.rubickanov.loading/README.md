@@ -4,7 +4,7 @@ Generic loading pipeline that runs a sequence of async operations with progress 
 
 ## Dependencies
 
-> `UniTask` and `ZLogger` come from git URLs, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+> `UniTask` and `ZLogger` come from git URLs, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
 - `UniTask` — async operation execution (`UniTask` / `UniTask<T>` return types)
 - `ZLogger` + `Microsoft.Extensions.Logging` — `LoadingService` requires an `ILoggerFactory`; pipeline steps and failures are logged through it

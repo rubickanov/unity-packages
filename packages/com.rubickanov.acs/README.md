@@ -4,7 +4,7 @@ Entity composition framework for Unity. Aspects hold reactive data, components d
 
 ## Dependencies
 
-> `R3` and `ObservableCollections` come from NuGet, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov-org/unity-packages#third-party-dependencies).
+> `R3` and `ObservableCollections` come from NuGet, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
 - `R3` — reactive primitives (`ReactiveProperty<T>`, `Subject<T>`, `DisposableBag`)
 - `ObservableCollections` + `ObservableCollections.R3` — reactive collections for aspect fields (`ObservableList<T>`, `ObservableDictionary<TKey,TValue>`, `ObservableHashSet<T>`, `ObservableRingBuffer<T>`)
