@@ -13,9 +13,10 @@ namespace Rubickanov.UI
         private readonly VisualElement _popupLayer;
         private readonly VisualElement _overlayLayer;
         private Action<bool>? _onUIVisibilityChanged;
+        private bool _uiVisible;
         private readonly Dictionary<Type, View> _views = new();
         private readonly Dictionary<Type, UILayer> _viewLayers = new();
-        private readonly Dictionary<View, IDisposable> _uxmlHandles = new();
+        private readonly Dictionary<Type, object> _loading = new();
         private View? _activeScreen;
         private readonly List<View> _popupStack = new();
 
@@ -42,57 +43,90 @@ namespace Rubickanov.UI
 
         public void SetVisibilityCallback(Action<bool> callback) => _onUIVisibilityChanged = callback;
 
-        public async UniTask Register<T>(UILayer layer) where T : View
+        public async UniTask Register<T>() where T : View
         {
-            var view = await CreateView<T>();
-            view.Root.style.position = Position.Absolute;
-            view.Root.style.left = view.Root.style.top =
-                view.Root.style.right = view.Root.style.bottom = 0;
-            view.Initialize();
-            GetLayerContainer(layer).Add(view.Root);
-
             var type = typeof(T);
+            if (_views.ContainsKey(type))
+                throw new InvalidOperationException($"View {type.Name} is already registered in UIService.");
+            if (_loading.ContainsKey(type))
+                throw new InvalidOperationException($"View {type.Name} is already being registered in UIService.");
+
+            var token = new object();
+            _loading[type] = token;
+
+            var view = Activator.CreateInstance<T>();
+            var cache = new UxmlCache();
+            try
+            {
+                await LoadUxml(cache, view, type);
+            }
+            catch
+            {
+                if (_loading.TryGetValue(type, out var current) && current == token)
+                    _loading.Remove(type);
+                cache.Release();
+                throw;
+            }
+
+            if (!_loading.TryGetValue(type, out var owner) || owner != token)
+            {
+                cache.Release();
+                throw new OperationCanceledException(
+                    $"Registration of view {type.Name} was cancelled by Unregister while its UXML was loading.");
+            }
+            _loading.Remove(type);
+
+            try
+            {
+                cache.TryGet(type, out var asset);
+                view.Root = asset != null ? asset.CloneTree() : new VisualElement();
+                view.Uxml = cache;
+                view.Root.pickingMode = PickingMode.Ignore;
+                view.Root.style.display = DisplayStyle.None;
+                view.Root.style.position = Position.Absolute;
+                view.Root.style.left = view.Root.style.top =
+                    view.Root.style.right = view.Root.style.bottom = 0;
+                view.Initialize();
+            }
+            catch
+            {
+                cache.Release();
+                throw;
+            }
+
+            var layer = view.ResolveLayer();
+            GetLayerContainer(layer).Add(view.Root);
             _views[type] = view;
             _viewLayers[type] = layer;
         }
 
-        internal async UniTask<T> CreateChildView<T>() where T : View
+        private async UniTask LoadUxml(UxmlCache cache, View view, Type viewType)
         {
-            var view = await CreateView<T>();
-            view.Initialize();
-            ReleaseUxml(view);
-            return view;
-        }
-
-        private async UniTask<T> CreateView<T>() where T : View
-        {
-            var view = Activator.CreateInstance<T>();
             var uxmlName = view.ResolveUxmlName();
-
+            VisualTreeAsset? asset = null;
             if (uxmlName != null)
             {
-                var (asset, handle) = await _loadUxml(uxmlName);
-                if (asset == null)
+                var (loaded, handle) = await _loadUxml(uxmlName);
+                cache.AddHandle(handle);
+                if (loaded == null)
                     throw new InvalidOperationException(
-                        $"Failed to load UXML '{uxmlName}' for view {typeof(T).Name}.");
-                _uxmlHandles[view] = handle;
-                view.Root = asset.CloneTree();
+                        $"Failed to load UXML '{uxmlName}' for view {viewType.Name}.");
+                asset = loaded;
             }
-            else
+            cache.Add(viewType, asset);
+
+            var children = view.ResolveChildViews();
+            for (int i = 0; i < children.Count; i++)
             {
-                view.Root = new VisualElement();
+                var childType = children[i];
+                if (cache.Contains(childType)) continue;
+                if (childType == null || childType.IsAbstract || !typeof(View).IsAssignableFrom(childType))
+                    throw new InvalidOperationException(
+                        $"View {viewType.Name} lists '{childType?.Name}' in ChildViews, which is not a concrete view type.");
+
+                var child = (View)Activator.CreateInstance(childType);
+                await LoadUxml(cache, child, childType);
             }
-
-            view.Root.pickingMode = PickingMode.Ignore;
-            view.Root.style.display = DisplayStyle.None;
-            view.Service = this;
-            return view;
-        }
-
-        private void ReleaseUxml(View view)
-        {
-            if (_uxmlHandles.Remove(view, out var handle))
-                handle.Dispose();
         }
 
         private VisualElement GetLayerContainer(UILayer layer) => layer switch
@@ -101,7 +135,7 @@ namespace Rubickanov.UI
             UILayer.HUD => _hudLayer,
             UILayer.Popup => _popupLayer,
             UILayer.Overlay => _overlayLayer,
-            _ => _screenLayer
+            _ => throw new ArgumentOutOfRangeException(nameof(layer), layer, null)
         };
 
         private static VisualElement RequireLayer(VisualElement root, string name)
@@ -117,22 +151,26 @@ namespace Rubickanov.UI
         public void Unregister<T>() where T : View
         {
             var type = typeof(T);
-            if (!_views.TryGetValue(type, out var view))
-            {
-                return;
-            }
+            if (_loading.Remove(type)) return;
+            if (!_views.TryGetValue(type, out var view)) return;
 
-            if (_activeScreen == view)
-            {
-                _activeScreen.Hide();
-                _activeScreen = null;
-            }
-
-            _popupStack.Remove(view);
-            view.Destroy();
-            ReleaseUxml(view);
             _views.Remove(type);
             _viewLayers.Remove(type);
+            RemoveFromStacks(view);
+            DestroyView(view);
+        }
+
+        private static void DestroyView(View view)
+        {
+            try
+            {
+                view.Destroy();
+            }
+            finally
+            {
+                view.Uxml?.Release();
+                view.Uxml = null;
+            }
         }
 
         public T Get<T>() where T : View
@@ -145,179 +183,154 @@ namespace Rubickanov.UI
 
         public async UniTask Show<T>(ViewModelBase viewModel) where T : View
         {
-            var type = typeof(T);
+            if (viewModel == null) throw new ArgumentNullException(nameof(viewModel));
+
             var view = Get<T>();
-            var layer = _viewLayers[type];
+            if (!view.ViewModelType.IsInstanceOfType(viewModel))
+                throw new ArgumentException(
+                    $"View {typeof(T).Name} expects a view model of type {view.ViewModelType.Name}, " +
+                    $"got {viewModel.GetType().Name}.", nameof(viewModel));
 
-            if (layer == UILayer.Screen)
+            UniTask animation;
+            try
             {
-                _activeScreen?.Hide();
-                _activeScreen = view;
-                try
-                {
-                    await view.Bind(viewModel);
-                    await view.ShowAsync();
-                }
-                catch
-                {
-                    view.Hide();
-                    _activeScreen = null;
-                    throw;
-                }
+                animation = view.BeginShow(viewModel);
             }
-            else
+            catch
             {
-                if (_popupStack.Contains(view))
-                {
-                    view.Hide();
-                    _popupStack.Remove(view);
-                }
-
-                _popupStack.Add(view);
-                try
-                {
-                    await view.Bind(viewModel);
-                    await view.ShowAsync();
-                }
-                catch
-                {
-                    view.Hide();
-                    _popupStack.Remove(view);
-                    throw;
-                }
+                RemoveFromStacks(view);
+                throw;
             }
 
-            _onUIVisibilityChanged?.Invoke(true);
+            switch (_viewLayers[typeof(T)])
+            {
+                case UILayer.Screen:
+                    var previous = _activeScreen;
+                    _activeScreen = view;
+                    if (previous != null && previous != view)
+                        previous.HideAsync().Forget();
+                    break;
+                case UILayer.Popup:
+                    _popupStack.Remove(view);
+                    _popupStack.Add(view);
+                    break;
+            }
+            UpdateVisibility();
+
+            try
+            {
+                await animation;
+            }
+            catch
+            {
+                if (view.State == ViewState.Showing)
+                {
+                    RemoveFromStacks(view);
+                    view.Hide();
+                }
+                throw;
+            }
         }
 
         public void Hide<T>() where T : View
         {
-            if (!_views.TryGetValue(typeof(T), out var view))
-            {
-                return;
-            }
+            if (!_views.TryGetValue(typeof(T), out var view)) return;
 
-            if (_activeScreen == view)
-            {
-                _activeScreen.Hide();
-                _activeScreen = null;
-            }
-            else
-            {
-                view.Hide();
-                _popupStack.Remove(view);
-            }
-
-            if (_popupStack.Count == 0 && _activeScreen == null)
-            {
-                _onUIVisibilityChanged?.Invoke(false);
-            }
+            RemoveFromStacks(view);
+            view.Hide();
         }
 
-        public async UniTask HideAsync<T>() where T : View
+        public UniTask HideAsync<T>() where T : View
         {
-            if (!_views.TryGetValue(typeof(T), out var view))
-            {
-                return;
-            }
+            if (!_views.TryGetValue(typeof(T), out var view)) return UniTask.CompletedTask;
 
-            if (_activeScreen == view)
-            {
-                await _activeScreen.HideAsync();
-                _activeScreen = null;
-            }
-            else
-            {
-                await view.HideAsync();
-                _popupStack.Remove(view);
-            }
-
-            if (_popupStack.Count == 0 && _activeScreen == null)
-            {
-                _onUIVisibilityChanged?.Invoke(false);
-            }
+            RemoveFromStacks(view);
+            return view.HideAsync();
         }
 
         public void HideTop()
         {
-            if (_popupStack.Count == 0)
-            {
-                return;
-            }
+            if (_popupStack.Count == 0) return;
 
             var top = _popupStack[^1];
+            RemoveFromStacks(top);
             top.Hide();
-            _popupStack.RemoveAt(_popupStack.Count - 1);
-
-            if (_popupStack.Count == 0 && _activeScreen == null)
-            {
-                _onUIVisibilityChanged?.Invoke(false);
-            }
         }
 
-        public async UniTask HideTopAsync()
+        public UniTask HideTopAsync()
         {
-            if (_popupStack.Count == 0)
-            {
-                return;
-            }
+            if (_popupStack.Count == 0) return UniTask.CompletedTask;
 
             var top = _popupStack[^1];
-            await top.HideAsync();
-            _popupStack.RemoveAt(_popupStack.Count - 1);
-
-            if (_popupStack.Count == 0 && _activeScreen == null)
-            {
-                _onUIVisibilityChanged?.Invoke(false);
-            }
+            RemoveFromStacks(top);
+            return top.HideAsync();
         }
 
         public void HideAll()
         {
-            if (_activeScreen == null && _popupStack.Count == 0) return;
-
-            _activeScreen?.Hide();
-            _activeScreen = null;
-
-            foreach (var popup in _popupStack)
-            {
-                popup.Hide();
-            }
-
-            _popupStack.Clear();
-            _onUIVisibilityChanged?.Invoke(false);
+            var views = TakeScreenAndPopups();
+            foreach (var view in views) view.Hide();
         }
 
-        public async UniTask HideAllAsync()
+        public UniTask HideAllAsync()
         {
-            if (_activeScreen == null && _popupStack.Count == 0) return;
+            var views = TakeScreenAndPopups();
+            if (views.Count == 0) return UniTask.CompletedTask;
 
-            var tasks = new List<UniTask>(_popupStack.Count + 1);
-            if (_activeScreen != null) tasks.Add(_activeScreen.HideAsync());
-            foreach (var popup in _popupStack) tasks.Add(popup.HideAsync());
+            var tasks = new UniTask[views.Count];
+            for (int i = 0; i < views.Count; i++) tasks[i] = views[i].HideAsync();
+            return UniTask.WhenAll(tasks);
+        }
 
-            await UniTask.WhenAll(tasks);
+        /// <summary>Clears the popup stack (top first) and the active screen, returning what they held.</summary>
+        private List<View> TakeScreenAndPopups()
+        {
+            var views = new List<View>(_popupStack.Count + 1);
+            for (int i = _popupStack.Count - 1; i >= 0; i--) views.Add(_popupStack[i]);
+            if (_activeScreen != null) views.Add(_activeScreen);
 
-            _activeScreen = null;
             _popupStack.Clear();
-            _onUIVisibilityChanged?.Invoke(false);
+            _activeScreen = null;
+            UpdateVisibility();
+            return views;
+        }
+
+        private void RemoveFromStacks(View view)
+        {
+            if (_activeScreen == view) _activeScreen = null;
+            _popupStack.Remove(view);
+            UpdateVisibility();
+        }
+
+        private void UpdateVisibility()
+        {
+            var visible = _activeScreen != null || _popupStack.Count > 0;
+            if (visible == _uiVisible) return;
+            _uiVisible = visible;
+            _onUIVisibilityChanged?.Invoke(visible);
         }
 
         public void Dispose()
         {
+            _loading.Clear();
+            _popupStack.Clear();
+            _activeScreen = null;
+            _uiVisible = false;
+
+            List<Exception>? errors = null;
             foreach (var view in _views.Values)
             {
-                view.Destroy();
-                ReleaseUxml(view);
+                try { DestroyView(view); }
+                catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
             }
 
             _views.Clear();
             _viewLayers.Clear();
-            _popupStack.Clear();
-            _activeScreen = null;
 #if UNITY_EDITOR
             DebugRegistry.Unregister(this);
 #endif
+            if (errors != null)
+                throw new AggregateException(errors);
         }
     }
 

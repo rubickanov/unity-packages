@@ -59,17 +59,17 @@ namespace Rubickanov.UI.Loading.Tests
         [Test]
         public void Add_DuplicateType_Throws()
         {
-            var op = new RegisterViewsOperation(_scope).Add<FakeViewA>(UILayer.Screen);
+            var op = new RegisterViewsOperation(_scope).Add<FakeViewA>();
 
-            Assert.Throws<InvalidOperationException>(() => op.Add<FakeViewA>(UILayer.Popup));
+            Assert.Throws<InvalidOperationException>(() => op.Add<FakeViewA>());
         }
 
         [Test]
         public async Task Execute_RegistersAllViews_ResolvableOnUiService()
         {
             var op = new RegisterViewsOperation(_scope)
-                .Add<FakeViewA>(UILayer.Screen)
-                .Add<FakeViewB>(UILayer.Popup);
+                .Add<FakeViewA>()
+                .Add<FakeViewB>();
 
             await op.Execute(new DummyProgress(), CancellationToken.None);
 
@@ -81,8 +81,8 @@ namespace Rubickanov.UI.Loading.Tests
         public async Task Execute_ReportsProgress_FromZeroToOne()
         {
             var op = new RegisterViewsOperation(_scope)
-                .Add<FakeViewA>(UILayer.Screen)
-                .Add<FakeViewB>(UILayer.Popup);
+                .Add<FakeViewA>()
+                .Add<FakeViewB>();
             var progress = new RecordingProgress();
 
             await op.Execute(progress, CancellationToken.None);
@@ -105,7 +105,7 @@ namespace Rubickanov.UI.Loading.Tests
         [Test]
         public async Task Execute_Twice_Throws()
         {
-            var op = new RegisterViewsOperation(_scope).Add<FakeViewA>(UILayer.Screen);
+            var op = new RegisterViewsOperation(_scope).Add<FakeViewA>();
             await op.Execute(new DummyProgress(), CancellationToken.None);
 
             Assert.ThrowsAsync<InvalidOperationException>(
@@ -115,7 +115,7 @@ namespace Rubickanov.UI.Loading.Tests
         [Test]
         public void Execute_CancelledBeforeStart_Throws()
         {
-            var op = new RegisterViewsOperation(_scope).Add<FakeViewA>(UILayer.Screen);
+            var op = new RegisterViewsOperation(_scope).Add<FakeViewA>();
             var cts = new CancellationTokenSource();
             cts.Cancel();
 
@@ -126,10 +126,10 @@ namespace Rubickanov.UI.Loading.Tests
         [Test]
         public async Task Execute_CancelledBeforeBegin_LeavesPriorScopeIntact()
         {
-            var first = new RegisterViewsOperation(_scope).Add<FakeViewA>(UILayer.Screen);
+            var first = new RegisterViewsOperation(_scope).Add<FakeViewA>();
             await first.Execute(new DummyProgress(), CancellationToken.None);
 
-            var second = new RegisterViewsOperation(_scope).Add<FakeViewB>(UILayer.Popup);
+            var second = new RegisterViewsOperation(_scope).Add<FakeViewB>();
             var cts = new CancellationTokenSource();
             cts.Cancel();
 
@@ -137,6 +137,27 @@ namespace Rubickanov.UI.Loading.Tests
                 async () => await second.Execute(new DummyProgress(), cts.Token).AsTask());
 
             Assert.DoesNotThrow(() => _ui.Get<FakeViewA>());
+        }
+
+        [Test]
+        public void Execute_ScopeReplacedDuringLoad_LeavesNoViewOfOldScopeRegistered()
+        {
+            var loader = new DeferredUxmlLoader();
+            using var ui = new UIService(TestRoot.Create(), loader.Load);
+            using var scopeService = new SceneViewScopeService(ui);
+            var op = new RegisterViewsOperation(scopeService)
+                .Add<FakeViewA>()
+                .Add<UxmlViewA>()
+                .Add<FakeViewB>();
+            var execution = op.Execute(new DummyProgress(), CancellationToken.None);
+
+            scopeService.Begin();
+            loader.Complete(nameof(UxmlViewA));
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await execution);
+            Assert.Throws<InvalidOperationException>(() => ui.Get<FakeViewA>());
+            Assert.Throws<InvalidOperationException>(() => ui.Get<UxmlViewA>());
+            Assert.Throws<InvalidOperationException>(() => ui.Get<FakeViewB>());
         }
 
         private sealed class DummyProgress : IProgress<float>

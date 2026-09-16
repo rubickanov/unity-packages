@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 
 namespace Rubickanov.UI.Tests
@@ -8,12 +9,14 @@ namespace Rubickanov.UI.Tests
     [TestFixture]
     public class ScopedViewRegistrationTests
     {
+        private RecordingUxmlLoader _loader = null!;
         private UIService _ui = null!;
 
         [SetUp]
         public void SetUp()
         {
-            _ui = new UIService(TestRoot.Create(), new RecordingUxmlLoader().Load);
+            _loader = new RecordingUxmlLoader();
+            _ui = new UIService(TestRoot.Create(), _loader.Load);
         }
 
         [TearDown]
@@ -24,22 +27,59 @@ namespace Rubickanov.UI.Tests
         {
             var scope = new ScopedViewRegistration(_ui);
 
-            await scope.Register<FakeViewA>(UILayer.Screen);
+            await scope.Register<ScreenA>();
 
-            Assert.DoesNotThrow(() => _ui.Get<FakeViewA>());
+            Assert.DoesNotThrow(() => _ui.Get<ScreenA>());
         }
 
         [Test]
         public async Task Dispose_UnregistersAllViews()
         {
             var scope = new ScopedViewRegistration(_ui);
-            await scope.Register<FakeViewA>(UILayer.Screen);
-            await scope.Register<FakeViewB>(UILayer.Popup);
+            await scope.Register<ScreenA>();
+            await scope.Register<PopupA>();
 
             scope.Dispose();
 
-            Assert.Throws<InvalidOperationException>(() => _ui.Get<FakeViewA>());
-            Assert.Throws<InvalidOperationException>(() => _ui.Get<FakeViewB>());
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<ScreenA>());
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<PopupA>());
+        }
+
+        [Test]
+        public void Dispose_DuringSlowLoad_LeavesNothingRegistered()
+        {
+            _loader.Deferred = true;
+            var scope = new ScopedViewRegistration(_ui);
+            var registration = scope.Register<UxmlScreen>();
+
+            scope.Dispose();
+            _loader.Complete(nameof(UxmlScreen));
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await registration);
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<UxmlScreen>());
+            CollectionAssert.AreEqual(new[] { nameof(UxmlScreen) }, _loader.Released);
+        }
+
+        [Test]
+        public void Register_DisposedScope_ThrowsObjectDisposed()
+        {
+            var scope = new ScopedViewRegistration(_ui);
+            scope.Dispose();
+
+            Assert.ThrowsAsync<ObjectDisposedException>(async () => await scope.Register<ScreenA>());
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<ScreenA>());
+        }
+
+        [Test]
+        public async Task Register_TypeRegisteredElsewhere_ThrowsAndDisposeKeepsOtherRegistration()
+        {
+            await _ui.Register<ScreenA>();
+            var scope = new ScopedViewRegistration(_ui);
+
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await scope.Register<ScreenA>());
+            scope.Dispose();
+
+            Assert.DoesNotThrow(() => _ui.Get<ScreenA>());
         }
 
         [Test]
@@ -49,29 +89,28 @@ namespace Rubickanov.UI.Tests
             var recorder = new RecordingUIService(order);
             var recordedScope = new ScopedViewRegistration(recorder);
 
-            recordedScope.Register<FakeViewA>(UILayer.Screen).GetAwaiter().GetResult();
-            recordedScope.Register<FakeViewB>(UILayer.Popup).GetAwaiter().GetResult();
-            recordedScope.Register<FakeViewC>(UILayer.HUD).GetAwaiter().GetResult();
+            recordedScope.Register<ScreenA>().GetAwaiter().GetResult();
+            recordedScope.Register<PopupA>().GetAwaiter().GetResult();
+            recordedScope.Register<HudA>().GetAwaiter().GetResult();
 
             recordedScope.Dispose();
 
-            Assert.AreEqual(new[] { "C", "B", "A" }, order);
+            Assert.AreEqual(new[] { nameof(HudA), nameof(PopupA), nameof(ScreenA) }, order);
         }
 
         [Test]
         public void Dispose_CleanupAction_Throws_AllOtherCleanupsStillRun()
         {
             var order = new List<string>();
-            var recorder = new RecordingUIService(order) { FailOnUnregisterType = typeof(FakeViewB) };
+            var recorder = new RecordingUIService(order) { FailOnUnregisterType = typeof(PopupA) };
             var scope = new ScopedViewRegistration(recorder);
 
-            scope.Register<FakeViewA>(UILayer.Screen).GetAwaiter().GetResult();
-            scope.Register<FakeViewB>(UILayer.Popup).GetAwaiter().GetResult();
-            scope.Register<FakeViewC>(UILayer.HUD).GetAwaiter().GetResult();
+            scope.Register<ScreenA>().GetAwaiter().GetResult();
+            scope.Register<PopupA>().GetAwaiter().GetResult();
+            scope.Register<HudA>().GetAwaiter().GetResult();
 
             Assert.Throws<AggregateException>(() => scope.Dispose());
-            // C runs, B throws but doesn't stop iteration, A still runs.
-            Assert.AreEqual(new[] { "C", "A" }, order);
+            Assert.AreEqual(new[] { nameof(HudA), nameof(ScreenA) }, order);
         }
 
         [Test]
@@ -90,28 +129,23 @@ namespace Rubickanov.UI.Tests
 
             public RecordingUIService(List<string> order) => _order = order;
 
-            public Cysharp.Threading.Tasks.UniTask Register<T>(UILayer layer) where T : View
-                => Cysharp.Threading.Tasks.UniTask.CompletedTask;
+            public UniTask Register<T>() where T : View => UniTask.CompletedTask;
 
             public void Unregister<T>() where T : View
             {
                 if (FailOnUnregisterType == typeof(T))
                     throw new InvalidOperationException($"Fail on {typeof(T).Name}");
-                _order.Add(typeof(T).Name.Replace("FakeView", string.Empty));
+                _order.Add(typeof(T).Name);
             }
 
             public T Get<T>() where T : View => throw new NotSupportedException();
-            public Cysharp.Threading.Tasks.UniTask Show<T>(ViewModelBase viewModel) where T : View
-                => Cysharp.Threading.Tasks.UniTask.CompletedTask;
+            public UniTask Show<T>(ViewModelBase viewModel) where T : View => UniTask.CompletedTask;
             public void Hide<T>() where T : View { }
-            public Cysharp.Threading.Tasks.UniTask HideAsync<T>() where T : View
-                => Cysharp.Threading.Tasks.UniTask.CompletedTask;
+            public UniTask HideAsync<T>() where T : View => UniTask.CompletedTask;
             public void HideTop() { }
-            public Cysharp.Threading.Tasks.UniTask HideTopAsync()
-                => Cysharp.Threading.Tasks.UniTask.CompletedTask;
+            public UniTask HideTopAsync() => UniTask.CompletedTask;
             public void HideAll() { }
-            public Cysharp.Threading.Tasks.UniTask HideAllAsync()
-                => Cysharp.Threading.Tasks.UniTask.CompletedTask;
+            public UniTask HideAllAsync() => UniTask.CompletedTask;
         }
     }
 }

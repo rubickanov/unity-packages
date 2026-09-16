@@ -42,19 +42,22 @@ namespace Rubickanov.UI.Loading
             Description = description ?? throw new ArgumentNullException(nameof(description));
         }
 
-        /// <summary>Queues a view type for registration on the given layer.</summary>
+        /// <summary>Queues a view type for registration on the layer the view declares.</summary>
         /// <exception cref="InvalidOperationException">Thrown when <typeparamref name="T"/> was already added to this operation.</exception>
-        public RegisterViewsOperation Add<T>(UILayer layer) where T : View
+        public RegisterViewsOperation Add<T>() where T : View
         {
             if (!_registeredTypes.Add(typeof(T)))
                 throw new InvalidOperationException($"View type {typeof(T).Name} already added to this operation.");
 
-            _registrations.Add(scope => scope.Register<T>(layer));
+            _registrations.Add(scope => scope.Register<T>());
             return this;
         }
 
         /// <summary>Opens a new scope on the service and registers every queued view in order.</summary>
         /// <exception cref="InvalidOperationException">Thrown when invoked more than once on the same instance.</exception>
+        /// <exception cref="OperationCanceledException">
+        /// Thrown when the scope is replaced or disposed while a view is loading; no view of that scope stays registered.
+        /// </exception>
         public async UniTask Execute(IProgress<float> progress, CancellationToken ct)
         {
             if (_executed)
