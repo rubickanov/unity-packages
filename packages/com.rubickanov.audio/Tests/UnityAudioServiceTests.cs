@@ -1,6 +1,5 @@
 using System;
 using System.Reflection;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -180,51 +179,11 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
-        public void Constructor_WithStorage_HydratesVolumesFromStorage()
+        public void Constructor_StartsAtFullVolume()
         {
-            var storage = new InMemoryStorageService();
-            storage.SetFloat("audio_master", 0.1f).Forget();
-            storage.SetFloat("audio_music", 0.2f).Forget();
-            storage.SetFloat("audio_sfx", 0.3f).Forget();
-
-            using var service = new UnityAudioService(_config, storage);
-
-            Assert.AreEqual(0.1f, service.MasterVolume);
-            Assert.AreEqual(0.2f, service.MusicVolume);
-            Assert.AreEqual(0.3f, service.SFXVolume);
-        }
-
-        [Test]
-        public void SetMasterVolume_WithStorage_PersistsValue()
-        {
-            var storage = new InMemoryStorageService();
-            using var service = new UnityAudioService(_config, storage);
-
-            service.SetMasterVolume(0.6f);
-
-            Assert.AreEqual(0.6f, storage.GetFloat("audio_master"));
-        }
-
-        [Test]
-        public void SetMusicVolume_WithStorage_PersistsValue()
-        {
-            var storage = new InMemoryStorageService();
-            using var service = new UnityAudioService(_config, storage);
-
-            service.SetMusicVolume(0.5f);
-
-            Assert.AreEqual(0.5f, storage.GetFloat("audio_music"));
-        }
-
-        [Test]
-        public void SetSFXVolume_WithStorage_PersistsValue()
-        {
-            var storage = new InMemoryStorageService();
-            using var service = new UnityAudioService(_config, storage);
-
-            service.SetSFXVolume(0.4f);
-
-            Assert.AreEqual(0.4f, storage.GetFloat("audio_sfx"));
+            Assert.AreEqual(1f, _service.MasterVolume);
+            Assert.AreEqual(1f, _service.MusicVolume);
+            Assert.AreEqual(1f, _service.SFXVolume);
         }
 
         private static SoundConfig MakeValidSound()

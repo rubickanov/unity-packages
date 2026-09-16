@@ -1,12 +1,11 @@
 # Audio
 
-Audio service with SFX source pooling, music crossfade, ducking, fade in/out, mixer snapshots, and persistent volumes.
+Audio service with SFX source pooling, music crossfade, ducking, fade in/out, mixer snapshots, and mixer volume control.
 
 ## Dependencies
 
 > `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
-- `com.rubickanov.storage` — optional volume persistence via `IStorageService`
 - `UniTask` — async crossfade, fades, ducking, and source lifecycle watchers
 
 Requires Unity 6000.0 or newer (uses `AudioResource` and `AudioSource.resource`).
@@ -19,7 +18,7 @@ IAudioService
 └── NullAudioService     — no-op for server/headless builds
 ```
 
-**UnityAudioService** is constructed from an **AudioServiceConfig** (ScriptableObject) that supplies the mixer, its groups, exposed parameter names, pool size, and default crossfade duration. An optional **IStorageService** persists and restores master/music/SFX volumes. The service creates a `[AudioService]` GameObject (marked `DontDestroyOnLoad` in play mode) that hosts the music sources, the SFX pool, and loop sources.
+**UnityAudioService** is constructed from an **AudioServiceConfig** (ScriptableObject) that supplies the mixer, its groups, exposed parameter names, pool size, and default crossfade duration. The service creates a `[AudioService]` GameObject (marked `DontDestroyOnLoad` in play mode) that hosts the music sources, the SFX pool, and loop sources.
 
 ## Core Concepts
 
@@ -34,10 +33,10 @@ IAudioService
 ## Quick Start
 
 1. Create an `AudioServiceConfig` asset via **Create > Config > Audio Service**. Assign the mixer, its groups, and the names of the exposed parameters for master/music/SFX volume.
-2. Construct the service, optionally passing an `IStorageService` for persistence:
+2. Construct the service:
 
 ```csharp
-IAudioService audio = new UnityAudioService(audioConfig, storage);
+IAudioService audio = new UnityAudioService(audioConfig);
 ```
 
 Or register it in a DI container:
@@ -131,13 +130,14 @@ float master = audio.MasterVolume;   // also MusicVolume, SFXVolume
 
 Volumes are clamped to `[0, 1]` and converted to dB (`20·log10(v)`, or `-80 dB` at zero) before being written to the exposed mixer parameters named in `AudioServiceConfig`. If a parameter is not exposed on the mixer, a warning is logged.
 
-### Volume Persistence
+### Saving Volumes
 
-Pass an `IStorageService` to the constructor. Volumes hydrate from storage on construction and save on every setter call. Without it, volumes reset each session.
+The service does not save anything. Every volume starts at `1` when the service is constructed. To keep the player's settings between sessions, the code that owns settings loads them and calls the setters after construction, and saves them wherever it saves the rest:
 
 ```csharp
-IStorageService storage = new PlayerPrefsStorageService();
-IAudioService audio = new UnityAudioService(audioConfig, storage);
+audio.SetMasterVolume(settings.MasterVolume);
+audio.SetMusicVolume(settings.MusicVolume);
+audio.SetSFXVolume(settings.SfxVolume);
 ```
 
 ## Design Decisions
@@ -146,5 +146,5 @@ IAudioService audio = new UnityAudioService(audioConfig, storage);
 - **Named loop slots, not handles** — a loop is a semantic slot (`"steps"`, `"ambient"`), not an anonymous instance. Slots are dedicated sources that survive scene loads and are never evicted by the SFX pool, so callers don't manage handles across scenes.
 - **SFX pool evicts oldest at capacity** — when every source is busy, the oldest playing source is stopped, its handle invalidated, and it is reused. No allocation spikes at peak concurrency.
 - **Mixer parameter names live in config** — `MasterVolumeParam`, `MusicVolumeParam`, `SfxVolumeParam` (plus optional UI/Dialog/Ambient) are fields on `AudioServiceConfig`. No hardcoded names.
-- **Persistence is opt-in** — the service works without an `IStorageService`; passing one is the only thing that makes volumes survive sessions.
+- **No persistence** — the service plays sound and sets mixer volumes, nothing else. Where settings are saved (PlayerPrefs, a file, a cloud save) belongs to the game, so the package has no dependency on a storage package.
 - **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.deltaTime`, and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.
