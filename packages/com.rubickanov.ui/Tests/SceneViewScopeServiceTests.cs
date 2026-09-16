@@ -7,12 +7,14 @@ namespace Rubickanov.UI.Tests
     [TestFixture]
     public class SceneViewScopeServiceTests
     {
+        private RecordingUxmlLoader _loader = null!;
         private UIService _ui = null!;
 
         [SetUp]
         public void SetUp()
         {
-            _ui = new UIService(TestRoot.Create(), new RecordingUxmlLoader().Load);
+            _loader = new RecordingUxmlLoader();
+            _ui = new UIService(TestRoot.Create(), _loader.Load);
         }
 
         [TearDown]
@@ -42,12 +44,27 @@ namespace Rubickanov.UI.Tests
         {
             var service = new SceneViewScopeService(_ui);
             var first = service.Begin();
-            await first.Register<FakeViewA>(UILayer.Screen);
+            await first.Register<ScreenA>();
 
             service.Begin();
 
-            Assert.Throws<InvalidOperationException>(() => _ui.Get<FakeViewA>(),
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<ScreenA>(),
                 "Previous scope should have been disposed, unregistering its views.");
+        }
+
+        [Test]
+        public void Begin_DuringSlowLoadOfPreviousScope_LeavesNothingOfOldScopeRegistered()
+        {
+            _loader.Deferred = true;
+            using var service = new SceneViewScopeService(_ui);
+            var registration = service.Begin().Register<UxmlScreen>();
+
+            service.Begin();
+            _loader.Complete(nameof(UxmlScreen));
+
+            Assert.CatchAsync<OperationCanceledException>(async () => await registration);
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<UxmlScreen>());
+            CollectionAssert.AreEqual(new[] { nameof(UxmlScreen) }, _loader.Released);
         }
 
         [Test]
@@ -55,13 +72,13 @@ namespace Rubickanov.UI.Tests
         {
             using var service = new SceneViewScopeService(_ui);
             var first = service.Begin();
-            await first.Register<FakeViewA>(UILayer.Screen);
+            await first.Register<ScreenA>();
 
             var second = service.Begin();
-            await second.Register<FakeViewB>(UILayer.Popup);
+            await second.Register<PopupA>();
 
-            Assert.Throws<InvalidOperationException>(() => _ui.Get<FakeViewA>());
-            Assert.DoesNotThrow(() => _ui.Get<FakeViewB>());
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<ScreenA>());
+            Assert.DoesNotThrow(() => _ui.Get<PopupA>());
         }
 
         [Test]
@@ -69,11 +86,11 @@ namespace Rubickanov.UI.Tests
         {
             var service = new SceneViewScopeService(_ui);
             var scope = service.Begin();
-            await scope.Register<FakeViewA>(UILayer.Screen);
+            await scope.Register<ScreenA>();
 
             service.Dispose();
 
-            Assert.Throws<InvalidOperationException>(() => _ui.Get<FakeViewA>());
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<ScreenA>());
             Assert.IsFalse(service.HasActiveScope);
         }
 

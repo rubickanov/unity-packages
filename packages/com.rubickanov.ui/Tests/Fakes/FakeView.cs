@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -19,17 +20,41 @@ namespace Rubickanov.UI.Tests
         }
     }
 
-    /// <summary>Loader that returns an empty asset built in code and records released handles.</summary>
+    /// <summary>
+    /// Loader returning empty assets built in code and recording loads and released handles. With
+    /// <see cref="Deferred"/> a load completes only when the test calls <see cref="Complete"/>.
+    /// </summary>
     public sealed class RecordingUxmlLoader
     {
         public readonly List<string> Loaded = new();
         public readonly List<string> Released = new();
+        public bool Deferred { get; set; }
+
+        private readonly Dictionary<string, UniTaskCompletionSource<(VisualTreeAsset asset, IDisposable handle)>> _pending = new();
 
         public UniTask<(VisualTreeAsset asset, IDisposable handle)> Load(string name)
         {
             Loaded.Add(name);
+            if (!Deferred)
+                return UniTask.FromResult(CreateResult(name));
+
+            var source = new UniTaskCompletionSource<(VisualTreeAsset asset, IDisposable handle)>();
+            _pending[name] = source;
+            return source.Task;
+        }
+
+        public void Complete(string name)
+        {
+            var source = _pending[name];
+            _pending.Remove(name);
+            source.TrySetResult(CreateResult(name));
+        }
+
+        private (VisualTreeAsset asset, IDisposable handle) CreateResult(string name)
+        {
             var asset = ScriptableObject.CreateInstance<VisualTreeAsset>();
-            return UniTask.FromResult<(VisualTreeAsset, IDisposable)>((asset, new Handle(this, name)));
+            asset.name = name;
+            return (asset, new Handle(this, name));
         }
 
         private sealed class Handle : IDisposable
@@ -47,44 +72,86 @@ namespace Rubickanov.UI.Tests
         }
     }
 
-    public class FakeViewModel : ViewModelBase { }
+    /// <summary>Animation whose every show and hide finishes only when the test completes it.</summary>
+    public sealed class ControlledAnimation : IViewAnimation
+    {
+        public readonly List<UniTaskCompletionSource> Shows = new();
+        public readonly List<UniTaskCompletionSource> Hides = new();
+
+        public UniTask PlayShowAsync(VisualElement target, CancellationToken ct) => Start(Shows, ct);
+        public UniTask PlayHideAsync(VisualElement target, CancellationToken ct) => Start(Hides, ct);
+        public void Reset(VisualElement target) { }
+
+        public void CompleteShow() => Shows[^1].TrySetResult();
+        public void CompleteHide() => Hides[^1].TrySetResult();
+        public void FailShow(Exception exception) => Shows[^1].TrySetException(exception);
+
+        private static UniTask Start(List<UniTaskCompletionSource> list, CancellationToken ct)
+        {
+            var source = new UniTaskCompletionSource();
+            list.Add(source);
+            return source.Task.AttachExternalCancellation(ct);
+        }
+    }
+
+    public class FakeViewModel : ViewModelBase
+    {
+        public int DisposeCalls { get; private set; }
+        protected override void OnDispose() => DisposeCalls++;
+    }
+
+    public sealed class OtherViewModel : ViewModelBase { }
 
     public abstract class FakeView : View<FakeViewModel>
     {
         protected override string? UxmlName => null;
+        protected override IViewAnimation Animation => TestAnimation ?? NoneAnimation.Instance;
 
+        public IViewAnimation? TestAnimation { get; set; }
         public int BindCalls { get; private set; }
-        public int ShowCalls { get; private set; }
-        public int HideCalls { get; private set; }
-        public ViewModelBase? LastViewModel { get; private set; }
-
+        public int UnbindCalls { get; private set; }
+        public FakeViewModel? LastViewModel { get; private set; }
         public Exception? ThrowOnBind { get; set; }
-        public Exception? ThrowOnShowAsync { get; set; }
 
-        protected override UniTask OnBind()
+        protected override void OnBind()
         {
             BindCalls++;
             LastViewModel = ViewModel;
             if (ThrowOnBind != null) throw ThrowOnBind;
-            return UniTask.CompletedTask;
         }
 
-        protected override UniTask OnShowAsync()
-        {
-            ShowCalls++;
-            if (ThrowOnShowAsync != null) throw ThrowOnShowAsync;
-            return UniTask.CompletedTask;
-        }
-
-        protected override void OnViewHide() => HideCalls++;
+        protected override void OnUnbind() => UnbindCalls++;
     }
 
-    public sealed class FakeViewA : FakeView { }
-    public sealed class FakeViewB : FakeView { }
-    public sealed class FakeViewC : FakeView { }
-
-    public sealed class FakeUxmlView : View<FakeViewModel>
+    public abstract class FakeScreen : FakeView
     {
-        protected override UniTask OnBind() => UniTask.CompletedTask;
+        protected override UILayer Layer => UILayer.Screen;
+    }
+
+    public abstract class FakePopup : FakeView
+    {
+        protected override UILayer Layer => UILayer.Popup;
+    }
+
+    public sealed class ScreenA : FakeScreen { }
+    public sealed class ScreenB : FakeScreen { }
+    public sealed class PopupA : FakePopup { }
+    public sealed class PopupB : FakePopup { }
+
+    public sealed class HudA : FakeView
+    {
+        protected override UILayer Layer => UILayer.HUD;
+    }
+
+    public sealed class UxmlScreen : View<FakeViewModel>
+    {
+        protected override UILayer Layer => UILayer.Screen;
+        protected override void OnBind() { }
+    }
+
+    public sealed class UxmlPopup : View<FakeViewModel>
+    {
+        protected override UILayer Layer => UILayer.Popup;
+        protected override void OnBind() { }
     }
 }
