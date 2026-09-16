@@ -16,16 +16,39 @@ namespace Rubickanov.UI
         /// <param name="p">The placement description.</param>
         /// <param name="size">Measured panel size; may contain NaN before the first layout pass.</param>
         /// <param name="cursorPanelPos">Latest pointer position in panel space (for cursor placement).</param>
+        /// <param name="camera">Camera for a world placement without its own camera.</param>
         /// <param name="topLeft">Resolved top-left in panel space.</param>
         /// <param name="resolvedSide">Side actually used after auto-flip (element placement).</param>
         /// <returns>False when the popup should be hidden (e.g. a world anchor behind the camera).</returns>
         public static bool TryResolve(VisualElement layer, in PopupPlacement p, Vector2 size,
-            Vector2 cursorPanelPos, out Vector2 topLeft, out PopupSide resolvedSide)
+            Vector2 cursorPanelPos, Camera? camera, out Vector2 topLeft, out PopupSide resolvedSide)
+        {
+            var worldPanelPoint = Vector2.zero;
+            if (p.Mode == PopupPlacementMode.World)
+            {
+                if (p.WorldAnchor == null) return Hidden(p, out topLeft, out resolvedSide);
+                var cam = p.Camera != null ? p.Camera : camera;
+                if (cam == null) return Hidden(p, out topLeft, out resolvedSide);
+                var screen = cam.WorldToScreenPoint(p.WorldAnchor.position + p.WorldOffset);
+                if (screen.z < 0f) return Hidden(p, out topLeft, out resolvedSide);
+                worldPanelPoint = ScreenToPanel(layer, new Vector2(screen.x, screen.y));
+            }
+
+            var layerSize = new Vector2(layer.resolvedStyle.width, layer.resolvedStyle.height);
+            return TryResolve(p, size, layerSize, cursorPanelPos, worldPanelPoint, out topLeft, out resolvedSide);
+        }
+
+        /// <summary>
+        /// Placement math with every input given: <paramref name="layerSize"/> bounds the popup, and
+        /// <paramref name="worldPanelPoint"/> is the projected world anchor in panel space (world placement only).
+        /// </summary>
+        public static bool TryResolve(in PopupPlacement p, Vector2 size, Vector2 layerSize, Vector2 cursorPanelPos,
+            Vector2 worldPanelPoint, out Vector2 topLeft, out PopupSide resolvedSide)
         {
             resolvedSide = p.Side;
 
-            var panelW = layer.resolvedStyle.width;
-            var panelH = layer.resolvedStyle.height;
+            var panelW = layerSize.x;
+            var panelH = layerSize.y;
             var w = size.x;
             var h = size.y;
             var hasSize = !float.IsNaN(w) && !float.IsNaN(h) && !float.IsNaN(panelW) && !float.IsNaN(panelH);
@@ -50,14 +73,8 @@ namespace Rubickanov.UI
                     break;
 
                 case PopupPlacementMode.World:
-                    if (p.WorldAnchor == null) { topLeft = Vector2.zero; return false; }
-                    var cam = p.Camera != null ? p.Camera : Camera.main;
-                    if (cam == null) { topLeft = Vector2.zero; return false; }
-                    var screen = cam.WorldToScreenPoint(p.WorldAnchor.position);
-                    if (screen.z < 0f) { topLeft = Vector2.zero; return false; }
-                    var panelPos = ScreenToPanel(layer, new Vector2(screen.x, screen.y));
                     // Hover above the object, like a speech bubble.
-                    topLeft = new Vector2(panelPos.x - w * 0.5f, panelPos.y - h) + p.Offset;
+                    topLeft = new Vector2(worldPanelPoint.x - w * 0.5f, worldPanelPoint.y - h) + p.Offset;
                     break;
 
                 case PopupPlacementMode.Cursor:
@@ -69,10 +86,18 @@ namespace Rubickanov.UI
                     break;
             }
 
-            if (hasSize)
+            var clamp = p.Mode != PopupPlacementMode.World || p.ClampToScreen;
+            if (hasSize && clamp)
                 topLeft = Clamp(topLeft, w, h, panelW, panelH);
 
             return true;
+        }
+
+        private static bool Hidden(in PopupPlacement p, out Vector2 topLeft, out PopupSide resolvedSide)
+        {
+            topLeft = Vector2.zero;
+            resolvedSide = p.Side;
+            return false;
         }
 
         /// <summary>
@@ -84,13 +109,18 @@ namespace Rubickanov.UI
         /// </summary>
         public static Vector2 ScreenToPanel(VisualElement layer, Vector2 screen)
         {
-            var size = layer.panel.visualTree.worldBound.size;
-            if (size.x <= 0f || size.y <= 0f)
-                return new Vector2(screen.x, Screen.height - screen.y);
+            var panelSize = layer.panel != null ? layer.panel.visualTree.worldBound.size : Vector2.zero;
+            return ScreenToPanel(screen, new Vector2(Screen.width, Screen.height), panelSize);
+        }
 
-            var scaleX = Screen.width / size.x;
-            var scaleY = Screen.height / size.y;
-            return new Vector2(screen.x / scaleX, (Screen.height - screen.y) / scaleY);
+        /// <summary>Screen pixels (bottom-left origin) to a panel of <paramref name="panelSize"/> (top-left origin).</summary>
+        public static Vector2 ScreenToPanel(Vector2 screen, Vector2 screenSize, Vector2 panelSize)
+        {
+            if (panelSize.x <= 0f || panelSize.y <= 0f || screenSize.x <= 0f || screenSize.y <= 0f)
+                return new Vector2(screen.x, screenSize.y - screen.y);
+
+            return new Vector2(screen.x * panelSize.x / screenSize.x,
+                               (screenSize.y - screen.y) * panelSize.y / screenSize.y);
         }
 
         private static Vector2 ResolveScreenAnchor(PopupAnchorCorner corner, Vector2 offset,

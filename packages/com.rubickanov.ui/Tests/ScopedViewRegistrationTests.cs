@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
+using R3;
 
 namespace Rubickanov.UI.Tests
 {
@@ -146,6 +147,10 @@ namespace Rubickanov.UI.Tests
             public UniTask HideTopAsync() => UniTask.CompletedTask;
             public void HideAll() { }
             public UniTask HideAllAsync() => UniTask.CompletedTask;
+            public IDisposable CapturePointer() => throw new NotSupportedException();
+            public ReadOnlyReactiveProperty<bool> PointerCaptured => throw new NotSupportedException();
+            public IDisposable PushBackHandler(Func<bool> handler) => throw new NotSupportedException();
+            public bool Back() => throw new NotSupportedException();
         }
     }
 }

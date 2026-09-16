@@ -1,4 +1,6 @@
+using System;
 using Cysharp.Threading.Tasks;
+using R3;
 
 namespace Rubickanov.UI
 {
@@ -25,5 +27,22 @@ namespace Rubickanov.UI
         UniTask HideTopAsync();
         void HideAll();
         UniTask HideAllAsync();
+
+        /// <summary>
+        /// Asks for a free pointer. Counted: <see cref="PointerCaptured"/> stays true while any handle is alive.
+        /// Screen and popup views, and modal or interactive popups, hold one while visible.
+        /// </summary>
+        IDisposable CapturePointer();
+
+        /// <summary>True while at least one pointer capture is held. The game maps it to its cursor state.</summary>
+        ReadOnlyReactiveProperty<bool> PointerCaptured { get; }
+
+        /// <summary>Pushes a handler for <see cref="Back"/>. The last pushed runs first; the handle removes it.</summary>
+        IDisposable PushBackHandler(Func<bool> handler);
+
+        /// <summary>
+        /// Runs back handlers from the top until one returns true. Returns false when nothing consumed it.
+        /// </summary>
+        bool Back();
     }
 }

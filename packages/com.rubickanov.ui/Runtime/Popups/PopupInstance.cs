@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -10,6 +11,12 @@ namespace Rubickanov.UI
     {
         /// <summary>Latest pointer position in panel space (for cursor placement).</summary>
         Vector2 CursorPanelPosition { get; }
+
+        /// <summary>Camera for world placements without their own camera; looked up once per frame.</summary>
+        Camera? WorldCamera { get; }
+
+        IUIService Ui { get; }
+        IViewAnimation DefaultAnimation { get; }
 
         void OnPopupClosed(PopupInstance instance);
         void OnPlacementChanged(PopupInstance instance);
@@ -24,6 +31,7 @@ namespace Rubickanov.UI
         private readonly VisualElement _layer;
         private readonly IPopupHostCallbacks _host;
         private readonly UniTaskCompletionSource<PopupResult> _completion = new();
+        private readonly IViewAnimation _animation;
 
         private PopupConfig _config;
         private PopupPlacement _placement;
@@ -34,9 +42,14 @@ namespace Rubickanov.UI
         private Label? _message;
         private VisualElement? _icon;
         private TextField? _input;
+        private bool _interactive;
 
         private IVisualElementScheduledItem? _timeout;
         private PopupSide? _appliedSide;
+
+        private IDisposable? _pointerCapture;
+        private IDisposable? _backHandle;
+        private CancellationTokenSource? _show;
 
         public bool IsOpen { get; private set; }
         public UniTask<PopupResult> Result => _completion.Task;
@@ -49,6 +62,7 @@ namespace Rubickanov.UI
             _placement = config.Placement;
             _layer = layer;
             _host = host;
+            _animation = config.Animation ?? host.DefaultAnimation;
 
             _panel = new VisualElement { name = "popup-panel" };
             _panel.AddToClassList(PopupStyle.Panel);
@@ -57,6 +71,14 @@ namespace Rubickanov.UI
             Build();
             Attach();
             IsOpen = true;
+
+            if (IsModal || _interactive)
+                _pointerCapture = host.Ui.CapturePointer();
+            if (Has(PopupCloseTriggers.Escape))
+                _backHandle = host.Ui.PushBackHandler(OnBack);
+
+            _show = new CancellationTokenSource();
+            PlayShowAsync(_show.Token).Forget();
         }
 
         // ── Construction ─────────────────────────────────────────
@@ -148,24 +170,19 @@ namespace Rubickanov.UI
                 _panel.Add(row);
             }
 
-            if (Has(PopupCloseTriggers.Escape))
-            {
-                _panel.focusable = true;
-                _panel.RegisterCallback<NavigationCancelEvent>(OnNavigationCancel);
-            }
-
             if (Has(PopupCloseTriggers.PointerLeave))
             {
                 _panel.RegisterCallback<PointerLeaveEvent>(OnPanelPointerLeave);
             }
 
             // A purely informational passive popup (no buttons / input / hover-close) should let clicks
-            // pass through to the game underneath, like a tooltip. Anything interactive stays pickable.
-            var interactive = _config.Buttons.Count > 0
-                              || Has(PopupCloseTriggers.CloseButton)
-                              || _config.HasInput
-                              || Has(PopupCloseTriggers.PointerLeave);
-            if (!modal && !interactive)
+            // pass through to the game underneath, like a tooltip. Anything interactive stays pickable
+            // and captures the pointer.
+            _interactive = _config.Buttons.Count > 0
+                           || Has(PopupCloseTriggers.CloseButton)
+                           || _config.HasInput
+                           || Has(PopupCloseTriggers.PointerLeave);
+            if (!modal && !_interactive)
             {
                 _panel.pickingMode = PickingMode.Ignore;
                 _panel.Query<VisualElement>().ForEach(e => e.pickingMode = PickingMode.Ignore);
@@ -189,10 +206,43 @@ namespace Rubickanov.UI
             }
         }
 
-        /// <summary>Gives keyboard focus to the panel so Escape (NavigationCancel) reaches it.</summary>
-        public void FocusPanel()
+        // ── Animation ────────────────────────────────────────────
+
+        private async UniTaskVoid PlayShowAsync(CancellationToken ct)
         {
-            if (IsOpen && _panel.focusable) _panel.Focus();
+            try
+            {
+                await _animation.PlayShowAsync(_panel, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+
+        private async UniTaskVoid PlayHideAndRemoveAsync()
+        {
+            try
+            {
+                await _animation.PlayHideAsync(_panel, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+            finally
+            {
+                RemoveElements();
+            }
+        }
+
+        private void RemoveElements()
+        {
+            _backdrop?.RemoveFromHierarchy();
+            _panel.RemoveFromHierarchy();
         }
 
         // ── Positioning ──────────────────────────────────────────
@@ -202,8 +252,11 @@ namespace Rubickanov.UI
             if (!IsOpen) return;
 
             var size = new Vector2(_panel.resolvedStyle.width, _panel.resolvedStyle.height);
+            var camera = _placement.Mode == PopupPlacementMode.World && _placement.Camera == null
+                ? _host.WorldCamera
+                : null;
             var visible = PopupPlacementResolver.TryResolve(
-                _layer, _placement, size, _host.CursorPanelPosition, out var topLeft, out var side);
+                _layer, _placement, size, _host.CursorPanelPosition, camera, out var topLeft, out var side);
 
             if (!visible)
             {
@@ -228,10 +281,10 @@ namespace Rubickanov.UI
 
         // ── Close triggers ───────────────────────────────────────
 
-        private void OnNavigationCancel(NavigationCancelEvent evt)
+        private bool OnBack()
         {
-            evt.StopPropagation();
             Close(null, PopupCloseReason.Escape);
+            return true;
         }
 
         private void OnBackdropPointerDown(PointerDownEvent evt)
@@ -245,7 +298,14 @@ namespace Rubickanov.UI
 
         // ── IPopupHandle ─────────────────────────────────────────
 
+        /// <summary>Completes <see cref="Result"/> at once, plays the hide animation, then removes the elements.</summary>
         public void Close(string? buttonId = null, PopupCloseReason reason = PopupCloseReason.Code)
+            => Close(buttonId, reason, animate: true);
+
+        /// <summary>Closes and removes the elements at once, without the hide animation.</summary>
+        internal void CloseImmediate() => Close(null, PopupCloseReason.Code, animate: false);
+
+        private void Close(string? buttonId, PopupCloseReason reason, bool animate)
         {
             if (!IsOpen) return;
             IsOpen = false;
@@ -255,11 +315,28 @@ namespace Rubickanov.UI
 
             var input = _config.HasInput ? _input?.value : null;
 
-            _backdrop?.RemoveFromHierarchy();
-            _panel.RemoveFromHierarchy();
+            var capture = _pointerCapture;
+            var back = _backHandle;
+            _pointerCapture = null;
+            _backHandle = null;
+            capture?.Dispose();
+            back?.Dispose();
+
+            var show = _show;
+            _show = null;
+            show?.Cancel();
+            show?.Dispose();
+
+            _panel.pickingMode = PickingMode.Ignore;
+            if (_backdrop != null) _backdrop.pickingMode = PickingMode.Ignore;
 
             _host.OnPopupClosed(this);
             _completion.TrySetResult(new PopupResult(buttonId, reason, input));
+
+            if (animate)
+                PlayHideAndRemoveAsync().Forget();
+            else
+                RemoveElements();
         }
 
         public void UpdateContent(Action<PopupContentContext> mutate)

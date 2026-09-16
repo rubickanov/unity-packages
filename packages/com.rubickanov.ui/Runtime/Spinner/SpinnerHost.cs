@@ -7,10 +7,19 @@ using UnityEngine.UIElements;
 
 namespace Rubickanov.UI
 {
+    /// <summary>
+    /// Corner busy indicator on the overlay layer, styled by classes (<see cref="RootClass"/>, <see cref="IconClass"/>,
+    /// <see cref="LabelClass"/>). Only the rotation is set in code.
+    /// </summary>
     public sealed class SpinnerHost : ISpinnerHost, IDisposable
     {
         private const string OverlayLayerName = "overlay-layer";
         private const string RootElementName = "spinner-host-root";
+
+        // USS classes, styled by Runtime/Styles/Default.uss.
+        public const string RootClass = "spinner";
+        public const string IconClass = "spinner__icon";
+        public const string LabelClass = "spinner__label";
 
         private readonly VisualElement _overlayLayer;
 
@@ -120,44 +129,16 @@ namespace Rubickanov.UI
         {
             if (_root != null) return;
 
-            _root = new VisualElement { name = RootElementName };
-            _root.pickingMode = PickingMode.Ignore;
-            var s = _root.style;
-            s.position = Position.Absolute;
-            s.right = 24f;
-            s.bottom = 24f;
-            s.flexDirection = FlexDirection.Row;
-            s.alignItems = Align.Center;
-            s.paddingLeft = s.paddingRight = s.paddingTop = s.paddingBottom = 8f;
-            s.backgroundColor = new Color(0f, 0f, 0f, 0.45f);
-            s.borderTopLeftRadius = s.borderTopRightRadius =
-                s.borderBottomLeftRadius = s.borderBottomRightRadius = 12f;
+            _root = new VisualElement { name = RootElementName, pickingMode = PickingMode.Ignore };
+            _root.AddToClassList(RootClass);
 
-            _icon = new VisualElement { name = "spinner-host-icon" };
-            _icon.pickingMode = PickingMode.Ignore;
-            var ics = _icon.style;
-            ics.width = ics.height = 28f;
-            ics.borderTopLeftRadius = ics.borderTopRightRadius =
-                ics.borderBottomLeftRadius = ics.borderBottomRightRadius = 14f;
-            ics.borderTopWidth = ics.borderRightWidth =
-                ics.borderBottomWidth = ics.borderLeftWidth = 3f;
-            ics.borderTopColor = Color.white;
-            var transparent = new Color(1f, 1f, 1f, 0f);
-            ics.borderRightColor = transparent;
-            ics.borderBottomColor = transparent;
-            ics.borderLeftColor = transparent;
-            ics.transformOrigin = new TransformOrigin(
-                new Length(50f, LengthUnit.Percent),
-                new Length(50f, LengthUnit.Percent));
+            _icon = new VisualElement { name = "spinner-host-icon", pickingMode = PickingMode.Ignore };
+            _icon.AddToClassList(IconClass);
             _root.Add(_icon);
 
-            _label = new Label { name = "spinner-host-label" };
-            _label.pickingMode = PickingMode.Ignore;
-            var ls = _label.style;
-            ls.marginLeft = 10f;
-            ls.color = Color.white;
-            ls.fontSize = 12f;
-            ls.display = DisplayStyle.None;
+            _label = new Label { name = "spinner-host-label", pickingMode = PickingMode.Ignore };
+            _label.AddToClassList(LabelClass);
+            _label.style.display = DisplayStyle.None;
             _root.Add(_label);
         }
 

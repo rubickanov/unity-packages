@@ -25,8 +25,11 @@ namespace Rubickanov.UI
 
         // World
         public readonly Transform? WorldAnchor;
+        public readonly Vector3 WorldOffset;
+        public readonly bool ClampToScreen;
         public readonly Camera? Camera;
 
+        /// <summary>Panel-space offset; for a world placement, applied after projection.</summary>
         public readonly Vector2 Offset;
 
         private PopupPlacement(
@@ -37,6 +40,8 @@ namespace Rubickanov.UI
             PopupSide side,
             bool autoFlip,
             Transform? worldAnchor,
+            Vector3 worldOffset,
+            bool clampToScreen,
             Camera? camera,
             Vector2 offset)
         {
@@ -47,6 +52,8 @@ namespace Rubickanov.UI
             Side = side;
             AutoFlip = autoFlip;
             WorldAnchor = worldAnchor;
+            WorldOffset = worldOffset;
+            ClampToScreen = clampToScreen;
             Camera = camera;
             Offset = offset;
         }
@@ -60,23 +67,31 @@ namespace Rubickanov.UI
 
         /// <summary>Pinned to a region of the screen, e.g. <see cref="PopupAnchorCorner.TopRight"/> for a toast.</summary>
         public static PopupPlacement Screen(PopupAnchorCorner corner, Vector2 offset = default)
-            => new(PopupPlacementMode.ScreenAnchor, corner, default, null, PopupSide.Bottom, false, null, null, offset);
+            => new(PopupPlacementMode.ScreenAnchor, corner, default, null, PopupSide.Bottom, false, null, default, true, null, offset);
 
         /// <summary>Centered on an explicit panel-space point.</summary>
         public static PopupPlacement ScreenPoint(Vector2 panelPoint, Vector2 offset = default)
-            => new(PopupPlacementMode.ScreenPoint, PopupAnchorCorner.Center, panelPoint, null, PopupSide.Bottom, false, null, null, offset);
+            => new(PopupPlacementMode.ScreenPoint, PopupAnchorCorner.Center, panelPoint, null, PopupSide.Bottom, false, null, default, true, null, offset);
 
         /// <summary>Next to a UI element, flipping to the opposite side if it would clip off-screen.</summary>
         public static PopupPlacement AtElement(VisualElement element, PopupSide side = PopupSide.Bottom,
             bool autoFlip = true, Vector2 offset = default)
-            => new(PopupPlacementMode.Element, PopupAnchorCorner.Center, default, element, side, autoFlip, null, null, offset);
+            => new(PopupPlacementMode.Element, PopupAnchorCorner.Center, default, element, side, autoFlip, null, default, true, null, offset);
 
-        /// <summary>Above a world-space object; follows the camera and hides when behind it.</summary>
-        public static PopupPlacement AtWorld(Transform anchor, Camera? camera = null, Vector2 offset = default)
-            => new(PopupPlacementMode.World, PopupAnchorCorner.Center, default, null, PopupSide.Bottom, false, anchor, camera, offset);
+        /// <summary>
+        /// Above a world-space object; follows it each frame and hides when it is behind the camera.
+        /// </summary>
+        /// <param name="worldOffset">Added to the anchor's position before projection.</param>
+        /// <param name="screenOffset">Panel-space offset added after projection.</param>
+        /// <param name="clampToScreen">Keep the popup inside the screen. False lets a marker leave the screen.</param>
+        /// <param name="camera">Projection camera. Default: the <see cref="PopupHost"/> camera provider, else <c>Camera.main</c>.</param>
+        public static PopupPlacement AtWorld(Transform anchor, Vector3 worldOffset = default, Vector2 screenOffset = default,
+            bool clampToScreen = true, Camera? camera = null)
+            => new(PopupPlacementMode.World, PopupAnchorCorner.Center, default, null, PopupSide.Bottom, false, anchor,
+                worldOffset, clampToScreen, camera, screenOffset);
 
         /// <summary>Follows the mouse cursor.</summary>
         public static PopupPlacement Cursor(Vector2 offset = default)
-            => new(PopupPlacementMode.Cursor, PopupAnchorCorner.Center, default, null, PopupSide.Bottom, false, null, null, offset);
+            => new(PopupPlacementMode.Cursor, PopupAnchorCorner.Center, default, null, PopupSide.Bottom, false, null, default, true, null, offset);
     }
 }

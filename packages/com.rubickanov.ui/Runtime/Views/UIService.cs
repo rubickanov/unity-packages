@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
+using R3;
 using UnityEngine.UIElements;
 
 namespace Rubickanov.UI
@@ -12,13 +13,15 @@ namespace Rubickanov.UI
         private readonly VisualElement _hudLayer;
         private readonly VisualElement _popupLayer;
         private readonly VisualElement _overlayLayer;
-        private Action<bool>? _onUIVisibilityChanged;
-        private bool _uiVisible;
         private readonly Dictionary<Type, View> _views = new();
         private readonly Dictionary<Type, UILayer> _viewLayers = new();
         private readonly Dictionary<Type, object> _loading = new();
         private View? _activeScreen;
         private readonly List<View> _popupStack = new();
+        private readonly ReactiveProperty<bool> _pointerCaptured = new(false);
+        private int _captureCount;
+        private readonly List<BackHandler> _backHandlers = new();
+        private bool _disposed;
 
         /// <param name="root">Element holding the layer children: screen-layer, hud-layer, popup-layer, overlay-layer.</param>
         /// <param name="loader">Loads the UXML asset of a view by name.</param>
@@ -41,7 +44,7 @@ namespace Rubickanov.UI
         public IReadOnlyList<View> DebugPopupStack => _popupStack;
 #endif
 
-        public void SetVisibilityCallback(Action<bool> callback) => _onUIVisibilityChanged = callback;
+        public ReadOnlyReactiveProperty<bool> PointerCaptured => _pointerCaptured;
 
         public async UniTask Register<T>() where T : View
         {
@@ -86,6 +89,7 @@ namespace Rubickanov.UI
                 view.Root.style.position = Position.Absolute;
                 view.Root.style.left = view.Root.style.top =
                     view.Root.style.right = view.Root.style.bottom = 0;
+                view.Owner = this;
                 view.Initialize();
             }
             catch
@@ -208,14 +212,18 @@ namespace Rubickanov.UI
                     var previous = _activeScreen;
                     _activeScreen = view;
                     if (previous != null && previous != view)
+                    {
+                        ReleaseInput(previous);
                         previous.HideAsync().Forget();
+                    }
+                    AcquireInput(view);
                     break;
                 case UILayer.Popup:
                     _popupStack.Remove(view);
                     _popupStack.Add(view);
+                    AcquireInput(view);
                     break;
             }
-            UpdateVisibility();
 
             try
             {
@@ -244,6 +252,11 @@ namespace Rubickanov.UI
         {
             if (!_views.TryGetValue(typeof(T), out var view)) return UniTask.CompletedTask;
 
+            return HideViewAsync(view);
+        }
+
+        internal UniTask HideViewAsync(View view)
+        {
             RemoveFromStacks(view);
             return view.HideAsync();
         }
@@ -261,9 +274,7 @@ namespace Rubickanov.UI
         {
             if (_popupStack.Count == 0) return UniTask.CompletedTask;
 
-            var top = _popupStack[^1];
-            RemoveFromStacks(top);
-            return top.HideAsync();
+            return HideViewAsync(_popupStack[^1]);
         }
 
         public void HideAll()
@@ -291,7 +302,7 @@ namespace Rubickanov.UI
 
             _popupStack.Clear();
             _activeScreen = null;
-            UpdateVisibility();
+            foreach (var view in views) ReleaseInput(view);
             return views;
         }
 
@@ -299,23 +310,113 @@ namespace Rubickanov.UI
         {
             if (_activeScreen == view) _activeScreen = null;
             _popupStack.Remove(view);
-            UpdateVisibility();
+            ReleaseInput(view);
         }
 
-        private void UpdateVisibility()
+        // ── Input: pointer capture and back stack (D8, D9) ───────
+
+        /// <summary>Takes a fresh capture and back handler for a visible screen or popup, on top of the others.</summary>
+        private void AcquireInput(View view)
         {
-            var visible = _activeScreen != null || _popupStack.Count > 0;
-            if (visible == _uiVisible) return;
-            _uiVisible = visible;
-            _onUIVisibilityChanged?.Invoke(visible);
+            ReleaseInput(view);
+            view.PointerCapture = CapturePointer();
+            view.BackHandle = PushBackHandler(view.HandleBack);
+        }
+
+        private static void ReleaseInput(View view)
+        {
+            var capture = view.PointerCapture;
+            var back = view.BackHandle;
+            view.PointerCapture = null;
+            view.BackHandle = null;
+            capture?.Dispose();
+            back?.Dispose();
+        }
+
+        public IDisposable CapturePointer()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(UIService));
+
+            _captureCount++;
+            _pointerCaptured.Value = true;
+            return new PointerCaptureHandle(this);
+        }
+
+        private void ReleasePointer()
+        {
+            if (_disposed || _captureCount == 0) return;
+
+            _captureCount--;
+            _pointerCaptured.Value = _captureCount > 0;
+        }
+
+        public IDisposable PushBackHandler(Func<bool> handler)
+        {
+            if (handler == null) throw new ArgumentNullException(nameof(handler));
+            if (_disposed) throw new ObjectDisposedException(nameof(UIService));
+
+            var entry = new BackHandler(this, handler);
+            _backHandlers.Add(entry);
+            return entry;
+        }
+
+        public bool Back()
+        {
+            if (_backHandlers.Count == 0) return false;
+
+            // Snapshot: a handler usually removes itself (a popup hides) or pushes another.
+            var snapshot = _backHandlers.ToArray();
+            for (int i = snapshot.Length - 1; i >= 0; i--)
+            {
+                var entry = snapshot[i];
+                if (entry.Removed) continue;
+                if (entry.Handler()) return true;
+            }
+            return false;
+        }
+
+        private sealed class PointerCaptureHandle : IDisposable
+        {
+            private UIService? _owner;
+
+            public PointerCaptureHandle(UIService owner) => _owner = owner;
+
+            public void Dispose()
+            {
+                var owner = _owner;
+                _owner = null;
+                owner?.ReleasePointer();
+            }
+        }
+
+        private sealed class BackHandler : IDisposable
+        {
+            private readonly UIService _owner;
+            public readonly Func<bool> Handler;
+            public bool Removed { get; private set; }
+
+            public BackHandler(UIService owner, Func<bool> handler)
+            {
+                _owner = owner;
+                Handler = handler;
+            }
+
+            public void Dispose()
+            {
+                if (Removed) return;
+                Removed = true;
+                _owner._backHandlers.Remove(this);
+            }
         }
 
         public void Dispose()
         {
+            if (_disposed) return;
+
             _loading.Clear();
             _popupStack.Clear();
             _activeScreen = null;
-            _uiVisible = false;
+            foreach (var view in _views.Values) ReleaseInput(view);
 
             List<Exception>? errors = null;
             foreach (var view in _views.Values)
@@ -326,6 +427,12 @@ namespace Rubickanov.UI
 
             _views.Clear();
             _viewLayers.Clear();
+
+            foreach (var entry in _backHandlers.ToArray()) entry.Dispose();
+            _captureCount = 0;
+            _pointerCaptured.Value = false;
+            _disposed = true;
+            _pointerCaptured.Dispose();
 #if UNITY_EDITOR
             DebugRegistry.Unregister(this);
 #endif
