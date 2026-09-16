@@ -8,7 +8,7 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-All at version `1.0.0`:
+All at version `1.0.0`, except `ui`, `ui.animations`, `ui.loading`, `ui.localization` at `2.0.0`:
 
 | Package | Purpose |
 |---|---|
@@ -33,10 +33,10 @@ All at version `1.0.0`:
 | `statemachine` | Generic FSM, hierarchical, deferred transitions, zero-alloc. |
 | `steam-transport` | NGO transport over Steam Networking Sockets P2P. |
 | `storage` | Key-value storage with pluggable backends (PlayerPrefs / file / encrypted). |
-| `ui` | Backend-agnostic UI framework: views, layers, dialogs. |
-| `ui.animations` | LitMotion-based view animations for UI framework. |
-| `ui.loading` | Bridge between UI framework and `loading` pipeline. |
-| `ui.localization` | Localization bindings for UI views. |
+| `ui` | UI Toolkit framework (no UGUI or TextMeshPro): views with view models on layers, popups, dialogs, tooltips, spinner, pointer capture and back stack, UXML catalog. |
+| `ui.animations` | LitMotion fade/scale/slide/composite animations for UI views and popups. |
+| `ui.loading` | Registers UI views into a scene scope as a `loading` pipeline step. |
+| `ui.localization` | Localized text and RTL bindings for UI views, localized values in view models. |
 | `utils` | Shared utilities: deterministic random, circular buffer, pooling, etc. |
 
 ## Repo layout

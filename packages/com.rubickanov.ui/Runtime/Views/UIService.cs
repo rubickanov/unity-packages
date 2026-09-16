@@ -42,6 +42,8 @@ namespace Rubickanov.UI
         public IReadOnlyDictionary<Type, UILayer> DebugViewLayers => _viewLayers;
         public View? DebugActiveScreen => _activeScreen;
         public IReadOnlyList<View> DebugPopupStack => _popupStack;
+        public int DebugPointerCaptureCount => _captureCount;
+        public int DebugBackStackDepth => _backHandlers.Count;
 #endif
 
         public ReadOnlyReactiveProperty<bool> PointerCaptured => _pointerCaptured;

@@ -76,6 +76,7 @@ namespace Rubickanov.UI.Editor
             if (!expanded) return;
 
             EditorGUI.indentLevel++;
+            DrawInput(service);
             DrawActiveScreen(service);
             DrawPopupStack(service);
             DrawRegisteredViews(service);
@@ -84,12 +85,23 @@ namespace Rubickanov.UI.Editor
             EditorGUILayout.Space();
         }
 
+        private static void DrawInput(UIService service)
+        {
+            EditorGUILayout.LabelField("Input", EditorStyles.boldLabel);
+            EditorGUI.indentLevel++;
+            var captured = service.PointerCaptured.CurrentValue ? "captured" : "free";
+            EditorGUILayout.LabelField("Pointer", $"{captured} ({service.DebugPointerCaptureCount} held)");
+            EditorGUILayout.LabelField("Back stack depth", service.DebugBackStackDepth.ToString());
+            EditorGUI.indentLevel--;
+        }
+
         private static void DrawActiveScreen(UIService service)
         {
             EditorGUILayout.LabelField("Active Screen", EditorStyles.boldLabel);
             EditorGUI.indentLevel++;
             var active = service.DebugActiveScreen;
-            EditorGUILayout.LabelField(active != null ? active.GetType().Name : "None");
+            if (active != null) DrawViewRow(active.GetType(), active);
+            else EditorGUILayout.LabelField("None");
             EditorGUI.indentLevel--;
         }
 
@@ -106,7 +118,7 @@ namespace Rubickanov.UI.Editor
             {
                 for (var i = stack.Count - 1; i >= 0; i--)
                 {
-                    EditorGUILayout.LabelField($"[{stack.Count - 1 - i}] {stack[i].GetType().Name}");
+                    DrawViewRow(stack[i].GetType(), stack[i]);
                 }
             }
 
@@ -148,13 +160,15 @@ namespace Rubickanov.UI.Editor
 
         private static void DrawViewRow(Type viewType, View view)
         {
-            EditorGUILayout.BeginHorizontal();
             var color = GUI.color;
-            GUI.color = view.IsVisible ? Color.green : new Color(0.6f, 0.6f, 0.6f);
-            EditorGUILayout.LabelField(view.IsVisible ? "●" : "○", GUILayout.Width(20));
+            GUI.color = view.State switch
+            {
+                ViewState.Shown => Color.green,
+                ViewState.Showing or ViewState.Hiding => Color.yellow,
+                _ => new Color(0.6f, 0.6f, 0.6f)
+            };
+            EditorGUILayout.LabelField(viewType.Name, view.State.ToString());
             GUI.color = color;
-            EditorGUILayout.LabelField(viewType.Name);
-            EditorGUILayout.EndHorizontal();
         }
 
         private static void DrawActions(UIService service)

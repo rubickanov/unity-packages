@@ -1,9 +1,9 @@
 {
   "name": "com.rubickanov.ui",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "license": "MIT",
   "displayName": "UI Framework",
-  "description": "Backend-agnostic UI framework with view lifecycle, layer management, and dialog system.",
+  "description": "UI Toolkit framework: views with view models on layers, popups, dialogs, tooltips and a spinner.",
   "unity": "6000.0",
   "author": {
     "name": "rubickanov"
