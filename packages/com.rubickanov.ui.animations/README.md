@@ -1,105 +1,61 @@
 # UI Animations
 
-LitMotion-based view animations for the [UI](../com.rubickanov.ui/) package. Implements `IViewAnimation` as fade, scale, slide, and composite tweens that drive an `IAnimationTarget` (float properties only — no engine references in the animation logic).
+LitMotion fade, scale, slide and composite animations for views and popups. Extension for [UI](../com.rubickanov.ui/).
 
 ## Dependencies
 
 > `UniTask` and `LitMotion` come from git URLs, not from UPM — UPM will not pull them in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
-- `com.rubickanov.ui` — base package: `IViewAnimation`, `IAnimationTarget`, `NoneAnimation`, `UIToolkitView<>`
-- `UniTask` — `PlayShowAsync` / `PlayHideAsync` return `UniTask`
-- `LitMotion` — tween engine (`LMotion.Create(...).Bind(...)`)
-
-Unity 6000.0+.
+- `com.rubickanov.ui` — base package: `IViewAnimation`, `View.Animation`, `PopupHost`
+- `UniTask` — animations are awaited with the view's cancellation token
+- `LitMotion` — tween engine
 
 ## Quick Start
 
-Override `OnShowAsync` / `OnHideAsync` in a view and return a `ViewAnimations` factory call. The base view passes its own `IAnimationTarget` (a `UIToolkitAnimationTarget` wrapping `Root`) and a duration; `ShowAsync()` / `HideAsync()` invoke these overrides whenever the UI service shows or hides the view.
-
 ```csharp
-using Cysharp.Threading.Tasks;
-using Rubickanov.UI;
-using Rubickanov.UI.Animations;
-using Rubickanov.UI.UIToolkit;
-
-public sealed class PausePopup : UIToolkitView<PauseViewModel>
+public sealed class PauseView : View<PauseViewModel>
 {
-    protected override UniTask OnShowAsync(IAnimationTarget root, float duration)
-        => ViewAnimations.FadeAndScale.PlayShowAsync(root, duration);
+    protected override UILayer Layer => UILayer.Popup;
+    protected override IViewAnimation Animation => ViewAnimations.FadeAndScale;
 
-    protected override UniTask OnHideAsync(IAnimationTarget root, float duration)
-        => ViewAnimations.Fade.PlayHideAsync(root, duration);
+    protected override void OnBind() { }
 }
 ```
 
-`PlayShowAsync` / `PlayHideAsync` return `UniTask` — you must `return`, `await`, or `.Forget()` the result, or the tween is dropped silently.
+The view plays `Animation` on every show and hide. Showing during a hide, or hiding during a show, cancels the running tween.
 
 ## Usage
 
-### Built-in Animations
+### Ready instances
 
-`ViewAnimations` exposes cached singleton instances — safe to read from hot paths without per-access allocations. Show eases use `Ease.OutCubic`, hide eases use `Ease.InCubic`.
+`ViewAnimations` holds shared instances with a 0.3 s duration: `None`, `Fade`, `Scale` (0.8 → 1), `SlideFromLeft`, `SlideFromRight`, `SlideFromTop`, `SlideFromBottom` (100 px), `FadeAndScale`.
 
-| Property | Effect |
-|----------|--------|
-| `ViewAnimations.None` | No tween; resets animation state only (`NoneAnimation`) |
-| `ViewAnimations.Fade` | `Opacity` 0 → 1 on show, 1 → 0 on hide |
-| `ViewAnimations.Scale` | Uniform scale 0.8 → 1 on show, 1 → 0.8 on hide |
-| `ViewAnimations.FadeAndScale` | `Fade` and `Scale` composited in parallel |
-| `ViewAnimations.SlideFromLeft` | `TranslateX` −100 → 0 on show, reverse on hide |
-| `ViewAnimations.SlideFromRight` | `TranslateX` +100 → 0 on show, reverse on hide |
-| `ViewAnimations.SlideFromTop` | `TranslateY` −100 → 0 on show, reverse on hide |
-| `ViewAnimations.SlideFromBottom` | `TranslateY` +100 → 0 on show, reverse on hide |
+### Duration, ease and offset
 
-### Custom Animations
-
-`FadeAnimation`, `ScaleAnimation`, and `SlideAnimation` are constructible directly when the cached singletons don't fit. `ScaleAnimation` takes a start scale; `SlideAnimation` takes a direction and an offset (default 100).
+Duration and ease are set on the instance. Keep one instance per configuration in a static field rather than a new one per access.
 
 ```csharp
-var bigPop = new ScaleAnimation(startScale: 0.5f);
-var slideUp = new SlideAnimation(SlideDirection.Bottom, offset: 200f);
+private static readonly IViewAnimation QuickFade = new FadeAnimation(0.15f);
+private static readonly IViewAnimation DrawerIn = ViewAnimations.Combine(
+    new SlideAnimation(SlideDirection.Right, offset: 320f, duration: 0.25f, showEase: Ease.OutQuart),
+    new FadeAnimation(0.25f));
 
-await slideUp.PlayShowAsync(root, duration);
+protected override IViewAnimation Animation => DrawerIn;
 ```
 
-### Composites
+`ScaleAnimation(startScale, duration, showEase, hideEase)` scales from `startScale` to 1 on show. `Reset` clears the opacity, scale or translate the animation set, and runs when a view hides.
 
-`ViewAnimations.Combine` (or `new CompositeAnimation(...)`) runs several animations in parallel via `UniTask.WhenAll`:
+### Popups
 
 ```csharp
-IViewAnimation entrance = ViewAnimations.Combine(
-    ViewAnimations.Fade,
-    new SlideAnimation(SlideDirection.Bottom, offset: 200f));
+var popups = new PopupHost(root, ui, animation: ViewAnimations.Fade); // default for every popup
 
-protected override UniTask OnShowAsync(IAnimationTarget root, float duration)
-    => entrance.PlayShowAsync(root, duration);
+popups.Create()
+    .Title("Hull breach")
+    .Message("Deck 2 is losing pressure.")
+    .Animation(new SlideAnimation(SlideDirection.Top, offset: 40f, duration: 0.2f))
+    .Timeout(4f)
+    .Open();
 ```
 
-A `CompositeAnimation` reuses one internal task buffer, so a single instance must not be played reentrantly — fine under the framework's sequential per-view show/hide.
-
-### Animating Individual Elements
-
-The `root` target wraps the whole view. To animate a child element, wrap it in a `UIToolkitAnimationTarget` (cache it in `OnInitialize`) and play against that target:
-
-```csharp
-private UIToolkitAnimationTarget _panel = default!;
-
-protected override void OnInitialize()
-    => _panel = new UIToolkitAnimationTarget(Root.Q("panel"));
-
-protected override UniTask OnShowAsync(IAnimationTarget root, float duration)
-    => UniTask.WhenAll(
-        ViewAnimations.Fade.PlayShowAsync(root, duration),
-        new ScaleAnimation(0.9f).PlayShowAsync(_panel, duration));
-```
-
-### Default Slot
-
-`ViewAnimations.Default` is a mutable slot for sharing one entrance style across views. It is not applied automatically — views with no `OnShowAsync` override stay instant; you read it yourself:
-
-```csharp
-ViewAnimations.Default = ViewAnimations.FadeAndScale;
-
-protected override UniTask OnShowAsync(IAnimationTarget root, float duration)
-    => ViewAnimations.Default.PlayShowAsync(root, duration);
-```
+A `CompositeAnimation` reuses one task buffer: do not play the same instance on two targets at once.

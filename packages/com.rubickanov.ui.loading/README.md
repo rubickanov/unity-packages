@@ -1,55 +1,45 @@
 # UI Loading
 
-Bridge between the [UI](../com.rubickanov.ui/) framework and the [Loading](../com.rubickanov.loading/) pipeline. Adds `RegisterViewsOperation`, an `ILoadingOperation` that opens a `SceneViewScopeService` scope and registers a declared set of views while a scene loads.
+Registers views as a step of a loading pipeline, into a fresh scene scope. Extension for [UI](../com.rubickanov.ui/), bridging it to [Loading](../com.rubickanov.loading/).
 
 ## Dependencies
 
 > `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
-- `com.rubickanov.ui` — `SceneViewScopeService`, `ScopedViewRegistration`, `UILayer`, `IView`
+- `com.rubickanov.ui` — base package: `SceneViewScopeService`, `ScopedViewRegistration`, `View`
 - `com.rubickanov.loading` — `ILoadingOperation`, `ILoadingService`
 - `UniTask` — async/await
 
 ## Quick Start
 
-Build the operation, declaring each view and its layer, then hand it to the loading service on scene entry:
-
 ```csharp
-var op = new RegisterViewsOperation(_scopeService)
-    .Add<HudView>(UILayer.Screen)
-    .Add<PausePopup>(UILayer.Popup)
-    .Add<DamageNumberOverlay>(UILayer.Overlay);
+var registerUi = new RegisterViewsOperation(sceneScopes)
+    .Add<HudView>()
+    .Add<PauseView>()
+    .Add<ScoreboardView>();
 
-await _loadingService.Load(new ILoadingOperation[] { op });
+await loadingService.Load(new ILoadingOperation[] { loadSector, registerUi, spawnShips });
 ```
 
-`ILoadingService.Load` takes an ordered list of operations, so `RegisterViewsOperation` sits alongside your asset-loading and world-spawn steps. On completion the declared views are registered with the UI service for the lifetime of the scene scope.
+Each view goes onto the layer it declares. `Execute` opens a new scope with `SceneViewScopeService.Begin()`, which disposes the previous scene's scope and unregisters its views, then registers the queued views in order and reports progress per view.
 
 ## Usage
 
 ### Scope ownership
 
-The scope opened during `Execute` is owned by `SceneViewScopeService`, not by the operation. The operation never disposes it — neither on success nor on exception. Each call to `SceneViewScopeService.Begin()` auto-disposes the previous scope, so scope lifetime is tied to the scene, not to the loading run. Partial registrations from an interrupted run therefore stay valid until the next scene transition or service disposal.
+The scope belongs to `SceneViewScopeService`, not to the operation: it is not disposed when the operation finishes or throws. It lives until the next `Begin()` or until the service is disposed. If the scope is replaced or disposed while a view is loading, `Execute` throws `OperationCanceledException` and no view of that scope stays registered.
 
-### Single-use
+### Rules
 
-Each `RegisterViewsOperation` is single-use. Calling `Execute` twice throws `InvalidOperationException`. Create a fresh instance per scene load.
+- An operation is single-use: a second `Execute` throws `InvalidOperationException`. Build one per scene load.
+- Adding the same view type twice throws `InvalidOperationException`.
+- A cancelled token before `Execute` starts leaves the current scope untouched.
 
-### Duplicate registrations
-
-Adding the same view type twice to one operation throws `InvalidOperationException` — duplicates are rejected rather than silently collapsed.
-
-```csharp
-new RegisterViewsOperation(_scopeService)
-    .Add<HudView>(UILayer.Screen)
-    .Add<HudView>(UILayer.Popup); // throws: HudView already added
-```
-
-### Custom description
-
-`Description` is surfaced to loading presenters and defaults to `"Loading UI..."`. Override it for localized or contextual text:
+### Presenter text
 
 ```csharp
-var op = new RegisterViewsOperation(_scopeService, description: "Preparing interface...")
-    .Add<HudView>(UILayer.Screen);
+var registerUi = new RegisterViewsOperation(sceneScopes, description: "Preparing bridge consoles...")
+    .Add<HelmView>();
 ```
+
+`Description` is shown by loading presenters; the default is `"Loading UI..."`.
