@@ -86,7 +86,7 @@ namespace Rubickanov.ACS.Tests
             }
             finally
             {
-                Object.DestroyImmediate(go);
+                UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
