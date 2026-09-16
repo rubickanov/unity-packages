@@ -3,7 +3,7 @@
     "rootNamespace": "Rubickanov.UI.Animations.Tests",
     "references": [
         "Rubickanov.UI.Animations",
-        "Rubickanov.UI.Runtime",
+        "Rubickanov.UI",
         "UniTask",
         "LitMotion"
     ],

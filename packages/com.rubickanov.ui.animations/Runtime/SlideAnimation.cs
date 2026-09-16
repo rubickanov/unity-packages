@@ -1,6 +1,8 @@
 using System;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using LitMotion;
+using UnityEngine.UIElements;
 
 namespace Rubickanov.UI.Animations
 {
@@ -21,41 +23,50 @@ namespace Rubickanov.UI.Animations
     {
         private readonly SlideDirection _direction;
         private readonly float _offset;
+        private readonly float _duration;
+        private readonly Ease _showEase;
+        private readonly Ease _hideEase;
 
         /// <param name="direction">Edge to slide from on show.</param>
-        /// <param name="offset">Non-negative distance in translate units. Default 100.</param>
-        public SlideAnimation(SlideDirection direction, float offset = 100f)
+        /// <param name="offset">Non-negative distance in pixels. Default 100.</param>
+        /// <param name="duration">Duration of show and hide in seconds.</param>
+        /// <param name="showEase">Ease of the show motion.</param>
+        /// <param name="hideEase">Ease of the hide motion.</param>
+        public SlideAnimation(SlideDirection direction, float offset = 100f, float duration = 0.3f,
+            Ease showEase = Ease.OutCubic, Ease hideEase = Ease.InCubic)
         {
             if (offset < 0f)
                 throw new ArgumentOutOfRangeException(nameof(offset), "Offset must be non-negative.");
 
             _direction = direction;
             _offset = offset;
+            _duration = duration;
+            _showEase = showEase;
+            _hideEase = hideEase;
         }
 
-        public async UniTask PlayShowAsync(IAnimationTarget target, float duration)
+        public UniTask PlayShowAsync(VisualElement target, CancellationToken ct)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
             var (startX, startY) = GetOffset();
-            target.TranslateX = startX;
-            target.TranslateY = startY;
+            target.style.translate = new Translate(startX, startY);
 
             if (startX != 0f)
             {
-                await LMotion.Create(startX, 0f, duration)
-                    .WithEase(Ease.OutCubic)
-                    .Bind(target, static (x, t) => t.TranslateX = x);
+                return LMotion.Create(startX, 0f, _duration)
+                    .WithEase(_showEase)
+                    .Bind(target, static (x, t) => t.style.translate = new Translate(x, 0f))
+                    .ToUniTask(ct);
             }
-            else
-            {
-                await LMotion.Create(startY, 0f, duration)
-                    .WithEase(Ease.OutCubic)
-                    .Bind(target, static (y, t) => t.TranslateY = y);
-            }
+
+            return LMotion.Create(startY, 0f, _duration)
+                .WithEase(_showEase)
+                .Bind(target, static (y, t) => t.style.translate = new Translate(0f, y))
+                .ToUniTask(ct);
         }
 
-        public async UniTask PlayHideAsync(IAnimationTarget target, float duration)
+        public UniTask PlayHideAsync(VisualElement target, CancellationToken ct)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
@@ -63,16 +74,23 @@ namespace Rubickanov.UI.Animations
 
             if (endX != 0f)
             {
-                await LMotion.Create(0f, endX, duration)
-                    .WithEase(Ease.InCubic)
-                    .Bind(target, static (x, t) => t.TranslateX = x);
+                return LMotion.Create(0f, endX, _duration)
+                    .WithEase(_hideEase)
+                    .Bind(target, static (x, t) => t.style.translate = new Translate(x, 0f))
+                    .ToUniTask(ct);
             }
-            else
-            {
-                await LMotion.Create(0f, endY, duration)
-                    .WithEase(Ease.InCubic)
-                    .Bind(target, static (y, t) => t.TranslateY = y);
-            }
+
+            return LMotion.Create(0f, endY, _duration)
+                .WithEase(_hideEase)
+                .Bind(target, static (y, t) => t.style.translate = new Translate(0f, y))
+                .ToUniTask(ct);
+        }
+
+        public void Reset(VisualElement target)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            target.style.translate = StyleKeyword.Null;
         }
 
         private (float x, float y) GetOffset() => _direction switch

@@ -1,33 +1,53 @@
 using System;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using LitMotion;
+using UnityEngine.UIElements;
 
 namespace Rubickanov.UI.Animations
 {
     /// <summary>
-    /// Fades <see cref="IAnimationTarget.Opacity"/> from 0 → 1 on show, 1 → 0 on hide.
+    /// Fades opacity from 0 → 1 on show, 1 → 0 on hide.
     /// </summary>
     public sealed class FadeAnimation : IViewAnimation
     {
-        public static readonly FadeAnimation Instance = new();
+        private readonly float _duration;
+        private readonly Ease _showEase;
+        private readonly Ease _hideEase;
 
-        public async UniTask PlayShowAsync(IAnimationTarget target, float duration)
+        public FadeAnimation(float duration = 0.3f, Ease showEase = Ease.OutCubic, Ease hideEase = Ease.InCubic)
         {
-            if (target == null) throw new ArgumentNullException(nameof(target));
-
-            target.Opacity = 0f;
-            await LMotion.Create(0f, 1f, duration)
-                .WithEase(Ease.OutCubic)
-                .Bind(target, static (x, t) => t.Opacity = x);
+            _duration = duration;
+            _showEase = showEase;
+            _hideEase = hideEase;
         }
 
-        public async UniTask PlayHideAsync(IAnimationTarget target, float duration)
+        public UniTask PlayShowAsync(VisualElement target, CancellationToken ct)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
-            await LMotion.Create(1f, 0f, duration)
-                .WithEase(Ease.InCubic)
-                .Bind(target, static (x, t) => t.Opacity = x);
+            target.style.opacity = 0f;
+            return LMotion.Create(0f, 1f, _duration)
+                .WithEase(_showEase)
+                .Bind(target, static (x, t) => t.style.opacity = x)
+                .ToUniTask(ct);
+        }
+
+        public UniTask PlayHideAsync(VisualElement target, CancellationToken ct)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            return LMotion.Create(1f, 0f, _duration)
+                .WithEase(_hideEase)
+                .Bind(target, static (x, t) => t.style.opacity = x)
+                .ToUniTask(ct);
+        }
+
+        public void Reset(VisualElement target)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            target.style.opacity = StyleKeyword.Null;
         }
     }
 }

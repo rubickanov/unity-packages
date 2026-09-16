@@ -21,8 +21,6 @@ namespace Rubickanov.UI.Tests
                 Typed = CreateCommand<string>();
                 Event = CreateSubject<int>();
             }
-
-            public new void AddDisposable(IDisposable d) => base.AddDisposable(d);
         }
 
         private sealed class DisposeCounter : IDisposable
@@ -98,23 +96,11 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public void Dispose_DisposesTrackedExternalDisposable()
-        {
-            var vm = new SampleViewModel();
-            var tracked = new DisposeCounter();
-            vm.AddDisposable(tracked);
-
-            vm.Dispose();
-
-            Assert.AreEqual(1, tracked.Disposes);
-        }
-
-        [Test]
         public void Dispose_CalledTwice_IsSafe()
         {
             var vm = new SampleViewModel();
             var tracked = new DisposeCounter();
-            vm.AddDisposable(tracked);
+            vm.TrackDisposable(tracked);
 
             vm.Dispose();
             Assert.DoesNotThrow(() => vm.Dispose());

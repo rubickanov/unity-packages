@@ -146,7 +146,7 @@ namespace Rubickanov.UI.Editor
             EditorGUI.indentLevel--;
         }
 
-        private static void DrawViewRow(Type viewType, IView view)
+        private static void DrawViewRow(Type viewType, View view)
         {
             EditorGUILayout.BeginHorizontal();
             var color = GUI.color;

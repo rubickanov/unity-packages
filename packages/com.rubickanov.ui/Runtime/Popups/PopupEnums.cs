@@ -1,6 +1,6 @@
 using System;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>How a popup interacts with input underneath it.</summary>
     public enum PopupBehaviour

@@ -7,16 +7,12 @@ namespace Rubickanov.UI.Tests
     [TestFixture]
     public class SceneViewScopeServiceTests
     {
-        private FakeViewFactory _factory = null!;
         private UIService _ui = null!;
 
         [SetUp]
         public void SetUp()
         {
-            _factory = new FakeViewFactory();
-            _ui = new UIService(_factory);
-            _factory.Preset<FakeViewA>(new FakeViewA());
-            _factory.Preset<FakeViewB>(new FakeViewB());
+            _ui = new UIService(TestRoot.Create(), new RecordingUxmlLoader().Load);
         }
 
         [TearDown]

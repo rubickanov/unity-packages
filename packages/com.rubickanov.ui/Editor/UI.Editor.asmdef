@@ -2,7 +2,7 @@
     "name": "Rubickanov.UI.Editor",
     "rootNamespace": "Rubickanov.UI.Editor",
     "references": [
-        "Rubickanov.UI.Runtime"
+        "Rubickanov.UI"
     ],
     "includePlatforms": [
         "Editor"

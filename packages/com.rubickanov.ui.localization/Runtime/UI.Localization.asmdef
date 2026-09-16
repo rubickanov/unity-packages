@@ -1,9 +1,10 @@
 {
-    "name": "Rubickanov.UI.Localization.Runtime",
+    "name": "Rubickanov.UI.Localization",
     "rootNamespace": "Rubickanov.UI.Localization",
     "references": [
-        "Rubickanov.UI.Runtime",
-        "Rubickanov.Localization.Runtime"
+        "Rubickanov.UI",
+        "Rubickanov.Localization.Runtime",
+        "Unity.Localization"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

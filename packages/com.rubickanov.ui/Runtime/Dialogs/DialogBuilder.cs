@@ -3,52 +3,69 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
+    /// <summary>
+    /// Builds a centered modal dialog shown through <see cref="IPopupService"/>.
+    /// </summary>
     public class DialogBuilder
     {
-        private readonly Func<DynamicDialogViewModel, UniTask<DialogResult>> _showFunc;
-        private readonly DynamicDialogViewModel _vm;
+        private readonly IPopupService _popups;
+        private readonly PopupConfig _config;
 
-        internal DialogBuilder(string title, Func<DynamicDialogViewModel, UniTask<DialogResult>> showFunc)
+        internal DialogBuilder(string title, IPopupService popups)
         {
-            _showFunc = showFunc;
-            _vm = new DynamicDialogViewModel(title);
+            _popups = popups;
+            _config = new PopupConfig
+            {
+                Title = title,
+                Behaviour = PopupBehaviour.Modal,
+                Placement = PopupPlacement.ScreenCenter(),
+                CloseTriggers = PopupCloseTriggers.Escape | PopupCloseTriggers.ActionButton
+            };
         }
 
         public DialogBuilder WithMessage(string message)
         {
-            _vm.Message = message;
+            _config.Message = message;
             return this;
         }
 
         public DialogBuilder WithImage(Texture2D texture)
         {
-            _vm.Image = texture;
+            _config.Icon = texture;
             return this;
         }
 
         public DialogBuilder WithContent(Func<VisualElement> contentFactory)
         {
-            _vm.ContentFactory = contentFactory;
+            _config.ContentFactory = contentFactory;
             return this;
         }
 
         public DialogBuilder WithInput(string placeholder = "", string defaultValue = "")
         {
-            _vm.HasInput = true;
-            _vm.InputPlaceholder = placeholder;
-            _vm.InputDefault = defaultValue;
-            _vm.InputValue = defaultValue;
+            _config.HasInput = true;
+            _config.InputPlaceholder = placeholder;
+            _config.InputDefault = defaultValue;
             return this;
         }
 
         public DialogBuilder AddButton(string text, string id, bool isPrimary = false)
         {
-            _vm.Buttons.Add(new ButtonConfig(text, id, isPrimary));
+            _config.Buttons.Add(new PopupButton(text, id, isPrimary));
             return this;
         }
 
-        public UniTask<DialogResult> ShowAsync() => _showFunc(_vm);
+        public async UniTask<DialogResult> ShowAsync()
+        {
+            var result = await _popups.Open(_config).Result;
+
+            // Escape or a close without a button maps to the last button.
+            var buttons = _config.Buttons;
+            var buttonId = result.ButtonId
+                ?? (buttons.Count > 0 ? buttons[^1].Id : string.Empty);
+            return new DialogResult(buttonId, _config.HasInput ? result.InputText : null);
+        }
     }
 }

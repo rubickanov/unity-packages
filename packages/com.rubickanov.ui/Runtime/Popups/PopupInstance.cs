@@ -3,7 +3,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>Callbacks a <see cref="PopupInstance"/> needs from its host.</summary>
     internal interface IPopupHostCallbacks
@@ -18,7 +18,6 @@ namespace Rubickanov.UI.UIToolkit
     /// <summary>
     /// One open popup: owns its backdrop (modal only) and panel elements, builds content from a
     /// <see cref="PopupConfig"/>, wires close triggers, and positions itself via <see cref="PopupPlacementResolver"/>.
-    /// Content build mirrors <see cref="DynamicPopup"/>; positioning mirrors <see cref="TooltipService"/>.
     /// </summary>
     internal sealed class PopupInstance : IPopupHandle
     {

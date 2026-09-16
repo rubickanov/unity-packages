@@ -1,5 +1,5 @@
 {
-    "name": "Rubickanov.UI.Runtime",
+    "name": "Rubickanov.UI",
     "rootNamespace": "Rubickanov.UI",
     "references": [
         "UniTask"
@@ -12,5 +12,5 @@
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],
-    "noEngineReferences": true
+    "noEngineReferences": false
 }

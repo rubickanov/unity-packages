@@ -11,7 +11,7 @@ namespace Rubickanov.UI
 
         public ScopedViewRegistration(IUIService ui) => _ui = ui;
 
-        public async UniTask Register<T>(UILayer layer) where T : class, IView
+        public async UniTask Register<T>(UILayer layer) where T : View
         {
             await _ui.Register<T>(layer);
             _cleanupActions.Add(() => _ui.Unregister<T>());

@@ -11,20 +11,14 @@ namespace Rubickanov.UI.Loading.Tests
     [TestFixture]
     public class RegisterViewsOperationTests
     {
-        private FakeViewFactory _factory = null!;
         private UIService _ui = null!;
         private SceneViewScopeService _scope = null!;
 
         [SetUp]
         public void SetUp()
         {
-            _factory = new FakeViewFactory();
-            _ui = new UIService(_factory);
+            _ui = new UIService(TestRoot.Create(), TestRoot.NoUxml);
             _scope = new SceneViewScopeService(_ui);
-
-            _factory.Preset<FakeViewA>(new FakeViewA());
-            _factory.Preset<FakeViewB>(new FakeViewB());
-            _factory.Preset<FakeViewC>(new FakeViewC());
         }
 
         [TearDown]

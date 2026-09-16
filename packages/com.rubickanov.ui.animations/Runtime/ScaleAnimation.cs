@@ -1,6 +1,9 @@
 using System;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using LitMotion;
+using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace Rubickanov.UI.Animations
 {
@@ -11,39 +14,52 @@ namespace Rubickanov.UI.Animations
     public sealed class ScaleAnimation : IViewAnimation
     {
         private readonly float _startScale;
+        private readonly float _duration;
+        private readonly Ease _showEase;
+        private readonly Ease _hideEase;
 
         /// <param name="startScale">Scale at the start of show / end of hide. Typically between 0 and 1.</param>
-        public ScaleAnimation(float startScale = 0.8f)
+        /// <param name="duration">Duration of show and hide in seconds.</param>
+        /// <param name="showEase">Ease of the show motion.</param>
+        /// <param name="hideEase">Ease of the hide motion.</param>
+        public ScaleAnimation(float startScale = 0.8f, float duration = 0.3f,
+            Ease showEase = Ease.OutCubic, Ease hideEase = Ease.InCubic)
         {
             _startScale = startScale;
+            _duration = duration;
+            _showEase = showEase;
+            _hideEase = hideEase;
         }
 
-        public async UniTask PlayShowAsync(IAnimationTarget target, float duration)
+        public UniTask PlayShowAsync(VisualElement target, CancellationToken ct)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
-            target.ScaleX = _startScale;
-            target.ScaleY = _startScale;
-            await LMotion.Create(_startScale, 1f, duration)
-                .WithEase(Ease.OutCubic)
-                .Bind(target, static (x, t) =>
-                {
-                    t.ScaleX = x;
-                    t.ScaleY = x;
-                });
+            SetScale(target, _startScale);
+            return LMotion.Create(_startScale, 1f, _duration)
+                .WithEase(_showEase)
+                .Bind(target, static (x, t) => SetScale(t, x))
+                .ToUniTask(ct);
         }
 
-        public async UniTask PlayHideAsync(IAnimationTarget target, float duration)
+        public UniTask PlayHideAsync(VisualElement target, CancellationToken ct)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
-            await LMotion.Create(1f, _startScale, duration)
-                .WithEase(Ease.InCubic)
-                .Bind(target, static (x, t) =>
-                {
-                    t.ScaleX = x;
-                    t.ScaleY = x;
-                });
+            return LMotion.Create(1f, _startScale, _duration)
+                .WithEase(_hideEase)
+                .Bind(target, static (x, t) => SetScale(t, x))
+                .ToUniTask(ct);
         }
+
+        public void Reset(VisualElement target)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            target.style.scale = StyleKeyword.Null;
+        }
+
+        private static void SetScale(VisualElement target, float scale)
+            => target.style.scale = new Scale(new Vector3(scale, scale, 1f));
     }
 }

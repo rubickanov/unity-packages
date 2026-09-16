@@ -1,5 +1,7 @@
 using System;
+using System.Threading;
 using Cysharp.Threading.Tasks;
+using UnityEngine.UIElements;
 
 namespace Rubickanov.UI.Animations
 {
@@ -27,22 +29,30 @@ namespace Rubickanov.UI.Animations
             _buffer = new UniTask[animations.Length];
         }
 
-        public async UniTask PlayShowAsync(IAnimationTarget target, float duration)
+        public async UniTask PlayShowAsync(VisualElement target, CancellationToken ct)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
             for (var i = 0; i < _animations.Length; i++)
-                _buffer[i] = _animations[i].PlayShowAsync(target, duration);
+                _buffer[i] = _animations[i].PlayShowAsync(target, ct);
             await UniTask.WhenAll(_buffer);
         }
 
-        public async UniTask PlayHideAsync(IAnimationTarget target, float duration)
+        public async UniTask PlayHideAsync(VisualElement target, CancellationToken ct)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
             for (var i = 0; i < _animations.Length; i++)
-                _buffer[i] = _animations[i].PlayHideAsync(target, duration);
+                _buffer[i] = _animations[i].PlayHideAsync(target, ct);
             await UniTask.WhenAll(_buffer);
+        }
+
+        public void Reset(VisualElement target)
+        {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+
+            for (var i = 0; i < _animations.Length; i++)
+                _animations[i].Reset(target);
         }
     }
 }

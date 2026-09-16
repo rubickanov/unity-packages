@@ -8,17 +8,12 @@ namespace Rubickanov.UI.Tests
     [TestFixture]
     public class ScopedViewRegistrationTests
     {
-        private FakeViewFactory _factory = null!;
         private UIService _ui = null!;
 
         [SetUp]
         public void SetUp()
         {
-            _factory = new FakeViewFactory();
-            _ui = new UIService(_factory);
-            _factory.Preset<FakeViewA>(new FakeViewA());
-            _factory.Preset<FakeViewB>(new FakeViewB());
-            _factory.Preset<FakeViewC>(new FakeViewC());
+            _ui = new UIService(TestRoot.Create(), new RecordingUxmlLoader().Load);
         }
 
         [TearDown]
@@ -51,13 +46,9 @@ namespace Rubickanov.UI.Tests
         public void Dispose_ExecutesActionsInLifoOrder()
         {
             var order = new List<string>();
-            var scope = new ScopedViewRegistration(_ui);
-
-            // Use reflection-free injection: register via a fake IUIService that records order.
             var recorder = new RecordingUIService(order);
             var recordedScope = new ScopedViewRegistration(recorder);
 
-            // Simulate three registrations. Register only adds the cleanup; Unregister records order.
             recordedScope.Register<FakeViewA>(UILayer.Screen).GetAwaiter().GetResult();
             recordedScope.Register<FakeViewB>(UILayer.Popup).GetAwaiter().GetResult();
             recordedScope.Register<FakeViewC>(UILayer.HUD).GetAwaiter().GetResult();
@@ -99,27 +90,27 @@ namespace Rubickanov.UI.Tests
 
             public RecordingUIService(List<string> order) => _order = order;
 
-            public Cysharp.Threading.Tasks.UniTask Register<T>(UILayer layer) where T : class, IView
+            public Cysharp.Threading.Tasks.UniTask Register<T>(UILayer layer) where T : View
                 => Cysharp.Threading.Tasks.UniTask.CompletedTask;
 
-            public void Unregister<T>() where T : IView
+            public void Unregister<T>() where T : View
             {
                 if (FailOnUnregisterType == typeof(T))
                     throw new InvalidOperationException($"Fail on {typeof(T).Name}");
                 _order.Add(typeof(T).Name.Replace("FakeView", string.Empty));
             }
 
-            public T Get<T>() where T : IView => throw new NotSupportedException();
-            public Cysharp.Threading.Tasks.UniTask Show<T>(ViewModelBase viewModel) where T : IView
+            public T Get<T>() where T : View => throw new NotSupportedException();
+            public Cysharp.Threading.Tasks.UniTask Show<T>(ViewModelBase viewModel) where T : View
                 => Cysharp.Threading.Tasks.UniTask.CompletedTask;
-            public void Hide<T>() where T : IView { }
-            public Cysharp.Threading.Tasks.UniTask HideAsync<T>(float duration = 0.3f) where T : IView
+            public void Hide<T>() where T : View { }
+            public Cysharp.Threading.Tasks.UniTask HideAsync<T>() where T : View
                 => Cysharp.Threading.Tasks.UniTask.CompletedTask;
             public void HideTop() { }
-            public Cysharp.Threading.Tasks.UniTask HideTopAsync(float duration = 0.3f)
+            public Cysharp.Threading.Tasks.UniTask HideTopAsync()
                 => Cysharp.Threading.Tasks.UniTask.CompletedTask;
             public void HideAll() { }
-            public Cysharp.Threading.Tasks.UniTask HideAllAsync(float duration = 0.3f)
+            public Cysharp.Threading.Tasks.UniTask HideAllAsync()
                 => Cysharp.Threading.Tasks.UniTask.CompletedTask;
         }
     }

@@ -1,9 +1,9 @@
 using System;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
-    /// <summary>Hover entry points for the flexible popup system (mirrors <see cref="TooltipExtensions"/>).</summary>
+    /// <summary>Hover entry points for the flexible popup system.</summary>
     public static class PopupExtensions
     {
         /// <summary>

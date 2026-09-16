@@ -1,12 +1,11 @@
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>
     /// Pure positioning math: turns a <see cref="PopupPlacement"/> plus a measured panel size into a
-    /// panel-space top-left for the popup panel. Generalizes the logic in TooltipService and the
-    /// world-anchored speech bubble in the game's CustomerWorldView.
+    /// panel-space top-left for the popup panel.
     /// </summary>
     internal static class PopupPlacementResolver
     {

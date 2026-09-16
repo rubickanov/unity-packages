@@ -1,11 +1,11 @@
 using System;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>
-    /// Shows a popup while the pointer hovers the target element, after a delay. Mirrors
-    /// <see cref="TooltipManipulator"/> but opens a full <see cref="PopupConfig"/> via <see cref="IPopupService"/>.
+    /// Shows a popup while the pointer hovers the target element, after a delay, opening a
+    /// full <see cref="PopupConfig"/> via <see cref="IPopupService"/>.
     /// </summary>
     public sealed class PopupManipulator : Manipulator
     {

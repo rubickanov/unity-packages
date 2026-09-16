@@ -1,30 +1,29 @@
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>
-    /// USS class names used by the flexible popup system. Reassign any field before the first popup
-    /// is shown to point the engine at your own CSS hooks (mirrors <see cref="DialogStyle"/>).
+    /// USS class names used by the flexible popup system.
     /// </summary>
     public static class PopupStyle
     {
-        public static string Backdrop = "popup-backdrop";
-        public static string Panel = "popup-panel";
-        public static string Title = "popup-title";
-        public static string Icon = "popup-icon";
-        public static string Message = "popup-message";
-        public static string Content = "popup-content";
-        public static string Input = "popup-input";
-        public static string Buttons = "popup-buttons";
-        public static string Button = "popup-btn";
-        public static string ButtonPrimary = "popup-btn--primary";
-        public static string Close = "popup-close";
+        public const string Backdrop = "popup-backdrop";
+        public const string Panel = "popup-panel";
+        public const string Title = "popup-title";
+        public const string Icon = "popup-icon";
+        public const string Message = "popup-message";
+        public const string Content = "popup-content";
+        public const string Input = "popup-input";
+        public const string Buttons = "popup-buttons";
+        public const string Button = "popup-btn";
+        public const string ButtonPrimary = "popup-btn--primary";
+        public const string Close = "popup-close";
 
         // Modifiers
-        public static string Modal = "popup--modal";
-        public static string Passive = "popup--passive";
-        public static string SideTop = "popup--side-top";
-        public static string SideBottom = "popup--side-bottom";
-        public static string SideLeft = "popup--side-left";
-        public static string SideRight = "popup--side-right";
+        public const string Modal = "popup--modal";
+        public const string Passive = "popup--passive";
+        public const string SideTop = "popup--side-top";
+        public const string SideBottom = "popup--side-bottom";
+        public const string SideLeft = "popup--side-left";
+        public const string SideRight = "popup--side-right";
 
         /// <summary>Maps a resolved side to its modifier class.</summary>
         public static string SideClass(PopupSide side) => side switch

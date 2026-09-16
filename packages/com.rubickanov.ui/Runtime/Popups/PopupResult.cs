@@ -1,4 +1,4 @@
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>Outcome of a popup, awaited via <see cref="IPopupHandle.Result"/>.</summary>
     public sealed class PopupResult

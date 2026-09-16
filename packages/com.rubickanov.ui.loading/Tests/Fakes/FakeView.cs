@@ -1,30 +1,32 @@
 using System;
 using Cysharp.Threading.Tasks;
 using Rubickanov.UI;
+using UnityEngine.UIElements;
 
 namespace Rubickanov.UI.Loading.Tests
 {
-    internal class FakeView : IView
+    internal static class TestRoot
     {
-        public bool IsVisible { get; private set; }
-
-        public UniTask Bind(ViewModelBase viewModel) => UniTask.CompletedTask;
-
-        public void Show() => IsVisible = true;
-        public void Hide() => IsVisible = false;
-        public void Destroy() { }
-
-        public UniTask ShowAsync(float duration = 0.3f)
+        public static VisualElement Create()
         {
-            Show();
-            return UniTask.CompletedTask;
+            var root = new VisualElement();
+            root.Add(new VisualElement { name = "screen-layer" });
+            root.Add(new VisualElement { name = "hud-layer" });
+            root.Add(new VisualElement { name = "popup-layer" });
+            root.Add(new VisualElement { name = "overlay-layer" });
+            return root;
         }
 
-        public UniTask HideAsync(float duration = 0.3f)
-        {
-            Hide();
-            return UniTask.CompletedTask;
-        }
+        public static UniTask<(VisualTreeAsset asset, IDisposable handle)> NoUxml(string name)
+            => throw new InvalidOperationException($"Code-only test views load no UXML, asked for '{name}'.");
+    }
+
+    internal sealed class FakeViewModel : ViewModelBase { }
+
+    internal abstract class FakeView : View<FakeViewModel>
+    {
+        protected override string? UxmlName => null;
+        protected override UniTask OnBind() => UniTask.CompletedTask;
     }
 
     internal sealed class FakeViewA : FakeView { }

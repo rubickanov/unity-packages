@@ -1,23 +1,25 @@
 using Cysharp.Threading.Tasks;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
-    public abstract class UIToolkitViewBase : IView
+    public abstract class View
     {
         public VisualElement Root { get; internal set; } = default!;
         public bool IsVisible { get; private set; }
 
-        internal abstract string? UxmlName { get; }
-        internal IViewFactory? ViewFactory { get; set; }
-        internal IViewServiceResolver? ServiceResolver { get; set; }
+        /// <summary>
+        /// Name of the UXML asset the view is built from. <c>null</c> means no UXML: the view builds its tree in
+        /// <see cref="OnInitialize"/> on an empty root.
+        /// </summary>
+        protected virtual string? UxmlName => GetType().Name;
+
+        internal string? ResolveUxmlName() => UxmlName;
+        internal UIService? Service { get; set; }
 
         internal void Initialize() => OnInitialize();
 
         protected virtual bool InterceptsInput => false;
-
-        private IAnimationTarget? _animationTarget;
-        private IAnimationTarget AnimationTarget => _animationTarget ??= new UIToolkitAnimationTarget(Root);
 
         public async UniTask Bind(ViewModelBase viewModel)
         {
@@ -41,21 +43,21 @@ namespace Rubickanov.UI.UIToolkit
             Root.pickingMode = PickingMode.Ignore;
         }
 
-        public async UniTask ShowAsync(float duration = 0.3f)
+        public async UniTask ShowAsync()
         {
             if (IsVisible) return;
             IsVisible = true;
-            AnimationTarget.ResetAnimationState();
+            NoneAnimation.Instance.Reset(Root);
             Root.style.display = DisplayStyle.Flex;
             if (InterceptsInput)
                 Root.pickingMode = PickingMode.Position;
-            await OnShowAsync(AnimationTarget, duration);
+            await OnShowAsync();
         }
 
-        public async UniTask HideAsync(float duration = 0.3f)
+        public async UniTask HideAsync()
         {
             if (!IsVisible) return;
-            await OnHideAsync(AnimationTarget, duration);
+            await OnHideAsync();
             IsVisible = false;
             OnHide();
             Root.style.display = DisplayStyle.None;
@@ -81,10 +83,7 @@ namespace Rubickanov.UI.UIToolkit
         protected virtual void OnInitialize() { }
         protected virtual void OnHide() { }
 
-        protected virtual UniTask OnShowAsync(IAnimationTarget root, float duration)
-            => UniTask.CompletedTask;
-
-        protected virtual UniTask OnHideAsync(IAnimationTarget root, float duration)
-            => UniTask.CompletedTask;
+        protected virtual UniTask OnShowAsync() => UniTask.CompletedTask;
+        protected virtual UniTask OnHideAsync() => UniTask.CompletedTask;
     }
 }

@@ -5,12 +5,12 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>
-    /// Default <see cref="IPopupService"/>. Owns popup elements directly on the UIDocument layers
-    /// (like <see cref="TooltipService"/>), supports many open at once, and drives world/cursor
-    /// followers from one MonoBehaviour-free loop (the <see cref="UIToolkitSpinnerHost"/> pattern).
+    /// Default <see cref="IPopupService"/>. Owns popup elements directly on the UI layers,
+    /// supports many open at once, and drives world/cursor followers from one MonoBehaviour-free loop
+    /// (the <see cref="SpinnerHost"/> pattern).
     /// </summary>
     public sealed class PopupHost : IPopupService, IPopupHostCallbacks, IDisposable
     {
@@ -29,7 +29,7 @@ namespace Rubickanov.UI.UIToolkit
         private Vector2 _cursorPanelPosition;
         private bool _disposed;
 
-        /// <param name="document">UIDocument whose root holds the standard layer elements.</param>
+        /// <param name="root">Element holding the standard layer elements (for example <c>uiDocument.rootVisualElement</c>).</param>
         /// <param name="defaultStyleSheet">Optional stylesheet applied to every popup.</param>
         /// <param name="pointerScreenPosition">
         /// Live screen-pixel pointer position (bottom-left origin, as from <c>Pointer.current</c> /
@@ -38,10 +38,10 @@ namespace Rubickanov.UI.UIToolkit
         /// <see cref="PointerMoveEvent"/> while a pickable element sits under the cursor, so the
         /// event-based fallback freezes over empty areas and a follow popup would stick.
         /// </param>
-        public PopupHost(UIDocument document, StyleSheet? defaultStyleSheet = null,
+        public PopupHost(VisualElement root, StyleSheet? defaultStyleSheet = null,
             Func<Vector2>? pointerScreenPosition = null)
         {
-            _root = document.rootVisualElement;
+            _root = root;
             _screenLayer = RequireLayer("screen-layer");
             _hudLayer = RequireLayer("hud-layer");
             _popupLayer = RequireLayer("popup-layer");
@@ -187,7 +187,7 @@ namespace Rubickanov.UI.UIToolkit
 
         private VisualElement RequireLayer(string name)
             => _root.Q(name) ?? throw new InvalidOperationException(
-                $"UIDocument root is missing required child '{name}'. PopupHost requires the standard " +
+                $"UI root is missing required child '{name}'. PopupHost requires the standard " +
                 "screen-layer / hud-layer / popup-layer / overlay-layer elements.");
 
         public void Dispose()
