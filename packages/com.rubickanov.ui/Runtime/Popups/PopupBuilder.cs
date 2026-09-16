@@ -3,7 +3,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>
     /// Fluent builder for a popup. Mirrors <see cref="DialogBuilder"/>; terminal <see cref="Open"/>

@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>
     /// Handed to <see cref="IPopupHandle.UpdateContent"/> to mutate a live popup. Convenience setters

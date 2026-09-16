@@ -1,38 +1,25 @@
 using System;
 using Rubickanov.Localization;
-using Rubickanov.UI.UIToolkit;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.Localization.UIToolkit
+namespace Rubickanov.UI.Localization
 {
     /// <summary>
-    /// One-line localization binding helpers for UIToolkit views.
+    /// One-line localization binding helpers for views.
     /// </summary>
     /// <remarks>
-    /// Subscriptions are registered through <see cref="UIToolkitView{TVM}.BindObservable{T}"/> and automatically
+    /// Subscriptions are registered through <see cref="View{TVM}.Bind{T}"/> and automatically
     /// disposed when the view is unbound. Requires <see cref="ILocalizationService.InitializeAsync"/> to have
     /// completed before any binding is created.
     /// </remarks>
-    public static class UIToolkitLocalizationExtensions
+    public static class LocalizationBindingExtensions
     {
         /// <summary>
         /// Binds <paramref name="label"/>.text to the localized string for <paramref name="key"/>, refreshing on
-        /// <see cref="ILocalizationService.OnLocaleChanged"/>. Resolves the service via <c>view.GetService</c>.
+        /// <see cref="ILocalizationService.OnLocaleChanged"/>.
         /// </summary>
         public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, Label label, LocalizationKey key)
-            where TVM : ViewModelBase
-        {
-            if (view == null) throw new ArgumentNullException(nameof(view));
-            BindLocalized(view, view.GetService<ILocalizationService>(), label, key);
-        }
-
-        /// <summary>
-        /// Explicit-service overload of <see cref="BindLocalized{TVM}(UIToolkitView{TVM}, Label, LocalizationKey)"/>.
-        /// Use when resolving <see cref="ILocalizationService"/> without the DI container (tests, presenters).
-        /// </summary>
-        public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, ILocalizationService loc, Label label, LocalizationKey key)
+            this View<TVM> view, ILocalizationService loc, Label label, LocalizationKey key)
             where TVM : ViewModelBase
         {
             if (view == null) throw new ArgumentNullException(nameof(view));
@@ -42,21 +29,12 @@ namespace Rubickanov.UI.Localization.UIToolkit
                 throw new ArgumentException("LocalizationKey must have non-empty Table and Key.", nameof(key));
 
             SetTextIfChanged(label, loc.GetString(key));
-            view.BindObservable(loc.OnLocaleChanged, _ => SetTextIfChanged(label, loc.GetString(key)));
+            view.Bind(loc.OnLocaleChanged, _ => SetTextIfChanged(label, loc.GetString(key)));
         }
 
-        /// <summary>Binds <paramref name="button"/>.text to <paramref name="key"/>. See <see cref="BindLocalized{TVM}(UIToolkitView{TVM}, Label, LocalizationKey)"/>.</summary>
+        /// <summary>Binds <paramref name="button"/>.text to the localized string for <paramref name="key"/>.</summary>
         public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, Button button, LocalizationKey key)
-            where TVM : ViewModelBase
-        {
-            if (view == null) throw new ArgumentNullException(nameof(view));
-            BindLocalized(view, view.GetService<ILocalizationService>(), button, key);
-        }
-
-        /// <summary>Explicit-service overload for buttons.</summary>
-        public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, ILocalizationService loc, Button button, LocalizationKey key)
+            this View<TVM> view, ILocalizationService loc, Button button, LocalizationKey key)
             where TVM : ViewModelBase
         {
             if (view == null) throw new ArgumentNullException(nameof(view));
@@ -66,21 +44,12 @@ namespace Rubickanov.UI.Localization.UIToolkit
                 throw new ArgumentException("LocalizationKey must have non-empty Table and Key.", nameof(key));
 
             SetTextIfChanged(button, loc.GetString(key));
-            view.BindObservable(loc.OnLocaleChanged, _ => SetTextIfChanged(button, loc.GetString(key)));
+            view.Bind(loc.OnLocaleChanged, _ => SetTextIfChanged(button, loc.GetString(key)));
         }
 
         /// <summary>Binds <paramref name="label"/>.text via a factory that computes the string from the service.</summary>
         public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, Label label, Func<ILocalizationService, string> textFactory)
-            where TVM : ViewModelBase
-        {
-            if (view == null) throw new ArgumentNullException(nameof(view));
-            BindLocalized(view, view.GetService<ILocalizationService>(), label, textFactory);
-        }
-
-        /// <summary>Explicit-service overload of the factory variant.</summary>
-        public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, ILocalizationService loc, Label label, Func<ILocalizationService, string> textFactory)
+            this View<TVM> view, ILocalizationService loc, Label label, Func<ILocalizationService, string> textFactory)
             where TVM : ViewModelBase
         {
             if (view == null) throw new ArgumentNullException(nameof(view));
@@ -89,21 +58,12 @@ namespace Rubickanov.UI.Localization.UIToolkit
             if (textFactory == null) throw new ArgumentNullException(nameof(textFactory));
 
             SetTextIfChanged(label, textFactory(loc));
-            view.BindObservable(loc.OnLocaleChanged, _ => SetTextIfChanged(label, textFactory(loc)));
+            view.Bind(loc.OnLocaleChanged, _ => SetTextIfChanged(label, textFactory(loc)));
         }
 
         /// <summary>Binds <paramref name="button"/>.text via a factory that computes the string from the service.</summary>
         public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, Button button, Func<ILocalizationService, string> textFactory)
-            where TVM : ViewModelBase
-        {
-            if (view == null) throw new ArgumentNullException(nameof(view));
-            BindLocalized(view, view.GetService<ILocalizationService>(), button, textFactory);
-        }
-
-        /// <summary>Explicit-service overload of the factory variant for buttons.</summary>
-        public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, ILocalizationService loc, Button button, Func<ILocalizationService, string> textFactory)
+            this View<TVM> view, ILocalizationService loc, Button button, Func<ILocalizationService, string> textFactory)
             where TVM : ViewModelBase
         {
             if (view == null) throw new ArgumentNullException(nameof(view));
@@ -112,7 +72,7 @@ namespace Rubickanov.UI.Localization.UIToolkit
             if (textFactory == null) throw new ArgumentNullException(nameof(textFactory));
 
             SetTextIfChanged(button, textFactory(loc));
-            view.BindObservable(loc.OnLocaleChanged, _ => SetTextIfChanged(button, textFactory(loc)));
+            view.Bind(loc.OnLocaleChanged, _ => SetTextIfChanged(button, textFactory(loc)));
         }
 
         /// <summary>
@@ -120,16 +80,7 @@ namespace Rubickanov.UI.Localization.UIToolkit
         /// via <see cref="ILocalizationService.GetString(LocalizationKey, object[])"/>.
         /// </summary>
         public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, Label label, LocalizationKey key, Func<object[]> argsFactory)
-            where TVM : ViewModelBase
-        {
-            if (view == null) throw new ArgumentNullException(nameof(view));
-            BindLocalized(view, view.GetService<ILocalizationService>(), label, key, argsFactory);
-        }
-
-        /// <summary>Explicit-service overload of the parameterized binding.</summary>
-        public static void BindLocalized<TVM>(
-            this UIToolkitView<TVM> view, ILocalizationService loc, Label label, LocalizationKey key, Func<object[]> argsFactory)
+            this View<TVM> view, ILocalizationService loc, Label label, LocalizationKey key, Func<object[]> argsFactory)
             where TVM : ViewModelBase
         {
             if (view == null) throw new ArgumentNullException(nameof(view));
@@ -140,7 +91,7 @@ namespace Rubickanov.UI.Localization.UIToolkit
                 throw new ArgumentException("LocalizationKey must have non-empty Table and Key.", nameof(key));
 
             SetTextIfChanged(label, loc.GetString(key, argsFactory()));
-            view.BindObservable(loc.OnLocaleChanged, _ => SetTextIfChanged(label, loc.GetString(key, argsFactory())));
+            view.Bind(loc.OnLocaleChanged, _ => SetTextIfChanged(label, loc.GetString(key, argsFactory())));
         }
 
         /// <summary>
@@ -148,16 +99,7 @@ namespace Rubickanov.UI.Localization.UIToolkit
         /// reactively on <see cref="ILocalizationService.IsRTL"/>.
         /// </summary>
         public static void BindIsRTL<TVM>(
-            this UIToolkitView<TVM> view, VisualElement element)
-            where TVM : ViewModelBase
-        {
-            if (view == null) throw new ArgumentNullException(nameof(view));
-            BindIsRTL(view, view.GetService<ILocalizationService>(), element);
-        }
-
-        /// <summary>Explicit-service overload of <see cref="BindIsRTL{TVM}(UIToolkitView{TVM}, VisualElement)"/>.</summary>
-        public static void BindIsRTL<TVM>(
-            this UIToolkitView<TVM> view, ILocalizationService loc, VisualElement element)
+            this View<TVM> view, ILocalizationService loc, VisualElement element)
             where TVM : ViewModelBase
         {
             if (view == null) throw new ArgumentNullException(nameof(view));
@@ -165,7 +107,7 @@ namespace Rubickanov.UI.Localization.UIToolkit
             if (element == null) throw new ArgumentNullException(nameof(element));
 
             element.style.flexDirection = loc.IsRTL.CurrentValue ? FlexDirection.RowReverse : FlexDirection.Row;
-            view.BindObservable(loc.IsRTL, rtl =>
+            view.Bind(loc.IsRTL, rtl =>
                 element.style.flexDirection = rtl ? FlexDirection.RowReverse : FlexDirection.Row);
         }
 

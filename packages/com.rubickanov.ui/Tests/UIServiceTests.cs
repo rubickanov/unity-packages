@@ -2,33 +2,33 @@ using System;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
+using UnityEngine.UIElements;
 
 namespace Rubickanov.UI.Tests
 {
     [TestFixture]
     public class UIServiceTests
     {
-        private FakeViewFactory _factory = null!;
+        private VisualElement _root = null!;
+        private RecordingUxmlLoader _loader = null!;
         private UIService _ui = null!;
-        private FakeViewA _a = null!;
-        private FakeViewB _b = null!;
-        private FakeViewC _c = null!;
 
         [SetUp]
         public void SetUp()
         {
-            _factory = new FakeViewFactory();
-            _ui = new UIService(_factory);
-            _a = new FakeViewA();
-            _b = new FakeViewB();
-            _c = new FakeViewC();
-            _factory.Preset<FakeViewA>(_a);
-            _factory.Preset<FakeViewB>(_b);
-            _factory.Preset<FakeViewC>(_c);
+            _root = TestRoot.Create();
+            _loader = new RecordingUxmlLoader();
+            _ui = new UIService(_root, _loader.Load);
         }
 
         [TearDown]
         public void TearDown() => _ui?.Dispose();
+
+        [Test]
+        public void Ctor_RootWithoutLayers_ThrowsInvalidOperation()
+        {
+            Assert.Throws<InvalidOperationException>(() => new UIService(new VisualElement(), _loader.Load));
+        }
 
         [Test]
         public void Get_Unregistered_ThrowsInvalidOperation()
@@ -37,25 +37,47 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task Register_ThenGet_ReturnsFactoryProducedView()
+        public async Task Register_ThenGet_ReturnsViewAttachedToItsLayer()
+        {
+            await _ui.Register<FakeViewA>(UILayer.Popup);
+
+            var view = _ui.Get<FakeViewA>();
+
+            Assert.AreSame(_root.Q("popup-layer"), view.Root.parent);
+            Assert.IsFalse(view.IsVisible);
+            Assert.AreEqual(DisplayStyle.None, view.Root.style.display.value);
+        }
+
+        [Test]
+        public async Task Register_CodeOnlyView_DoesNotLoadUxml()
         {
             await _ui.Register<FakeViewA>(UILayer.Screen);
 
-            Assert.AreSame(_a, _ui.Get<FakeViewA>());
+            CollectionAssert.IsEmpty(_loader.Loaded);
+        }
+
+        [Test]
+        public async Task Register_ViewWithUxml_LoadsByViewTypeName()
+        {
+            await _ui.Register<FakeUxmlView>(UILayer.Screen);
+
+            CollectionAssert.AreEqual(new[] { nameof(FakeUxmlView) }, _loader.Loaded);
+            CollectionAssert.IsEmpty(_loader.Released);
         }
 
         [Test]
         public async Task ShowScreen_NoActive_BindsAndShows()
         {
             await _ui.Register<FakeViewA>(UILayer.Screen);
+            var a = _ui.Get<FakeViewA>();
             var vm = new FakeViewModel();
 
             await _ui.Show<FakeViewA>(vm);
 
-            Assert.AreEqual(1, _a.BindCalls);
-            Assert.AreEqual(1, _a.ShowCalls);
-            Assert.AreSame(vm, _a.LastViewModel);
-            Assert.IsTrue(_a.IsVisible);
+            Assert.AreEqual(1, a.BindCalls);
+            Assert.AreEqual(1, a.ShowCalls);
+            Assert.AreSame(vm, a.LastViewModel);
+            Assert.IsTrue(a.IsVisible);
         }
 
         [Test]
@@ -63,40 +85,45 @@ namespace Rubickanov.UI.Tests
         {
             await _ui.Register<FakeViewA>(UILayer.Screen);
             await _ui.Register<FakeViewB>(UILayer.Screen);
+            var a = _ui.Get<FakeViewA>();
+            var b = _ui.Get<FakeViewB>();
 
             await _ui.Show<FakeViewA>(new FakeViewModel());
             await _ui.Show<FakeViewB>(new FakeViewModel());
 
-            Assert.AreEqual(1, _a.HideCalls);
-            Assert.IsFalse(_a.IsVisible);
-            Assert.IsTrue(_b.IsVisible);
+            Assert.AreEqual(1, a.HideCalls);
+            Assert.IsFalse(a.IsVisible);
+            Assert.IsTrue(b.IsVisible);
         }
 
         [Test]
         public async Task ShowPopup_NewView_AddsToStackAndShows()
         {
             await _ui.Register<FakeViewA>(UILayer.Popup);
+            var a = _ui.Get<FakeViewA>();
 
             await _ui.Show<FakeViewA>(new FakeViewModel());
 
-            Assert.AreEqual(1, _a.ShowCalls);
-            Assert.IsTrue(_a.IsVisible);
+            Assert.AreEqual(1, a.ShowCalls);
+            Assert.IsTrue(a.IsVisible);
+            CollectionAssert.AreEqual(new[] { a }, _ui.DebugPopupStack);
         }
 
         [Test]
         public async Task ShowPopup_AlreadyShown_HidesPreviousInstanceAndRebinds()
         {
             await _ui.Register<FakeViewA>(UILayer.Popup);
+            var a = _ui.Get<FakeViewA>();
             var firstVm = new FakeViewModel();
             var secondVm = new FakeViewModel();
 
             await _ui.Show<FakeViewA>(firstVm);
             await _ui.Show<FakeViewA>(secondVm);
 
-            Assert.AreEqual(1, _a.HideCalls);
-            Assert.AreEqual(2, _a.BindCalls);
-            Assert.AreEqual(2, _a.ShowCalls);
-            Assert.AreSame(secondVm, _a.LastViewModel);
+            Assert.AreEqual(1, a.HideCalls);
+            Assert.AreEqual(2, a.BindCalls);
+            Assert.AreEqual(2, a.ShowCalls);
+            Assert.AreSame(secondVm, a.LastViewModel);
         }
 
         [Test]
@@ -104,47 +131,53 @@ namespace Rubickanov.UI.Tests
         {
             await _ui.Register<FakeViewA>(UILayer.Popup);
             await _ui.Register<FakeViewB>(UILayer.Popup);
+            var a = _ui.Get<FakeViewA>();
+            var b = _ui.Get<FakeViewB>();
 
             await _ui.Show<FakeViewA>(new FakeViewModel());
             await _ui.Show<FakeViewA>(new FakeViewModel());
             await _ui.Show<FakeViewB>(new FakeViewModel());
 
+            CollectionAssert.AreEqual(new FakeView[] { a, b }, _ui.DebugPopupStack);
             _ui.HideTop();
             _ui.HideTop();
             _ui.HideTop();
 
-            // A.Hide: 1 from re-bind cleanup + 1 from second HideTop = 2.
-            // A phantom A in the stack would bump this to 3 on the third HideTop.
-            Assert.AreEqual(2, _a.HideCalls);
-            Assert.AreEqual(1, _b.HideCalls);
+            CollectionAssert.IsEmpty(_ui.DebugPopupStack);
+            Assert.AreEqual(2, a.HideCalls);
+            Assert.AreEqual(1, b.HideCalls);
         }
 
         [Test]
         public async Task ShowScreen_BindThrows_RollsBackActiveScreen()
         {
             await _ui.Register<FakeViewA>(UILayer.Screen);
-            _a.ThrowOnBind = new InvalidOperationException("boom");
+            var a = _ui.Get<FakeViewA>();
+            a.ThrowOnBind = new InvalidOperationException("boom");
 
             Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await _ui.Show<FakeViewA>(new FakeViewModel()));
 
-            Assert.AreEqual(1, _a.HideCalls);
+            Assert.IsFalse(a.IsVisible);
+            Assert.IsNull(_ui.DebugActiveScreen);
             await _ui.Register<FakeViewB>(UILayer.Screen);
             await _ui.Show<FakeViewB>(new FakeViewModel());
-            Assert.IsTrue(_b.IsVisible, "Active screen should have been cleared after failed Show.");
+            Assert.IsTrue(_ui.Get<FakeViewB>().IsVisible, "Active screen should have been cleared after failed Show.");
         }
 
         [Test]
         public async Task ShowPopup_ShowAsyncThrows_RemovesFromStack()
         {
             await _ui.Register<FakeViewA>(UILayer.Popup);
-            _a.ThrowOnShowAsync = new InvalidOperationException("boom");
+            var a = _ui.Get<FakeViewA>();
+            a.ThrowOnShowAsync = new InvalidOperationException("boom");
 
             Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await _ui.Show<FakeViewA>(new FakeViewModel()));
 
+            CollectionAssert.IsEmpty(_ui.DebugPopupStack);
             _ui.HideTop();
-            Assert.AreEqual(1, _a.HideCalls,
+            Assert.AreEqual(1, a.HideCalls,
                 "HideTop after failed popup show must not hide FakeViewA again.");
         }
 
@@ -159,14 +192,16 @@ namespace Rubickanov.UI.Tests
         public async Task Hide_ActiveScreen_ClearsActive()
         {
             await _ui.Register<FakeViewA>(UILayer.Screen);
+            var a = _ui.Get<FakeViewA>();
             await _ui.Show<FakeViewA>(new FakeViewModel());
 
             _ui.Hide<FakeViewA>();
 
-            Assert.IsFalse(_a.IsVisible);
+            Assert.IsFalse(a.IsVisible);
+            Assert.IsNull(_ui.DebugActiveScreen);
             await _ui.Register<FakeViewB>(UILayer.Screen);
             await _ui.Show<FakeViewB>(new FakeViewModel());
-            Assert.AreEqual(1, _a.HideCalls, "Hiding already-cleared screen must not hide it again.");
+            Assert.AreEqual(1, a.HideCalls, "Hiding already-cleared screen must not hide it again.");
         }
 
         [Test]
@@ -182,13 +217,16 @@ namespace Rubickanov.UI.Tests
         {
             await _ui.Register<FakeViewA>(UILayer.Popup);
             await _ui.Register<FakeViewB>(UILayer.Popup);
+            var a = _ui.Get<FakeViewA>();
+            var b = _ui.Get<FakeViewB>();
             await _ui.Show<FakeViewA>(new FakeViewModel());
             await _ui.Show<FakeViewB>(new FakeViewModel());
 
             _ui.HideTop();
 
-            Assert.AreEqual(0, _a.HideCalls);
-            Assert.AreEqual(1, _b.HideCalls);
+            Assert.AreEqual(0, a.HideCalls);
+            Assert.AreEqual(1, b.HideCalls);
+            CollectionAssert.AreEqual(new[] { a }, _ui.DebugPopupStack);
         }
 
         [Test]
@@ -203,9 +241,9 @@ namespace Rubickanov.UI.Tests
 
             _ui.HideAll();
 
-            Assert.AreEqual(1, _a.HideCalls);
-            Assert.AreEqual(1, _b.HideCalls);
-            Assert.AreEqual(1, _c.HideCalls);
+            Assert.AreEqual(1, _ui.Get<FakeViewA>().HideCalls);
+            Assert.AreEqual(1, _ui.Get<FakeViewB>().HideCalls);
+            Assert.AreEqual(1, _ui.Get<FakeViewC>().HideCalls);
         }
 
         [Test]
@@ -235,8 +273,8 @@ namespace Rubickanov.UI.Tests
 
             await _ui.HideAllAsync();
 
-            Assert.AreEqual(1, _a.HideCalls);
-            Assert.AreEqual(1, _b.HideCalls);
+            Assert.AreEqual(1, _ui.Get<FakeViewA>().HideCalls);
+            Assert.AreEqual(1, _ui.Get<FakeViewB>().HideCalls);
         }
 
         [Test]
@@ -256,13 +294,24 @@ namespace Rubickanov.UI.Tests
         public async Task Unregister_ActiveScreen_HidesAndDetaches()
         {
             await _ui.Register<FakeViewA>(UILayer.Screen);
+            var a = _ui.Get<FakeViewA>();
             await _ui.Show<FakeViewA>(new FakeViewModel());
 
             _ui.Unregister<FakeViewA>();
 
-            Assert.AreEqual(1, _a.HideCalls);
-            Assert.AreEqual(1, _a.DestroyCalls);
-            CollectionAssert.Contains(_factory.Detached, _a);
+            Assert.AreEqual(1, a.HideCalls);
+            Assert.IsNull(a.Root.parent);
+            Assert.Throws<InvalidOperationException>(() => _ui.Get<FakeViewA>());
+        }
+
+        [Test]
+        public async Task Unregister_ViewWithUxml_ReleasesHandle()
+        {
+            await _ui.Register<FakeUxmlView>(UILayer.Screen);
+
+            _ui.Unregister<FakeUxmlView>();
+
+            CollectionAssert.AreEqual(new[] { nameof(FakeUxmlView) }, _loader.Released);
         }
 
         [Test]
@@ -275,12 +324,15 @@ namespace Rubickanov.UI.Tests
         public async Task Dispose_DestroysAllViews()
         {
             await _ui.Register<FakeViewA>(UILayer.Screen);
-            await _ui.Register<FakeViewB>(UILayer.Popup);
+            await _ui.Register<FakeUxmlView>(UILayer.Popup);
+            var a = _ui.Get<FakeViewA>();
+            var uxmlView = _ui.Get<FakeUxmlView>();
 
             _ui.Dispose();
 
-            Assert.AreEqual(1, _a.DestroyCalls);
-            Assert.AreEqual(1, _b.DestroyCalls);
+            Assert.IsNull(a.Root.parent);
+            Assert.IsNull(uxmlView.Root.parent);
+            CollectionAssert.AreEqual(new[] { nameof(FakeUxmlView) }, _loader.Released);
         }
     }
 }

@@ -3,7 +3,7 @@
     "rootNamespace": "Rubickanov.UI.Loading.Tests",
     "references": [
         "Rubickanov.UI.Loading",
-        "Rubickanov.UI.Runtime",
+        "Rubickanov.UI",
         "Rubickanov.Loading.Runtime",
         "UniTask"
     ],

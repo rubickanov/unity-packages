@@ -1,4 +1,4 @@
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     public class DialogResult
     {

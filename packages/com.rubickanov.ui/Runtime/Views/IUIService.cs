@@ -4,17 +4,17 @@ namespace Rubickanov.UI
 {
     public interface IUIService
     {
-        UniTask Register<T>(UILayer layer) where T : class, IView;
-        void Unregister<T>() where T : IView;
-        T Get<T>() where T : IView;
+        UniTask Register<T>(UILayer layer) where T : View;
+        void Unregister<T>() where T : View;
+        T Get<T>() where T : View;
 
-        UniTask Show<T>(ViewModelBase viewModel) where T : IView;
-        void Hide<T>() where T : IView;
-        UniTask HideAsync<T>(float duration = 0.3f) where T : IView;
+        UniTask Show<T>(ViewModelBase viewModel) where T : View;
+        void Hide<T>() where T : View;
+        UniTask HideAsync<T>() where T : View;
 
         void HideTop();
-        UniTask HideTopAsync(float duration = 0.3f);
+        UniTask HideTopAsync();
         void HideAll();
-        UniTask HideAllAsync(float duration = 0.3f);
+        UniTask HideAllAsync();
     }
 }

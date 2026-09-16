@@ -44,7 +44,7 @@ namespace Rubickanov.UI.Loading
 
         /// <summary>Queues a view type for registration on the given layer.</summary>
         /// <exception cref="InvalidOperationException">Thrown when <typeparamref name="T"/> was already added to this operation.</exception>
-        public RegisterViewsOperation Add<T>(UILayer layer) where T : class, IView
+        public RegisterViewsOperation Add<T>(UILayer layer) where T : View
         {
             if (!_registeredTypes.Add(typeof(T)))
                 throw new InvalidOperationException($"View type {typeof(T).Name} already added to this operation.");

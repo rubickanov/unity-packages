@@ -1,7 +1,7 @@
 using System;
 using Cysharp.Threading.Tasks;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>Controls a single open popup.</summary>
     public interface IPopupHandle

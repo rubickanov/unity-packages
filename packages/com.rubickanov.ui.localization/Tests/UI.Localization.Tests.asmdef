@@ -2,8 +2,8 @@
     "name": "Rubickanov.UI.Localization.Tests",
     "rootNamespace": "Rubickanov.UI.Localization.Tests",
     "references": [
-        "Rubickanov.UI.Localization.Runtime",
-        "Rubickanov.UI.Runtime",
+        "Rubickanov.UI.Localization",
+        "Rubickanov.UI",
         "Rubickanov.Localization.Runtime"
     ],
     "includePlatforms": [

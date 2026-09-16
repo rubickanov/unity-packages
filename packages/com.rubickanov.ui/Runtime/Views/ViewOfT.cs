@@ -4,17 +4,15 @@ using Cysharp.Threading.Tasks;
 using R3;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
-    public abstract class UIToolkitView<TViewModel> : UIToolkitViewBase where TViewModel : ViewModelBase
+    public abstract class View<TViewModel> : View where TViewModel : ViewModelBase
     {
         protected TViewModel ViewModel { get; private set; } = default!;
 
-        internal override string? UxmlName => GetType().Name;
-
         private DisposableBag _disposables;
         private readonly List<Action> _unbindActions = new();
-        private readonly List<IView> _children = new();
+        private readonly List<View> _children = new();
 
         protected sealed override async UniTask OnBind(ViewModelBase viewModel)
         {
@@ -54,15 +52,7 @@ namespace Rubickanov.UI.UIToolkit
         protected virtual void OnViewHide() { }
         protected virtual void OnUnbind() { }
 
-        public T GetService<T>() where T : class
-            => ServiceResolver is null
-                ? throw new InvalidOperationException("IViewServiceResolver is not set on this view.")
-                : ServiceResolver.Require<T>();
-
-        public void BindObservable<T>(Observable<T> observable, Action<T> handler)
-            => Bind(observable, handler);
-
-        protected void Bind<T>(Observable<T> observable, Action<T> handler)
+        public void Bind<T>(Observable<T> observable, Action<T> handler)
         {
             observable.Subscribe(handler).AddTo(ref _disposables);
         }
@@ -138,29 +128,19 @@ namespace Rubickanov.UI.UIToolkit
         }
 
         protected async UniTask<TView> CreateChild<TView, TVM>(TVM viewModel, VisualElement? container = null)
-            where TView : UIToolkitView<TVM>, new()
+            where TView : View<TVM>, new()
             where TVM : ViewModelBase
         {
-            if (ViewFactory == null)
-                throw new InvalidOperationException("ViewFactory is not set. Cannot create child views.");
+            if (Service == null)
+                throw new InvalidOperationException("View is not registered in a UIService. Cannot create child views.");
 
-            var childView = await ViewFactory.Create<TView>(UILayer.HUD);
-            if (childView is UIToolkitViewBase uitkChild)
-            {
-                // Reset absolute positioning for inline children
-                uitkChild.Root.style.position = StyleKeyword.Null;
-                uitkChild.Root.style.left = uitkChild.Root.style.top =
-                    uitkChild.Root.style.right = uitkChild.Root.style.bottom = StyleKeyword.Null;
-
-                ViewFactory.Detach(childView);
-                uitkChild.Root.RemoveFromHierarchy();
-                container?.Add(uitkChild.Root);
-            }
+            var childView = await Service.CreateChildView<TView>();
+            container?.Add(childView.Root);
 
             await childView.Bind(viewModel);
             childView.Show();
             _children.Add(childView);
-            return (TView)childView;
+            return childView;
         }
 
         protected void DestroyChildren()

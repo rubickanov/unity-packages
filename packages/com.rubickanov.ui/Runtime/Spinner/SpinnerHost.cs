@@ -5,9 +5,9 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
-    public sealed class UIToolkitSpinnerHost : ISpinnerHost, IDisposable
+    public sealed class SpinnerHost : ISpinnerHost, IDisposable
     {
         private const string OverlayLayerName = "overlay-layer";
         private const string RootElementName = "spinner-host-root";
@@ -23,13 +23,12 @@ namespace Rubickanov.UI.UIToolkit
         private float _angle;
         private bool _disposed;
 
-        public UIToolkitSpinnerHost(UIDocument document)
+        public SpinnerHost(VisualElement root)
         {
-            var root = document.rootVisualElement;
             var overlay = root.Q(OverlayLayerName);
             if (overlay == null)
                 throw new InvalidOperationException(
-                    $"UIDocument root is missing required child '{OverlayLayerName}'. UIToolkitSpinnerHost requires an overlay-layer to attach to.");
+                    $"UI root is missing required child '{OverlayLayerName}'. SpinnerHost requires an overlay-layer to attach to.");
             _overlayLayer = overlay;
         }
 
@@ -175,11 +174,11 @@ namespace Rubickanov.UI.UIToolkit
 
         private sealed class Handle : IDisposable
         {
-            private readonly UIToolkitSpinnerHost _owner;
+            private readonly SpinnerHost _owner;
             public string? Label { get; }
             private bool _disposed;
 
-            public Handle(UIToolkitSpinnerHost owner, string? label)
+            public Handle(SpinnerHost owner, string? label)
             {
                 _owner = owner;
                 Label = label;

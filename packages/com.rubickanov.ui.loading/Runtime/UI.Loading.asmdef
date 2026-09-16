@@ -2,7 +2,7 @@
     "name": "Rubickanov.UI.Loading",
     "rootNamespace": "Rubickanov.UI.Loading",
     "references": [
-        "Rubickanov.UI.Runtime",
+        "Rubickanov.UI",
         "Rubickanov.Loading.Runtime",
         "UniTask"
     ],
@@ -14,5 +14,5 @@
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],
-    "noEngineReferences": true
+    "noEngineReferences": false
 }

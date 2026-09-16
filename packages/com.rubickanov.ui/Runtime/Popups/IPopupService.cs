@@ -1,4 +1,4 @@
-namespace Rubickanov.UI.UIToolkit
+namespace Rubickanov.UI
 {
     /// <summary>
     /// Shows flexible popups: configurable panels placed anywhere on screen, modal or passive,

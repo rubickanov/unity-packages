@@ -18,11 +18,6 @@ namespace Rubickanov.UI
 
         protected virtual void OnDispose() { }
 
-        protected void AddDisposable(IDisposable disposable)
-        {
-            disposable.AddTo(ref _disposables);
-        }
-
         /// <summary>
         /// Tracks a disposable for cleanup when the ViewModel is disposed.
         /// Public wrapper for use by extension methods in bridge packages.
