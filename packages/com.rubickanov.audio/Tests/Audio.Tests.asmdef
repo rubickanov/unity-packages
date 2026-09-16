@@ -2,9 +2,7 @@
     "name": "Rubickanov.Audio.Tests",
     "rootNamespace": "Rubickanov.Audio.Tests",
     "references": [
-        "Rubickanov.Audio.Runtime",
-        "Rubickanov.Storage.Runtime",
-        "UniTask"
+        "Rubickanov.Audio.Runtime"
     ],
     "includePlatforms": [
         "Editor"

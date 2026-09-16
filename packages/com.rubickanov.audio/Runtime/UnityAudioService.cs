@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using Rubickanov.Storage;
 using UnityEngine;
 using UnityEngine.Audio;
 using Object = UnityEngine.Object;
@@ -10,7 +9,8 @@ using Object = UnityEngine.Object;
 namespace Rubickanov.Audio
 {
     /// <summary>
-    /// AudioMixer-based audio service with pooled SFX sources, music crossfade, and optional volume persistence via IStorageService.
+    /// AudioMixer-based audio service with pooled SFX sources and music crossfade. Volumes start at 1 each session;
+    /// saving and restoring them is the caller's job.
     /// </summary>
     public class UnityAudioService : IAudioService, IDisposable
     {
@@ -32,7 +32,6 @@ namespace Rubickanov.Audio
         private readonly Dictionary<AudioSource, CancellationTokenSource> _sourceWatchers = new();
         private readonly Dictionary<string, AudioSource> _loopSources = new();
         private readonly Dictionary<string, CancellationTokenSource> _loopWatchers = new();
-        private readonly IStorageService? _storage;
         private readonly CancellationTokenSource _cts = new();
 
         private long _nextHandleId = 1;
@@ -48,15 +47,10 @@ namespace Rubickanov.Audio
         public float MusicVolume => _musicVolume;
         public float SFXVolume => _sfxVolume;
 
-        private const string KeyMaster = "audio_master";
-        private const string KeyMusic = "audio_music";
-        private const string KeySfx = "audio_sfx";
-
-        public UnityAudioService(AudioServiceConfig config, IStorageService? storage = null)
+        public UnityAudioService(AudioServiceConfig config)
         {
             if (config == null) throw new ArgumentNullException(nameof(config));
 
-            _storage = storage;
             _mixer = config.Mixer;
             _musicGroup = config.MusicGroup;
             _sfxGroup = config.SfxGroup;
@@ -78,9 +72,9 @@ namespace Rubickanov.Audio
             for (int i = 0; i < maxSources; i++)
                 _sfxPool.Enqueue(CreateSFXSource());
 
-            SetMasterVolume(_storage?.GetFloat(KeyMaster, 1f) ?? 1f);
-            SetMusicVolume(_storage?.GetFloat(KeyMusic, 1f) ?? 1f);
-            SetSFXVolume(_storage?.GetFloat(KeySfx, 1f) ?? 1f);
+            SetMasterVolume(1f);
+            SetMusicVolume(1f);
+            SetSFXVolume(1f);
         }
 
         private AudioSource CreateMusicSource(string name)
@@ -577,21 +571,18 @@ namespace Rubickanov.Audio
         {
             _masterVolume = Mathf.Clamp01(volume01);
             ApplyVolume(_masterVolumeParam, _masterVolume);
-            _storage?.SetFloat(KeyMaster, _masterVolume).Forget();
         }
 
         public void SetMusicVolume(float volume01)
         {
             _musicVolume = Mathf.Clamp01(volume01);
             ApplyVolume(_musicVolumeParam, _musicVolume);
-            _storage?.SetFloat(KeyMusic, _musicVolume).Forget();
         }
 
         public void SetSFXVolume(float volume01)
         {
             _sfxVolume = Mathf.Clamp01(volume01);
             ApplyVolume(_sfxVolumeParam, _sfxVolume);
-            _storage?.SetFloat(KeySfx, _sfxVolume).Forget();
         }
 
         private void ApplyVolume(string param, float volume01)
