@@ -1,0 +1,183 @@
+/*
+ * Default styles for popups, dialogs, tooltips and the spinner.
+ * Every value reads a `--ui-*` custom property with a built-in fallback, so the sheet works as is. A theme restyles
+ * the package by importing this sheet and setting the variables on an ancestor (for example `:root`):
+ *
+ *   @import url("/Packages/com.rubickanov.ui/Runtime/Styles/Default.uss");
+ *   :root { --ui-popup-bg: rgb(10, 20, 30); }
+ */
+
+/* ── Popup ─────────────────────────────────────────────────── */
+
+.popup-backdrop {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    background-color: var(--ui-backdrop-color, rgba(0, 0, 0, 0.5));
+    justify-content: center;
+    align-items: center;
+}
+
+.popup--passive {
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.popup-panel {
+    position: absolute;
+    background-color: var(--ui-popup-bg, rgba(25, 25, 35, 0.98));
+    border-left-color: var(--ui-popup-border-color, rgba(255, 255, 255, 0.1));
+    border-right-color: var(--ui-popup-border-color, rgba(255, 255, 255, 0.1));
+    border-top-color: var(--ui-popup-border-color, rgba(255, 255, 255, 0.1));
+    border-bottom-color: var(--ui-popup-border-color, rgba(255, 255, 255, 0.1));
+    border-left-width: var(--ui-popup-border-width, 1px);
+    border-right-width: var(--ui-popup-border-width, 1px);
+    border-top-width: var(--ui-popup-border-width, 1px);
+    border-bottom-width: var(--ui-popup-border-width, 1px);
+    border-top-left-radius: var(--ui-popup-radius, 10px);
+    border-top-right-radius: var(--ui-popup-radius, 10px);
+    border-bottom-left-radius: var(--ui-popup-radius, 10px);
+    border-bottom-right-radius: var(--ui-popup-radius, 10px);
+    padding: var(--ui-popup-padding, 16px);
+    min-width: var(--ui-popup-min-width, 160px);
+    max-width: var(--ui-popup-max-width, 420px);
+}
+
+.popup-title {
+    color: var(--ui-popup-title-color, rgb(255, 255, 255));
+    font-size: var(--ui-popup-title-font-size, 18px);
+    -unity-font-style: bold;
+    margin-bottom: var(--ui-popup-gap, 8px);
+    white-space: normal;
+}
+
+.popup-icon {
+    width: var(--ui-popup-icon-size, 48px);
+    height: var(--ui-popup-icon-size, 48px);
+    align-self: center;
+    margin-bottom: var(--ui-popup-gap, 8px);
+    -unity-background-scale-mode: scale-to-fit;
+}
+
+.popup-message {
+    color: var(--ui-popup-color, rgb(230, 230, 230));
+    font-size: var(--ui-popup-font-size, 14px);
+    white-space: normal;
+    margin-bottom: var(--ui-popup-gap, 8px);
+}
+
+.popup-content {
+    margin-bottom: var(--ui-popup-gap, 8px);
+}
+
+.popup-input {
+    margin-bottom: var(--ui-popup-gap, 8px);
+}
+
+.popup-buttons {
+    flex-direction: row;
+    justify-content: flex-end;
+}
+
+.popup-btn {
+    margin-left: var(--ui-popup-gap, 8px);
+    padding-left: 14px;
+    padding-right: 14px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    background-color: var(--ui-button-bg, rgba(255, 255, 255, 0.08));
+    color: var(--ui-button-color, rgb(255, 255, 255));
+    border-top-left-radius: var(--ui-button-radius, 6px);
+    border-top-right-radius: var(--ui-button-radius, 6px);
+    border-bottom-left-radius: var(--ui-button-radius, 6px);
+    border-bottom-right-radius: var(--ui-button-radius, 6px);
+}
+
+.popup-btn--primary {
+    background-color: var(--ui-button-primary-bg, rgb(100, 150, 255));
+    color: var(--ui-button-primary-color, rgb(255, 255, 255));
+}
+
+.popup-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: var(--ui-popup-close-size, 22px);
+    height: var(--ui-popup-close-size, 22px);
+    padding: 0;
+    background-color: rgba(0, 0, 0, 0);
+    color: var(--ui-popup-color, rgb(230, 230, 230));
+    -unity-text-align: middle-center;
+    font-size: var(--ui-popup-close-font-size, 16px);
+}
+
+/* ── Dialog ────────────────────────────────────────────────── */
+
+.popup--dialog {
+    min-width: var(--ui-dialog-min-width, 280px);
+    max-width: var(--ui-dialog-max-width, 480px);
+}
+
+/* ── Tooltip ───────────────────────────────────────────────── */
+
+.popup--tooltip {
+    background-color: var(--ui-tooltip-bg, rgba(15, 15, 20, 0.95));
+    padding: var(--ui-tooltip-padding, 6px);
+    min-width: 0;
+    max-width: var(--ui-tooltip-max-width, 280px);
+    border-top-left-radius: var(--ui-tooltip-radius, 4px);
+    border-top-right-radius: var(--ui-tooltip-radius, 4px);
+    border-bottom-left-radius: var(--ui-tooltip-radius, 4px);
+    border-bottom-right-radius: var(--ui-tooltip-radius, 4px);
+}
+
+.popup--tooltip .popup-message {
+    color: var(--ui-tooltip-color, rgb(230, 230, 230));
+    font-size: var(--ui-tooltip-font-size, 12px);
+    margin-bottom: 0;
+}
+
+.popup--tooltip .popup-content {
+    margin-bottom: 0;
+}
+
+/* ── Spinner ───────────────────────────────────────────────── */
+
+.spinner {
+    position: absolute;
+    right: var(--ui-spinner-margin, 24px);
+    bottom: var(--ui-spinner-margin, 24px);
+    flex-direction: row;
+    align-items: center;
+    padding: 8px;
+    background-color: var(--ui-spinner-bg, rgba(0, 0, 0, 0.45));
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+
+.spinner__icon {
+    width: var(--ui-spinner-size, 28px);
+    height: var(--ui-spinner-size, 28px);
+    border-top-left-radius: 50%;
+    border-top-right-radius: 50%;
+    border-bottom-left-radius: 50%;
+    border-bottom-right-radius: 50%;
+    border-left-width: 3px;
+    border-right-width: 3px;
+    border-top-width: 3px;
+    border-bottom-width: 3px;
+    border-top-color: var(--ui-spinner-color, rgb(255, 255, 255));
+    border-right-color: rgba(255, 255, 255, 0);
+    border-bottom-color: rgba(255, 255, 255, 0);
+    border-left-color: rgba(255, 255, 255, 0);
+    transform-origin: center;
+}
+
+.spinner__label {
+    margin-left: 10px;
+    color: var(--ui-spinner-label-color, rgb(255, 255, 255));
+    font-size: var(--ui-spinner-font-size, 12px);
+}

@@ -55,6 +55,7 @@ namespace Rubickanov.UI
         public PopupBuilder Style(StyleSheet sheet) { _config.StyleSheet = sheet; return this; }
         public PopupBuilder Class(string rootClass) { _config.RootClass = rootClass; return this; }
         public PopupBuilder DismissOthers(bool dismiss = true) { _config.DismissOthers = dismiss; return this; }
+        public PopupBuilder Animation(IViewAnimation animation) { _config.Animation = animation; return this; }
 
         /// <summary>Builds and shows the popup.</summary>
         public IPopupHandle Open() => _service.Open(_config);

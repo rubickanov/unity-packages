@@ -20,6 +20,8 @@ namespace Rubickanov.UI
         // Modifiers
         public const string Modal = "popup--modal";
         public const string Passive = "popup--passive";
+        public const string Dialog = "popup--dialog";
+        public const string Tooltip = "popup--tooltip";
         public const string SideTop = "popup--side-top";
         public const string SideBottom = "popup--side-bottom";
         public const string SideLeft = "popup--side-left";

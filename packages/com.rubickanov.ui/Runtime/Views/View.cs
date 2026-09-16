@@ -38,6 +38,9 @@ namespace Rubickanov.UI
         internal UILayer ResolveLayer() => Layer;
         internal IReadOnlyList<Type> ResolveChildViews() => ChildViews;
         internal UxmlCache? Uxml { get; set; }
+        internal UIService? Owner { get; set; }
+        internal IDisposable? PointerCapture { get; set; }
+        internal IDisposable? BackHandle { get; set; }
 
         internal abstract Type ViewModelType { get; }
         internal abstract ViewModelBase? BoundViewModel { get; }
@@ -45,6 +48,21 @@ namespace Rubickanov.UI
         internal abstract void Unbind();
 
         internal void Initialize() => OnInitialize();
+
+        internal bool HandleBack() => OnBack();
+
+        /// <summary>
+        /// Called by <see cref="IUIService.Back"/> while this screen or popup is visible and its handler is the top one.
+        /// Return true when the back press was consumed. Default: a popup hides itself and returns true; a screen
+        /// returns false.
+        /// </summary>
+        protected virtual bool OnBack()
+        {
+            if (Layer != UILayer.Popup || Owner == null) return false;
+
+            Owner.HideViewAsync(this).Forget();
+            return true;
+        }
 
         /// <summary>
         /// Binds <paramref name="viewModel"/> (unless it is already bound) and makes the view visible. Returns the show

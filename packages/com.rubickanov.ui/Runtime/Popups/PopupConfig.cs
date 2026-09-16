@@ -44,6 +44,9 @@ namespace Rubickanov.UI
 
         /// <summary>Close every other open popup before showing this one.</summary>
         public bool DismissOthers;
+
+        /// <summary>Played on the panel on open and close. Null: the <see cref="PopupHost"/> default.</summary>
+        public IViewAnimation? Animation;
     }
 
     /// <summary>A button rendered in the popup's button row.</summary>

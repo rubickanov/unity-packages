@@ -23,13 +23,23 @@ namespace Rubickanov.UI
         private readonly List<PopupInstance> _open = new();
         private readonly List<PopupInstance> _followers = new();
 
+        private readonly IUIService _ui;
         private readonly Func<Vector2>? _pointerScreenPosition;
+        private readonly Func<Camera?>? _cameraProvider;
+        private readonly IViewAnimation _defaultAnimation;
+
+        private Camera? _worldCamera;
+        private int _worldCameraFrame = -1;
 
         private CancellationTokenSource? _tickCts;
         private Vector2 _cursorPanelPosition;
         private bool _disposed;
 
         /// <param name="root">Element holding the standard layer elements (for example <c>uiDocument.rootVisualElement</c>).</param>
+        /// <param name="ui">
+        /// Receives a pointer capture for every open modal or interactive popup and a back handler for every popup
+        /// closing on <see cref="PopupCloseTriggers.Escape"/>.
+        /// </param>
         /// <param name="defaultStyleSheet">Optional stylesheet applied to every popup.</param>
         /// <param name="pointerScreenPosition">
         /// Live screen-pixel pointer position (bottom-left origin, as from <c>Pointer.current</c> /
@@ -38,10 +48,15 @@ namespace Rubickanov.UI
         /// <see cref="PointerMoveEvent"/> while a pickable element sits under the cursor, so the
         /// event-based fallback freezes over empty areas and a follow popup would stick.
         /// </param>
-        public PopupHost(VisualElement root, StyleSheet? defaultStyleSheet = null,
-            Func<Vector2>? pointerScreenPosition = null)
+        /// <param name="camera">Camera for world placements without their own camera. Default: <c>Camera.main</c>.</param>
+        /// <param name="animation">Played by popups whose config has no animation. Default: none.</param>
+        public PopupHost(VisualElement root, IUIService ui, StyleSheet? defaultStyleSheet = null,
+            Func<Vector2>? pointerScreenPosition = null, Func<Camera?>? camera = null, IViewAnimation? animation = null)
         {
-            _root = root;
+            _root = root ?? throw new ArgumentNullException(nameof(root));
+            _ui = ui ?? throw new ArgumentNullException(nameof(ui));
+            _cameraProvider = camera;
+            _defaultAnimation = animation ?? NoneAnimation.Instance;
             _screenLayer = RequireLayer("screen-layer");
             _hudLayer = RequireLayer("hud-layer");
             _popupLayer = RequireLayer("popup-layer");
@@ -76,9 +91,6 @@ namespace Rubickanov.UI
                 EnsureTick();
             }
 
-            if (config.Behaviour == PopupBehaviour.Modal)
-                instance.FocusPanel();
-
             return instance;
         }
 
@@ -92,6 +104,13 @@ namespace Rubickanov.UI
                 popup.Close(null, PopupCloseReason.Code);
         }
 
+        private void CloseAllImmediate()
+        {
+            var snapshot = _open.ToArray();
+            foreach (var popup in snapshot)
+                popup.CloseImmediate();
+        }
+
         // ── IPopupHostCallbacks (explicit: PopupInstance is internal) ─
 
         Vector2 IPopupHostCallbacks.CursorPanelPosition =>
@@ -99,14 +118,30 @@ namespace Rubickanov.UI
                 ? PopupPlacementResolver.ScreenToPanel(_root, _pointerScreenPosition())
                 : _cursorPanelPosition;
 
+        Camera? IPopupHostCallbacks.WorldCamera
+        {
+            get
+            {
+                var frame = Time.frameCount;
+                if (_worldCameraFrame != frame)
+                {
+                    var camera = _cameraProvider?.Invoke();
+                    _worldCamera = camera != null ? camera : Camera.main;
+                    _worldCameraFrame = frame;
+                }
+                return _worldCamera;
+            }
+        }
+
+        IUIService IPopupHostCallbacks.Ui => _ui;
+        IViewAnimation IPopupHostCallbacks.DefaultAnimation => _defaultAnimation;
+
         void IPopupHostCallbacks.OnPopupClosed(PopupInstance instance)
         {
             _open.Remove(instance);
             _followers.Remove(instance);
             if (_followers.Count == 0)
                 StopTick();
-
-            FocusTopmostModal();
         }
 
         void IPopupHostCallbacks.OnPlacementChanged(PopupInstance instance)
@@ -164,18 +199,6 @@ namespace Rubickanov.UI
         private void OnPointerMove(PointerMoveEvent evt)
             => _cursorPanelPosition = new Vector2(evt.position.x, evt.position.y);
 
-        private void FocusTopmostModal()
-        {
-            for (var i = _open.Count - 1; i >= 0; i--)
-            {
-                if (_open[i].IsModal)
-                {
-                    _open[i].FocusPanel();
-                    return;
-                }
-            }
-        }
-
         private VisualElement GetLayerContainer(UILayer layer) => layer switch
         {
             UILayer.Screen => _screenLayer,
@@ -195,7 +218,7 @@ namespace Rubickanov.UI
             if (_disposed) return;
             _disposed = true;
             StopTick();
-            CloseAll();
+            CloseAllImmediate();
             if (_pointerScreenPosition == null)
                 _root.UnregisterCallback<PointerMoveEvent>(OnPointerMove, TrickleDown.TrickleDown);
         }

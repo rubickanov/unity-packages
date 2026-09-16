@@ -27,7 +27,7 @@ namespace Rubickanov.UI
         /// <summary>Clicking the modal backdrop (outside the panel) closes it. Modal only.</summary>
         ClickOutside = 1 << 2,
 
-        /// <summary>Pressing Escape closes the topmost popup. Requires panel focus.</summary>
+        /// <summary>Closes on <see cref="IUIService.Back"/>, which the game calls on its Escape key.</summary>
         Escape = 1 << 3,
 
         /// <summary>Closes when the pointer leaves the panel (hover dismiss).</summary>

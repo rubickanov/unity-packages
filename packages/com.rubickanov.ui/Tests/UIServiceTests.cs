@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using R3;
 using UnityEngine.UIElements;
 
 namespace Rubickanov.UI.Tests
@@ -475,18 +476,6 @@ namespace Rubickanov.UI.Tests
             Assert.AreEqual(ViewState.Hidden, _ui.Get<PopupA>().State);
         }
 
-        [Test]
-        public async Task ShowHud_VisibilityCallbackNotFired()
-        {
-            await Registered<HudA>();
-            var events = new List<bool>();
-            _ui.SetVisibilityCallback(events.Add);
-
-            await _ui.Show<HudA>(new FakeViewModel());
-
-            CollectionAssert.IsEmpty(events);
-        }
-
         // ── Hide ─────────────────────────────────────────────────
 
         [Test]
@@ -571,17 +560,6 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public void HideAll_EmptyState_DoesNotFireVisibilityCallback()
-        {
-            var events = new List<bool>();
-            _ui.SetVisibilityCallback(events.Add);
-
-            _ui.HideAll();
-
-            CollectionAssert.IsEmpty(events);
-        }
-
-        [Test]
         public async Task HideAllAsync_EmptyState_NoOp()
         {
             await _ui.HideAllAsync();
@@ -601,17 +579,171 @@ namespace Rubickanov.UI.Tests
             Assert.AreEqual(ViewState.Hidden, b.State);
         }
 
+        // ── Pointer capture (D8, F7) ─────────────────────────────
+
         [Test]
-        public async Task VisibilityCallback_FiresTrueOnFirstShowAndFalseWhenLastHides()
+        public async Task ShowPopup_PointerCapturedUntilHide()
+        {
+            await Registered<PopupA>();
+            var events = new List<bool>();
+            using var subscription = _ui.PointerCaptured.Subscribe(events.Add);
+
+            await _ui.Show<PopupA>(new FakeViewModel());
+            var capturedWhileShown = _ui.PointerCaptured.CurrentValue;
+            _ui.Hide<PopupA>();
+
+            Assert.IsTrue(capturedWhileShown);
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+            CollectionAssert.AreEqual(new[] { false, true, false }, events);
+        }
+
+        [Test]
+        public async Task CapturePointer_ViewAndHandle_ReleasedOnlyWhenBothRelease()
+        {
+            await Registered<PopupA>();
+            await _ui.Show<PopupA>(new FakeViewModel());
+            var handle = _ui.CapturePointer();
+
+            _ui.Hide<PopupA>();
+            var capturedAfterHide = _ui.PointerCaptured.CurrentValue;
+            handle.Dispose();
+            handle.Dispose();
+
+            Assert.IsTrue(capturedAfterHide);
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+        }
+
+        [Test]
+        public async Task ShowHud_DoesNotCapturePointer()
+        {
+            await Registered<HudA>();
+
+            await _ui.Show<HudA>(new FakeViewModel());
+
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+        }
+
+        [Test]
+        public async Task HideAsync_ReleasesCaptureWhenHideStarts()
+        {
+            var animation = new ControlledAnimation();
+            await Registered<PopupA>(animation);
+            var show = _ui.Show<PopupA>(new FakeViewModel());
+            animation.CompleteShow();
+            await show;
+
+            var hide = _ui.HideAsync<PopupA>();
+            var capturedDuringHide = _ui.PointerCaptured.CurrentValue;
+            animation.CompleteHide();
+            await hide;
+
+            Assert.IsFalse(capturedDuringHide);
+            Assert.AreEqual(ViewState.Hidden, _ui.Get<PopupA>().State);
+        }
+
+        [Test]
+        public async Task ShowScreen_ReplacingScreen_CaptureStaysHeld()
         {
             await Registered<ScreenA>();
-            var events = new List<bool>();
-            _ui.SetVisibilityCallback(events.Add);
-
+            await Registered<ScreenB>();
             await _ui.Show<ScreenA>(new FakeViewModel());
-            _ui.Hide<ScreenA>();
 
-            CollectionAssert.AreEqual(new[] { true, false }, events);
+            await _ui.Show<ScreenB>(new FakeViewModel());
+            var capturedWithB = _ui.PointerCaptured.CurrentValue;
+            _ui.Hide<ScreenB>();
+
+            Assert.IsTrue(capturedWithB);
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+        }
+
+        [Test]
+        public async Task HideAll_ReleasesEveryCapture()
+        {
+            await Registered<ScreenA>();
+            await Registered<PopupA>();
+            await _ui.Show<ScreenA>(new FakeViewModel());
+            await _ui.Show<PopupA>(new FakeViewModel());
+
+            _ui.HideAll();
+
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+        }
+
+        // ── Back stack (D9, F8) ──────────────────────────────────
+
+        [Test]
+        public void Back_NoHandlers_ReturnsFalse()
+        {
+            Assert.IsFalse(_ui.Back());
+        }
+
+        [Test]
+        public async Task Back_ScreenOnly_ReturnsFalseAndScreenStays()
+        {
+            var screen = await Registered<ScreenA>();
+            await _ui.Show<ScreenA>(new FakeViewModel());
+
+            var consumed = _ui.Back();
+
+            Assert.IsFalse(consumed);
+            Assert.AreEqual(ViewState.Shown, screen.State);
+        }
+
+        [Test]
+        public async Task Back_TwoPopups_HidesTopmostFirst()
+        {
+            var a = await Registered<PopupA>();
+            var b = await Registered<PopupB>();
+            await _ui.Show<PopupA>(new FakeViewModel());
+            await _ui.Show<PopupB>(new FakeViewModel());
+
+            var consumed = _ui.Back();
+
+            Assert.IsTrue(consumed);
+            Assert.AreEqual(ViewState.Hidden, b.State);
+            Assert.AreEqual(ViewState.Shown, a.State);
+        }
+
+        [Test]
+        public async Task Back_PopupShownAgain_MovesToTopOfBackStack()
+        {
+            var a = await Registered<PopupA>();
+            var b = await Registered<PopupB>();
+            var viewModel = new FakeViewModel();
+            await _ui.Show<PopupA>(viewModel);
+            await _ui.Show<PopupB>(new FakeViewModel());
+            await _ui.Show<PopupA>(viewModel);
+
+            _ui.Back();
+
+            Assert.AreEqual(ViewState.Hidden, a.State);
+            Assert.AreEqual(ViewState.Shown, b.State);
+        }
+
+        [Test]
+        public void Back_HandlerReturnsFalse_TriesNext()
+        {
+            var calls = new List<string>();
+            using var lower = _ui.PushBackHandler(() => { calls.Add("lower"); return true; });
+            using var upper = _ui.PushBackHandler(() => { calls.Add("upper"); return false; });
+
+            var consumed = _ui.Back();
+
+            Assert.IsTrue(consumed);
+            CollectionAssert.AreEqual(new[] { "upper", "lower" }, calls);
+        }
+
+        [Test]
+        public void PushBackHandler_Disposed_NotCalled()
+        {
+            var called = false;
+            var handle = _ui.PushBackHandler(() => called = true);
+
+            handle.Dispose();
+            var consumed = _ui.Back();
+
+            Assert.IsFalse(consumed);
+            Assert.IsFalse(called);
         }
 
         // ── Unregister and Dispose ───────────────────────────────
