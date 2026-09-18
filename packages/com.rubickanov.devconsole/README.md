@@ -328,6 +328,41 @@ public static void GodMode() { }
 #endif
 ```
 
+## Startup commands from the command line
+
+A build nobody can type into — a headless host, a machine started over ssh, a run that has to begin in a known
+state — reaches the console through `-command`:
+
+```
+MyGame -batchmode -nographics -command "net host 7777"
+MyGame -command "net profile lan" -command "net join 192.168.1.25 7777"
+```
+
+The flag may be repeated and the commands run in the order given. Each value is one console line, so the shell's
+quoting is what separates a command from the next flag; the line itself is tokenized by the registry, which is why
+`-command 'say "hello world"'` arrives intact. A `-command` with a blank or missing value is dropped, the way `exec`
+drops a blank line in a file.
+
+**The game decides when they run**, because only the game knows when its own command groups have registered. Call
+`StartupCommands.Run(CommandRegistry.Instance)` from a hook that comes after everything has started — with VContainer
+that is an `IPostStartable`, which runs after every `IStartable.Start()` of the container:
+
+```csharp
+public sealed class StartupCommandRunner : IPostStartable
+{
+    public void PostStart() => StartupCommands.Run(CommandRegistry.Instance);
+}
+```
+
+The queue drains as it runs and resets once per process (`SubsystemRegistration`), so a scene reload that rebuilds
+the game's scopes finds it empty and cannot start a second session on top of the first. `StartupCommands.Enqueue`
+adds to the same queue by hand, for an intent formed while the game cannot act on it yet.
+
+Every command is logged to `ConsoleLog` and, unlike `exec`, also to the player log with a `[DevConsole]` prefix: this
+feature exists for a log file on another machine, and a command that is not registered is indistinguishable from a
+typo from here, so failures are `LogError`. `StartupCommands.Parse` is pure and takes the arguments as a parameter,
+so argument handling can be tested without starting a process.
+
 ## Design Decisions
 
 - **Two UI frontends** — **DevConsoleUIToolkit** (retained-mode, pooled elements) and **DevConsoleIMGUI** (immediate-mode, zero setup). Both honor `DevConsoleSettings`; pick whichever fits the project.
