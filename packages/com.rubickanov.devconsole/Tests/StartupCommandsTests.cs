@@ -8,6 +8,12 @@ namespace Rubickanov.DevConsole.Tests
     [TestFixture]
     public class StartupCommandsTests
     {
+        // A failing command is reported to the player log on purpose, so the runner must not take it for a crash.
+        // Cleared here rather than after the call: an assertion that throws in between would otherwise leak the flag
+        // into every test that follows.
+        [TearDown]
+        public void TearDown() => LogAssert.ignoreFailingMessages = false;
+
         [Test]
         public void Parse_NoFlag_ReturnsEmpty()
         {
@@ -61,6 +67,23 @@ namespace Rubickanov.DevConsole.Tests
         }
 
         [Test]
+        public void Parse_FlagWithBlankValue_IsDropped()
+        {
+            var commands = StartupCommands.Parse(new[] { "game", "-command", "", "-command", "   " });
+
+            Assert.AreEqual(0, commands.Count);
+        }
+
+        [Test]
+        public void Parse_ValueWithSpaces_StaysOneCommandForTheRegistryToTokenize()
+        {
+            var commands = StartupCommands.Parse(new[] { "game", "-command", "say \"hello world\"" });
+
+            CollectionAssert.AreEqual(new[] { "say \"hello world\"" }, commands);
+            CollectionAssert.AreEqual(new[] { "say", "hello world" }, CommandRegistry.Tokenize(commands[0]));
+        }
+
+        [Test]
         public void Parse_Null_ReturnsEmpty()
         {
             var commands = StartupCommands.Parse(null);
@@ -88,13 +111,28 @@ namespace Rubickanov.DevConsole.Tests
             bool reached = false;
             registry.Register("probe", _ => { reached = true; });
 
-            // The failure is reported to the player log on purpose, so the test runner must not take it for a crash
             LogAssert.ignoreFailingMessages = true;
             int ran = StartupCommands.Run(registry, new[] { "nosuchcommand", "probe" });
-            LogAssert.ignoreFailingMessages = false;
 
             Assert.AreEqual(2, ran);
             Assert.IsTrue(reached, "a failing command must not stop the ones after it");
+        }
+
+        [Test]
+        public void Run_CalledTwice_DrainsTheQueueOnlyOnce()
+        {
+            var registry = new CommandRegistry();
+            int executed = 0;
+            registry.Register("probe", _ => { executed++; });
+            StartupCommands.Enqueue("probe");
+
+            int first = StartupCommands.Run(registry);
+            int second = StartupCommands.Run(registry);
+
+            // The guarantee the whole feature rests on: a scene reload runs the hook again and must start nothing
+            Assert.AreEqual(1, first);
+            Assert.AreEqual(0, second);
+            Assert.AreEqual(1, executed);
         }
 
         [Test]
