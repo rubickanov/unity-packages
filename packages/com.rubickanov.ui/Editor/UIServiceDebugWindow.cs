@@ -30,7 +30,7 @@ namespace Rubickanov.UI.Editor
         private readonly Dictionary<int, bool> _instanceFoldouts = new();
         private Vector2 _scroll;
 
-        [MenuItem("Tools/Rubickanov/UI Debug")]
+        [MenuItem("Rubickanov/UI Debug")]
         public static void Open()
         {
             var window = GetWindow<UIServiceDebugWindow>();
