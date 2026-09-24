@@ -15,7 +15,6 @@ namespace Rubickanov.UI
 
         private IVisualElementScheduledItem? _scheduledShow;
         private IPopupHandle? _handle;
-        private bool _cancelled;
 
         public PopupManipulator(IPopupService service, Func<PopupConfig> configFactory, float delay = 0.3f)
         {
@@ -44,14 +43,10 @@ namespace Rubickanov.UI
 
             if (_delay <= 0f)
             {
-                // CancelScheduledShow() above set _cancelled = true; clear it so the immediate
-                // ShowPopup() isn't swallowed by its own `if (_cancelled) return;` guard.
-                _cancelled = false;
                 ShowPopup();
                 return;
             }
 
-            _cancelled = false;
             _scheduledShow = target.schedule.Execute(ShowPopup).StartingIn((long)(_delay * 1000f));
         }
 
@@ -64,8 +59,6 @@ namespace Rubickanov.UI
         private void ShowPopup()
         {
             _scheduledShow = null;
-            if (_cancelled) return;
-
             CloseCurrent();
             _handle = _service.Open(_configFactory());
         }
@@ -79,12 +72,8 @@ namespace Rubickanov.UI
 
         private void CancelScheduledShow()
         {
-            _cancelled = true;
-            if (_scheduledShow != null)
-            {
-                _scheduledShow.Pause();
-                _scheduledShow = null;
-            }
+            _scheduledShow?.Pause();
+            _scheduledShow = null;
         }
     }
 }

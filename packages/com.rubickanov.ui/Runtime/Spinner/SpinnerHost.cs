@@ -13,7 +13,6 @@ namespace Rubickanov.UI
     /// </summary>
     public sealed class SpinnerHost : ISpinnerHost, IDisposable
     {
-        private const string OverlayLayerName = "overlay-layer";
         private const string RootElementName = "spinner-host-root";
 
         // USS classes, styled by Runtime/Styles/Default.uss.
@@ -34,11 +33,7 @@ namespace Rubickanov.UI
 
         public SpinnerHost(VisualElement root)
         {
-            var overlay = root.Q(OverlayLayerName);
-            if (overlay == null)
-                throw new InvalidOperationException(
-                    $"UI root is missing required child '{OverlayLayerName}'. SpinnerHost requires an overlay-layer to attach to.");
-            _overlayLayer = overlay;
+            _overlayLayer = UILayerElements.Require(root, UILayer.Overlay);
         }
 
         public IDisposable Show(string? label = null)

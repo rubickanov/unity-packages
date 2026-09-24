@@ -56,7 +56,10 @@ namespace Rubickanov.UI
         /// <summary>True while at least one pointer capture is held. The game maps it to its cursor state.</summary>
         ReadOnlyReactiveProperty<bool> PointerCaptured { get; }
 
-        /// <summary>Pushes a handler for <see cref="Back"/>. The last pushed runs first; the handle removes it.</summary>
+        /// <summary>
+        /// Pushes a handler for <see cref="Back"/>. The last pushed runs first, except that the visible screen's own
+        /// handler always runs last; the handle removes it.
+        /// </summary>
         IDisposable PushBackHandler(Func<bool> handler);
 
         /// <summary>

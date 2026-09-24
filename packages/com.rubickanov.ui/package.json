@@ -1,6 +1,6 @@
 {
   "name": "com.rubickanov.ui",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "license": "MIT",
   "displayName": "UI Framework",
   "description": "UI Toolkit framework: views with view models on layers, a screen history, list binding, popups with view content, dialogs, tooltips and a spinner.",

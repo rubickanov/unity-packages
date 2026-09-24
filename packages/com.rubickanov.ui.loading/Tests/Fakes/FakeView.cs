@@ -19,18 +19,18 @@ namespace Rubickanov.UI.Loading.Tests
             return root;
         }
 
-        public static UniTask<(VisualTreeAsset asset, IDisposable handle)> NoUxml(string name)
+        public static UniTask<(VisualTreeAsset? asset, IDisposable? handle)> NoUxml(string name)
             => throw new InvalidOperationException($"Code-only test views load no UXML, asked for '{name}'.");
     }
 
     /// <summary>Loader whose loads complete only when the test calls <see cref="Complete"/>.</summary>
     internal sealed class DeferredUxmlLoader
     {
-        private readonly Dictionary<string, UniTaskCompletionSource<(VisualTreeAsset asset, IDisposable handle)>> _pending = new();
+        private readonly Dictionary<string, UniTaskCompletionSource<(VisualTreeAsset? asset, IDisposable? handle)>> _pending = new();
 
-        public UniTask<(VisualTreeAsset asset, IDisposable handle)> Load(string name)
+        public UniTask<(VisualTreeAsset? asset, IDisposable? handle)> Load(string name)
         {
-            var source = new UniTaskCompletionSource<(VisualTreeAsset asset, IDisposable handle)>();
+            var source = new UniTaskCompletionSource<(VisualTreeAsset? asset, IDisposable? handle)>();
             _pending[name] = source;
             return source.Task;
         }

@@ -5,7 +5,8 @@ namespace Rubickanov.UI
 {
     /// <summary>
     /// Tooltips as a popup preset: a passive popup with the <see cref="PopupStyle.Tooltip"/> class below the element,
-    /// opened after a hover delay and closed when the pointer leaves the element. For a 3D object, open a popup with
+    /// opened after a hover delay and closed when the pointer leaves the element. It sits on the overlay layer, above
+    /// modal dialogs and their content, whatever layer the element is on. For a 3D object, open a popup with
     /// <see cref="PopupPlacement.Cursor"/> or <see cref="PopupPlacement.AtWorld"/> and close its handle.
     /// </summary>
     public static class TooltipExtensions
@@ -39,18 +40,21 @@ namespace Rubickanov.UI
             if (element == null) throw new ArgumentNullException(nameof(element));
             if (popups == null) throw new ArgumentNullException(nameof(popups));
 
-            return element.AttachPopup(popups, () =>
+            return element.AttachPopup(popups, () => CreateConfig(element, setContent), delay);
+        }
+
+        internal static PopupConfig CreateConfig(VisualElement element, Action<PopupConfig> setContent)
+        {
+            var config = new PopupConfig
             {
-                var config = new PopupConfig
-                {
-                    Placement = PopupPlacement.AtElement(element, PopupSide.Bottom),
-                    Behaviour = PopupBehaviour.Passive,
-                    CloseTriggers = PopupCloseTriggers.None,
-                    RootClass = PopupStyle.Tooltip
-                };
-                setContent(config);
-                return config;
-            }, delay);
+                Placement = PopupPlacement.AtElement(element, PopupSide.Bottom),
+                Behaviour = PopupBehaviour.Passive,
+                CloseTriggers = PopupCloseTriggers.None,
+                Layer = UILayer.Overlay,
+                RootClass = PopupStyle.Tooltip
+            };
+            setContent(config);
+            return config;
         }
     }
 }

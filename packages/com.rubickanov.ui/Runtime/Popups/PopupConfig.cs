@@ -44,7 +44,10 @@ namespace Rubickanov.UI
         /// <summary>Seconds before auto-close. Only used when <see cref="PopupCloseTriggers.Timeout"/> is set.</summary>
         public float TimeoutSeconds;
 
-        /// <summary>Layer to attach to. Modal popups default to <see cref="UILayer.Overlay"/>.</summary>
+        /// <summary>
+        /// Layer to attach to. <see cref="PopupBuilder.Modal"/> puts a popup on <see cref="UILayer.Overlay"/>; a config
+        /// built directly stays on this value whatever its <see cref="Behaviour"/>.
+        /// </summary>
         public UILayer Layer = UILayer.Popup;
 
         /// <summary>Optional stylesheet applied to this popup only.</summary>

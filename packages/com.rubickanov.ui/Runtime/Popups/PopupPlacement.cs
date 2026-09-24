@@ -79,7 +79,8 @@ namespace Rubickanov.UI
             => new(PopupPlacementMode.Element, PopupAnchorCorner.Center, default, element, side, autoFlip, null, default, true, null, offset);
 
         /// <summary>
-        /// Above a world-space object; follows it each frame and hides when it is behind the camera.
+        /// Above a world-space object; follows it each frame and hides when it is behind the camera. The popup closes
+        /// with <see cref="PopupCloseReason.AnchorDestroyed"/> once the anchor is destroyed.
         /// </summary>
         /// <param name="worldOffset">Added to the anchor's position before projection.</param>
         /// <param name="screenOffset">Panel-space offset added after projection.</param>

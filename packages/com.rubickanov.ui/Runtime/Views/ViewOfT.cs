@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Runtime.ExceptionServices;
 using ObservableCollections;
 using R3;
 using UnityEngine.UIElements;
@@ -25,30 +26,45 @@ namespace Rubickanov.UI
             OnBind();
         }
 
-        /// <summary>Clears bindings, destroys children and disposes the bound view model.</summary>
+        /// <summary>
+        /// Clears bindings, destroys children and disposes the bound view model. Every step runs even when an earlier
+        /// one throws, so the view always ends unbound; the failures are rethrown at the end.
+        /// </summary>
         internal sealed override void Unbind()
         {
             var viewModel = _viewModel;
             if (viewModel is null) return;
 
-            try
-            {
-                OnUnbind();
-            }
-            finally
-            {
-                UnbindAll();
-                DestroyChildren();
-                _viewModel = null;
-                viewModel.Dispose();
-            }
+            List<Exception>? errors = null;
+            try { OnUnbind(); }
+            catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
+
+            UnbindAll(ref errors);
+
+            try { DestroyChildren(); }
+            catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
+
+            _viewModel = null;
+            try { viewModel.Dispose(); }
+            catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
+
+            if (errors == null) return;
+            if (errors.Count == 1) ExceptionDispatchInfo.Capture(errors[0]).Throw();
+            throw new AggregateException(errors);
         }
 
-        private void UnbindAll()
+        private void UnbindAll(ref List<Exception>? errors)
         {
-            _disposables.Dispose();
+            var disposables = _disposables;
             _disposables = new DisposableBag();
-            foreach (var unbind in _unbindActions) unbind();
+            try { disposables.Dispose(); }
+            catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
+
+            foreach (var unbind in _unbindActions)
+            {
+                try { unbind(); }
+                catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
+            }
             _unbindActions.Clear();
         }
 
@@ -94,23 +110,22 @@ namespace Rubickanov.UI
 
         // ── Two-way: element ↔ ReactiveProperty ─────────────────
 
+        // Bind applies the property's current value at once: a ReactiveProperty emits it on subscribe.
+
         protected void BindTextField(TextField field, ReactiveProperty<string> property)
         {
-            field.value = property.Value;
             Bind(property, v => { if (field.value != v) field.value = v; });
             BindValueChanged<TextField, string>(field, v => property.Value = v);
         }
 
         protected void BindSlider(Slider slider, ReactiveProperty<float> property)
         {
-            slider.value = property.Value;
-            Bind(property, v => { if (Math.Abs(slider.value - v) > float.Epsilon) slider.value = v; });
+            Bind(property, v => { if (slider.value != v) slider.value = v; });
             BindValueChanged<Slider, float>(slider, v => property.Value = v);
         }
 
         protected void BindToggle(Toggle toggle, ReactiveProperty<bool> property)
         {
-            toggle.value = property.Value;
             Bind(property, v => { if (toggle.value != v) toggle.value = v; });
             BindValueChanged<Toggle, bool>(toggle, v => property.Value = v);
         }
@@ -119,7 +134,6 @@ namespace Rubickanov.UI
             List<string> choices)
         {
             dropdown.choices = choices;
-            dropdown.index = property.Value;
             Bind(property, v => { if (dropdown.index != v) dropdown.index = v; });
             BindValueChanged<DropdownField, string>(dropdown, _ => property.Value = dropdown.index);
         }

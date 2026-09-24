@@ -47,7 +47,12 @@ namespace Rubickanov.UI
         PointerLeave,
         Timeout,
         Code,
-        Replaced
+
+        /// <summary>Closed by a popup opened with <see cref="PopupConfig.DismissOthers"/>.</summary>
+        Replaced,
+
+        /// <summary>The <see cref="PopupPlacement.WorldAnchor"/> of a world placement was destroyed.</summary>
+        AnchorDestroyed
     }
 
     /// <summary>How a popup is anchored on screen.</summary>

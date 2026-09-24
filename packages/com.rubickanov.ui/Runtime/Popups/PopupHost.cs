@@ -15,10 +15,8 @@ namespace Rubickanov.UI
     public sealed class PopupHost : IPopupService, IPopupHostCallbacks, IDisposable
     {
         private readonly VisualElement _root;
-        private readonly VisualElement _screenLayer;
-        private readonly VisualElement _hudLayer;
-        private readonly VisualElement _popupLayer;
-        private readonly VisualElement _overlayLayer;
+        private readonly UILayerElements _layers;
+        private readonly StyleSheet? _defaultStyleSheet;
 
         private readonly List<PopupInstance> _open = new();
         private readonly List<PopupInstance> _followers = new();
@@ -34,6 +32,8 @@ namespace Rubickanov.UI
         private CancellationTokenSource? _tickCts;
         private Vector2 _cursorPanelPosition;
         private bool _disposed;
+
+        internal int FollowerCount => _followers.Count;
 
         /// <param name="root">Element holding the standard layer elements (for example <c>uiDocument.rootVisualElement</c>).</param>
         /// <param name="ui">
@@ -57,14 +57,12 @@ namespace Rubickanov.UI
             _ui = ui ?? throw new ArgumentNullException(nameof(ui));
             _cameraProvider = camera;
             _defaultAnimation = animation ?? NoneAnimation.Instance;
-            _screenLayer = RequireLayer("screen-layer");
-            _hudLayer = RequireLayer("hud-layer");
-            _popupLayer = RequireLayer("popup-layer");
-            _overlayLayer = RequireLayer("overlay-layer");
+            _layers = new UILayerElements(root);
             _pointerScreenPosition = pointerScreenPosition;
 
-            if (defaultStyleSheet != null)
-                _root.styleSheets.Add(defaultStyleSheet);
+            _defaultStyleSheet = defaultStyleSheet;
+            if (_defaultStyleSheet != null)
+                _root.styleSheets.Add(_defaultStyleSheet);
 
             // Event-based fallback only when no live provider is supplied.
             if (_pointerScreenPosition == null)
@@ -79,9 +77,9 @@ namespace Rubickanov.UI
                 throw new ObjectDisposedException(nameof(PopupHost));
 
             if (config.DismissOthers)
-                CloseAll();
+                CloseAll(PopupCloseReason.Replaced);
 
-            var layer = GetLayerContainer(config.Layer);
+            var layer = _layers[config.Layer];
             var instance = new PopupInstance(config, layer, this);
             _open.Add(instance);
 
@@ -96,12 +94,14 @@ namespace Rubickanov.UI
 
         public PopupBuilder Create() => new(this);
 
-        public void CloseAll()
+        public void CloseAll() => CloseAll(PopupCloseReason.Code);
+
+        private void CloseAll(PopupCloseReason reason)
         {
             // Copy: Close mutates _open via the callback.
             var snapshot = _open.ToArray();
             foreach (var popup in snapshot)
-                popup.Close(null, PopupCloseReason.Code);
+                popup.Close(null, reason);
         }
 
         private void CloseAllImmediate()
@@ -194,8 +194,10 @@ namespace Rubickanov.UI
                 // Iterate by index: Reposition may close a popup (world anchor destroyed) and mutate the list.
                 for (var i = _followers.Count - 1; i >= 0; i--)
                 {
-                    if (i < _followers.Count)
-                        _followers[i].Reposition();
+                    if (i >= _followers.Count) continue;
+                    // One failing popup (a throwing pointer provider) must not stop the loop for the others.
+                    try { _followers[i].Reposition(); }
+                    catch (Exception ex) { Debug.LogException(ex); }
                 }
 
                 try { await UniTask.NextFrame(ct); }
@@ -208,20 +210,6 @@ namespace Rubickanov.UI
         private void OnPointerMove(PointerMoveEvent evt)
             => _cursorPanelPosition = new Vector2(evt.position.x, evt.position.y);
 
-        private VisualElement GetLayerContainer(UILayer layer) => layer switch
-        {
-            UILayer.Screen => _screenLayer,
-            UILayer.HUD => _hudLayer,
-            UILayer.Popup => _popupLayer,
-            UILayer.Overlay => _overlayLayer,
-            _ => _popupLayer
-        };
-
-        private VisualElement RequireLayer(string name)
-            => _root.Q(name) ?? throw new InvalidOperationException(
-                $"UI root is missing required child '{name}'. PopupHost requires the standard " +
-                "screen-layer / hud-layer / popup-layer / overlay-layer elements.");
-
         public void Dispose()
         {
             if (_disposed) return;
@@ -230,6 +218,8 @@ namespace Rubickanov.UI
             CloseAllImmediate();
             if (_pointerScreenPosition == null)
                 _root.UnregisterCallback<PointerMoveEvent>(OnPointerMove, TrickleDown.TrickleDown);
+            if (_defaultStyleSheet != null)
+                _root.styleSheets.Remove(_defaultStyleSheet);
         }
     }
 }

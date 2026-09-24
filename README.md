@@ -47,7 +47,7 @@ Which package needs what:
 | Needs | Packages |
 |---|---|
 | `R3` | `acs`, `acs.debug`, `acs.netcode`, `acs.persistence`, `acs.reactive`, `ui`, `ui.localization` |
-| `ObservableCollections` | `acs`, `acs.debug`, `acs.netcode`, `acs.persistence` |
+| `ObservableCollections` | `acs`, `acs.debug`, `acs.netcode`, `acs.persistence`, `ui` |
 | `UniTask` | `audio`, `config`, `eqs` (optional asm), `loading`, `statemachine` (async asm), `storage`, `ui`, `ui.animations`, `ui.loading` |
 | `ZLogger` | `logging` |
 | `LitMotion` | `ui.animations` |

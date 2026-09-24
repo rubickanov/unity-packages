@@ -189,5 +189,35 @@ namespace Rubickanov.UI.Tests
             public bool Disposed { get; private set; }
             protected override void OnDispose() => Disposed = true;
         }
+
+        [Test]
+        public async Task Back_ScreenShownOverOpenPopupView_PopupAnswersFirst()
+        {
+            await _ui.Navigate<ScreenA>(() => new FakeViewModel());
+            await _ui.Show<PopupA>(new FakeViewModel());
+            await _ui.Navigate<ScreenB>(() => new FakeViewModel());
+
+            var consumed = _ui.Back();
+
+            Assert.IsTrue(consumed);
+            Assert.AreEqual(ViewState.Hidden, _ui.Get<PopupA>().State);
+            Assert.AreEqual(ViewState.Shown, _ui.Get<ScreenB>().State);
+            Assert.IsTrue(_ui.CanNavigateBack);
+        }
+
+        [Test]
+        public async Task Back_HandlerPushedBeforeScreen_RunsBeforeScreen()
+        {
+            await _ui.Navigate<ScreenA>(() => new FakeViewModel());
+            var handled = false;
+            using var handle = _ui.PushBackHandler(() => handled = true);
+            await _ui.Navigate<ScreenB>(() => new FakeViewModel());
+
+            var consumed = _ui.Back();
+
+            Assert.IsTrue(consumed);
+            Assert.IsTrue(handled);
+            Assert.AreEqual(ViewState.Shown, _ui.Get<ScreenB>().State);
+        }
     }
 }

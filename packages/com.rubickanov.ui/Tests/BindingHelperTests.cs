@@ -78,6 +78,66 @@ namespace Rubickanov.UI.Tests
             Assert.IsFalse(_view.Box.ClassListContains("warning"));
         }
 
+        [Test]
+        public async System.Threading.Tasks.Task TwoWayBindings_PropertyValues_AppliedAtBindAndOnChange()
+        {
+            await _ui.Register<TwoWayView>();
+            var view = _ui.Get<TwoWayView>();
+            var vm = new TwoWayViewModel();
+            vm.Name.Value = "Kestrel";
+            vm.Volume.Value = 0.25f;
+            vm.Invert.Value = true;
+            await _ui.Show<TwoWayView>(vm);
+
+            var applied = (view.Name.value, view.Volume.value, view.Invert.value);
+            vm.Name.Value = "Heron";
+            vm.Volume.Value = 0.75f;
+            vm.Invert.Value = false;
+
+            Assert.AreEqual(("Kestrel", 0.25f, true), applied);
+            Assert.AreEqual("Heron", view.Name.value);
+            Assert.AreEqual(0.75f, view.Volume.value);
+            Assert.IsFalse(view.Invert.value);
+        }
+
+        public sealed class TwoWayViewModel : ViewModelBase
+        {
+            public ReactiveProperty<string> Name { get; }
+            public ReactiveProperty<float> Volume { get; }
+            public ReactiveProperty<bool> Invert { get; }
+
+            public TwoWayViewModel()
+            {
+                Name = CreateProperty("");
+                Volume = CreateProperty(0f);
+                Invert = CreateProperty(false);
+            }
+        }
+
+        public sealed class TwoWayView : View<TwoWayViewModel>
+        {
+            public TextField Name { get; } = new();
+            public Slider Volume { get; } = new(0f, 1f);
+            public Toggle Invert { get; } = new();
+
+            protected override string? UxmlName => null;
+            protected override UILayer Layer => UILayer.HUD;
+
+            protected override void OnInitialize()
+            {
+                Root.Add(Name);
+                Root.Add(Volume);
+                Root.Add(Invert);
+            }
+
+            protected override void OnBind()
+            {
+                BindTextField(Name, ViewModel.Name);
+                BindSlider(Volume, ViewModel.Volume);
+                BindToggle(Invert, ViewModel.Invert);
+            }
+        }
+
         public sealed class BindingViewModel : ViewModelBase
         {
             // Exposed from a longer-lived owner: not tracked, so disposal of the view model leaves them alive.
