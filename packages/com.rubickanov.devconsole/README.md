@@ -282,6 +282,10 @@ ConsoleLog.OnLogAdded += entry => Debug.Log(entry.Message);
 ConsoleLog.OnCleared += () => Debug.Log("Console cleared");
 ```
 
+Every Unity log message (`Debug.Log*`, exceptions, engine messages) is copied into `ConsoleLog` with an `[Unity]` prefix, from any thread and from the first moment scripts run, before any frontend exists. Errors, exceptions and asserts carry their stack trace. Messages from other threads appear at the start of the next frame. `log_unity false` stops the copying, `log_unity true` resumes it.
+
+Logs written to the console by a `ConsoleLog.OnLogAdded` subscriber through `Debug.Log` are not copied back, so a subscriber like the one above cannot loop.
+
 ### Pre-Execute Filter
 
 `CommandRegistry.PreExecuteFilter` intercepts commands before execution. Return a non-null `ExecutionResult` to override the handler, or null to proceed:
@@ -367,6 +371,7 @@ so argument handling can be tested without starting a process.
 
 - **Two UI frontends** — **DevConsoleUIToolkit** (retained-mode, pooled elements) and **DevConsoleIMGUI** (immediate-mode, zero setup). Both honor `DevConsoleSettings`; pick whichever fits the project.
 - **Static ConsoleLog** — decoupled from UI. Commands log via `ConsoleLog`; any frontend subscribes to `OnLogAdded`. Custom UIs can consume the same buffer.
+- **Unity logs forwarded by default** — subscribed on `SubsystemRegistration` through `logMessageReceivedThreaded`, not by a frontend, so startup logs are not lost. `ConsoleLog` stays main-thread only: other threads' messages wait in a queue drained in `PreUpdate`.
 - **Reflection-based discovery** — scans non-system assemblies for `[ConsoleCommand]` at startup, skipping `System.*`, `Unity.*`, `Mono.*`, `Microsoft.*`, `mscorlib`, `netstandard` prefixes for speed. Instance methods are not auto-discovered; bind them with `RegisterTarget(this)`.
 - **Per-execution allocation in the reflection path** — `Execute` allocates a small `object?[]` for boxed arguments per call. Fine for a dev tool; not a per-frame hot path. Autocomplete (`GetSuggestions`) is allocation-free by contrast.
 - **PlayerPrefs persistence** — aliases, history, and key bindings persist via PlayerPrefs. Simple and sufficient; history is capped at 100 entries.
