@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -15,6 +17,11 @@ namespace Rubickanov.DevConsole
     {
         private const string InputControlName = "DevConsoleInput";
         private const int MaxSuggestions = 10;
+        private static readonly int LogSelectHint = "DevConsoleLogSelect".GetHashCode();
+
+        // The tags IMGUI rich text understands; stripped from copied lines so the clipboard gets plain text.
+        private static readonly Regex RichTextTag =
+            new(@"</?(b|i|size|color|material|quad)(=[^>]*)?>", RegexOptions.Compiled);
 
         private static DevConsoleIMGUI? _instance;
 
@@ -38,6 +45,13 @@ namespace Rubickanov.DevConsole
         // Reused per frame so the measured total height matches what is drawn exactly.
         private readonly List<GUIContent> _logContents = new();
         private readonly List<float> _logHeights = new();
+
+        // Selected log lines, whole lines only: rich text makes per-character hit testing unreliable in
+        // IMGUI. Anchor is where the drag started, end is where it is now; -1 for no selection.
+        private int _selAnchor = -1;
+        private int _selEnd = -1;
+        private int _lastLogCount;
+        private int _dragControl;
 
         // Autocomplete state
         private readonly List<string> _suggestions = new();
@@ -79,6 +93,7 @@ namespace Rubickanov.DevConsole
             _history = new CommandHistory();
             CommandRegistry.Instance.Initialize();
 
+            _lastLogCount = ConsoleLog.Entries.Count;
             ConsoleLog.OnLogAdded += OnLogAdded;
             ConsoleLog.OnCleared += OnCleared;
         }
@@ -100,8 +115,38 @@ namespace Rubickanov.DevConsole
             DestroyTex(ref _clearTex);
         }
 
-        private void OnLogAdded(ConsoleLog.LogEntry entry) => _scrollToBottom = true;
-        private void OnCleared() => _scrollToBottom = true;
+        private void OnLogAdded(ConsoleLog.LogEntry entry)
+        {
+            // A full ring buffer drops its oldest line, so the selected lines move up by one.
+            int count = ConsoleLog.Entries.Count;
+            if (count == _lastLogCount && HasSelection)
+            {
+                _selAnchor--;
+                _selEnd--;
+                if (_selAnchor < 0 && _selEnd < 0)
+                {
+                    ClearSelection();
+                }
+                else
+                {
+                    _selAnchor = Mathf.Max(0, _selAnchor);
+                    _selEnd = Mathf.Max(0, _selEnd);
+                }
+            }
+
+            _lastLogCount = count;
+
+            // Jumping to the bottom would scroll the lines being copied out from under the cursor.
+            if (!HasSelection)
+                _scrollToBottom = true;
+        }
+
+        private void OnCleared()
+        {
+            ClearSelection();
+            _lastLogCount = 0;
+            _scrollToBottom = true;
+        }
 
         // Drive the built-in toggle from DevConsoleSettings, mirroring DevConsoleUIToolkit so the
         // two frontends honor the same Toggle Key / Use Built-in Toggle options. Polling the Input
@@ -132,6 +177,12 @@ namespace Rubickanov.DevConsole
             if (_isOpen == open) return;
 
             _isOpen = open;
+            ClearSelection();
+
+            // Closed mid-drag: nothing is left to take the mouse-up, so IMGUI would stay captured
+            if (_dragControl != 0 && GUIUtility.hotControl == _dragControl)
+                GUIUtility.hotControl = 0;
+            _dragControl = 0;
             if (open)
             {
                 _requestFocus = true;
@@ -181,6 +232,14 @@ namespace Rubickanov.DevConsole
                 _pendingComplete = false;
                 if (_suggestions.Count > 0)
                     ApplySelectedSuggestion();
+            }
+
+            // Copy the selected log lines. Checked before the command field is drawn, which would
+            // otherwise take the shortcut for its own, usually empty, selection.
+            if (HasSelection && IsCopyEvent(e))
+            {
+                GUIUtility.systemCopyBuffer = SelectedText();
+                e.Use();
             }
 
             KeyCode capturedKey = KeyCode.None;
@@ -275,6 +334,8 @@ namespace Rubickanov.DevConsole
                 case KeyCode.Escape:
                     if (hasSuggestions)
                         HideAutocomplete();
+                    else if (HasSelection)
+                        ClearSelection();
                     else
                         SetOpen(false);
                     break;
@@ -338,6 +399,8 @@ namespace Rubickanov.DevConsole
 
             var scrollContent = new Rect(0, 0, contentWidth, contentHeight);
 
+            HandleLogMouse(position, contentWidth, padTop);
+
             if (_scrollToBottom)
             {
                 _scrollPos.y = Mathf.Max(0f, contentHeight - height);
@@ -346,14 +409,137 @@ namespace Rubickanov.DevConsole
 
             _scrollPos = GUI.BeginScrollView(position, _scrollPos, scrollContent);
 
+            int selFrom = Mathf.Min(_selAnchor, _selEnd);
+            int selTo = Mathf.Max(_selAnchor, _selEnd);
+            bool repaint = Event.current.type == EventType.Repaint;
+
             float y = padTop;
             for (int i = 0; i < _logContents.Count; i++)
             {
+                if (repaint && HasSelection && i >= selFrom && i <= selTo)
+                    GUI.DrawTexture(new Rect(0, y, contentWidth, _logHeights[i]), _selectedBgTex!);
+
                 GUI.Label(new Rect(padLeft, y, innerWidth, _logHeights[i]), _logContents[i], _logStyle);
                 y += _logHeights[i];
             }
 
             GUI.EndScrollView();
+        }
+
+        // Press on a line to select it, drag across lines to extend, shift-press to extend from the anchor.
+        // Handled in screen space before the scroll view so the scrollbar keeps its own clicks.
+        private void HandleLogMouse(Rect area, float contentWidth, float padTop)
+        {
+            var e = Event.current;
+            int id = GUIUtility.GetControlID(LogSelectHint, FocusType.Passive);
+            float contentY = e.mousePosition.y - area.y + _scrollPos.y;
+
+            switch (e.GetTypeForControl(id))
+            {
+                case EventType.MouseDown:
+                    if (e.button != 0 || !area.Contains(e.mousePosition) || e.mousePosition.x >= area.x + contentWidth)
+                        return;
+
+                    int hit = LineAt(contentY, padTop);
+                    if (hit < 0)
+                    {
+                        // Empty space under the last line
+                        ClearSelection();
+                    }
+                    else
+                    {
+                        if (!e.shift || !HasSelection)
+                            _selAnchor = hit;
+                        _selEnd = hit;
+                        GUIUtility.hotControl = id;
+                        _dragControl = id;
+                    }
+
+                    // Used so the command field keeps keyboard focus and the caret
+                    e.Use();
+                    break;
+
+                case EventType.MouseDrag:
+                    if (GUIUtility.hotControl != id) return;
+
+                    int line = LineAt(contentY, padTop);
+                    _selEnd = line < 0 ? _logHeights.Count - 1 : line;
+                    ScrollLineIntoView(_selEnd, area.height, padTop);
+                    e.Use();
+                    break;
+
+                case EventType.MouseUp:
+                    if (GUIUtility.hotControl != id) return;
+
+                    GUIUtility.hotControl = 0;
+                    _dragControl = 0;
+                    e.Use();
+                    break;
+            }
+        }
+
+        /// <summary>The line at a y in scroll content space; the first above it, -1 below the last.</summary>
+        private int LineAt(float contentY, float padTop)
+        {
+            if (_logHeights.Count == 0) return -1;
+
+            float y = padTop;
+            for (int i = 0; i < _logHeights.Count; i++)
+            {
+                y += _logHeights[i];
+                if (contentY < y) return i;
+            }
+
+            return -1;
+        }
+
+        private void ScrollLineIntoView(int index, float viewHeight, float padTop)
+        {
+            if (index < 0 || index >= _logHeights.Count) return;
+
+            float top = padTop;
+            for (int i = 0; i < index; i++)
+                top += _logHeights[i];
+            float bottom = top + _logHeights[index];
+
+            if (top < _scrollPos.y)
+                _scrollPos.y = top;
+            else if (bottom > _scrollPos.y + viewHeight)
+                _scrollPos.y = bottom - viewHeight;
+        }
+
+        private bool HasSelection => _selAnchor >= 0;
+
+        private void ClearSelection()
+        {
+            _selAnchor = -1;
+            _selEnd = -1;
+        }
+
+        // Ctrl+C in a player, Cmd+C on macOS; the editor may send the Copy command instead of the key.
+        private static bool IsCopyEvent(Event e)
+        {
+            if (e.type == EventType.KeyDown)
+                return e.keyCode == KeyCode.C && (e.control || e.command);
+
+            return (e.type == EventType.ValidateCommand || e.type == EventType.ExecuteCommand) &&
+                   e.commandName == "Copy";
+        }
+
+        private string SelectedText()
+        {
+            var entries = ConsoleLog.Entries;
+            int from = Mathf.Max(0, Mathf.Min(_selAnchor, _selEnd));
+            int to = Mathf.Min(entries.Count - 1, Mathf.Max(_selAnchor, _selEnd));
+
+            var sb = new StringBuilder();
+            for (int i = from; i <= to; i++)
+            {
+                if (sb.Length > 0) sb.Append('\n');
+                sb.Append(RichTextTag.Replace(entries[i].Message, ""));
+            }
+
+            return sb.ToString();
         }
 
         private static string ColorizeEntry(ConsoleLog.LogEntry entry)
@@ -502,6 +688,9 @@ namespace Rubickanov.DevConsole
         {
             var text = _inputText.Trim();
             if (string.IsNullOrEmpty(text)) return;
+
+            // Lets the command's output scroll into view
+            ClearSelection();
 
             _history.Add(text);
             _history.ResetCursor();
