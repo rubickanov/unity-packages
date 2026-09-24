@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
@@ -123,6 +124,32 @@ namespace Rubickanov.UI.Tests
 
             Assert.AreEqual(1, childrenDuringHide);
             Assert.AreEqual(0, PopupLayer.childCount);
+        }
+
+        [Test]
+        public void Close_DuringHideAnimation_NothingInPanelPickable()
+        {
+            var animation = new ControlledAnimation();
+            var popup = _popups.Create().Message("choose").Button("OK", "ok").Button("Cancel", "cancel")
+                .Input().Animation(animation).Open();
+            animation.CompleteShow();
+
+            popup.Close();
+            var panel = PopupLayer.Q(className: PopupStyle.Panel);
+
+            Assert.IsNotNull(panel);
+            Assert.IsTrue(panel.Query<VisualElement>().ToList().All(e => e.pickingMode == PickingMode.Ignore));
+        }
+
+        [Test]
+        public void Dialog_Modal_OnOverlayLayerLikeModalPopups()
+        {
+            var dialogs = new DialogService(_popups);
+
+            dialogs.CreateDialog("Abandon ship?").AddButton("Yes", "yes").ShowAsync().Forget();
+
+            Assert.IsNotNull(_root.Q("overlay-layer").Q(className: PopupStyle.Dialog));
+            Assert.IsNull(PopupLayer.Q(className: PopupStyle.Dialog));
         }
 
         [Test]

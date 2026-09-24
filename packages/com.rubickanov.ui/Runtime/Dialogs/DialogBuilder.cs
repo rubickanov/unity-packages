@@ -20,6 +20,7 @@ namespace Rubickanov.UI
             {
                 Title = title,
                 Behaviour = PopupBehaviour.Modal,
+                Layer = UILayer.Overlay,
                 Placement = PopupPlacement.ScreenCenter(),
                 RootClass = PopupStyle.Dialog,
                 CloseTriggers = PopupCloseTriggers.Escape | PopupCloseTriggers.ActionButton

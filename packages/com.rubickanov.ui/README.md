@@ -335,7 +335,7 @@ var named = await dialogs.CreateDialog("Rename ship").WithInput("Name", ship.Nam
     .AddButton("Save", "save", isPrimary: true).AddButton("Cancel", "cancel").ShowAsync();
 ```
 
-Dialogs close on `Back()`; a dialog closed without a button reports its last button's id.
+Dialogs are modal popups on the overlay layer, like `Modal()`. They close on `Back()`; a dialog closed without a button reports its last button's id.
 
 ### Tooltips
 
