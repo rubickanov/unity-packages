@@ -367,8 +367,12 @@ namespace Rubickanov.UI
             show?.Cancel();
             show?.Dispose();
 
-            _panel.pickingMode = PickingMode.Ignore;
+            // The panel stays on screen while the hide animation plays: nothing in it may be clicked or submitted.
+            // The elements are removed afterwards, so their picking needs no restoring.
+            _panel.Query<VisualElement>().ForEach(e => e.pickingMode = PickingMode.Ignore);
             if (_backdrop != null) _backdrop.pickingMode = PickingMode.Ignore;
+            if (_panel.focusController?.focusedElement is VisualElement focused && _panel.Contains(focused))
+                focused.Blur();
 
             _host.OnPopupClosed(this);
             _completion.TrySetResult(new PopupResult(buttonId, reason, input));
