@@ -8,7 +8,7 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-All at version `1.0.0`, except `ui` at `2.2.0` and `ui.animations`, `ui.loading`, `ui.localization` at `2.0.0`:
+All at version `1.0.0`, except `ui`, `ui.animations`, `ui.loading`, `ui.localization` at `3.0.0`:
 
 | Package | Purpose |
 |---|---|

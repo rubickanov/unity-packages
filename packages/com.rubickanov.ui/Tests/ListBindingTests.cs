@@ -180,6 +180,22 @@ namespace Rubickanov.UI.Tests
             StringAssert.Contains("ChildViews", ex.Message);
         }
 
+        [Test]
+        public async Task Reset_FactoryThrows_UnmatchedRowsKeptAndClearRemovesThem()
+        {
+            await Show("a", "b", "c");
+            _view.ThrowFor = "boom";
+            Assert.Throws<InvalidOperationException>(() => _items.Insert(0, "boom"));
+
+            Assert.Throws<InvalidOperationException>(() => _items.Sort(StringComparer.Ordinal));
+            var afterSort = Children;
+            _items.Clear();
+
+            CollectionAssert.AreEqual(new[] { "header", "a", "b", "c" }, afterSort);
+            CollectionAssert.AreEqual(new[] { "header" }, Children);
+            Assert.IsTrue(_view.Created.All(vm => vm.DisposeCalls == 1));
+        }
+
         public sealed class ListViewModel : ViewModelBase
         {
             public readonly ObservableList<string> Items;
@@ -205,6 +221,7 @@ namespace Rubickanov.UI.Tests
         {
             public readonly List<RowViewModel> Created = new();
             public VisualElement Rows { get; private set; } = null!;
+            public string? ThrowFor;
 
             protected override string? UxmlName => null;
             protected override UILayer Layer => UILayer.Screen;
@@ -221,6 +238,7 @@ namespace Rubickanov.UI.Tests
             {
                 BindList<string, RowView, RowViewModel>(ViewModel.Items, Rows, item =>
                 {
+                    if (item == ThrowFor) throw new InvalidOperationException("factory");
                     var vm = new RowViewModel(item);
                     Created.Add(vm);
                     return vm;

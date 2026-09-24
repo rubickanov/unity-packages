@@ -4,11 +4,16 @@ using UnityEngine.UIElements;
 
 namespace Rubickanov.UI
 {
-    /// <summary>UXML of a registered view and of every child view it can create, with the handles to release.</summary>
+    /// <summary>
+    /// UXML of a registered view and of every child view it can create, with the handles to release. Counted: the
+    /// registration holds one reference and every instance built apart from it (a popup's content) holds another, so
+    /// the assets stay loaded until the last of them is gone.
+    /// </summary>
     internal sealed class UxmlCache
     {
         private readonly Dictionary<Type, VisualTreeAsset?> _assets = new();
         private readonly List<IDisposable> _handles = new();
+        private int _references = 1;
 
         public bool Contains(Type viewType) => _assets.ContainsKey(viewType);
 
@@ -21,8 +26,17 @@ namespace Rubickanov.UI
 
         public bool TryGet(Type viewType, out VisualTreeAsset? asset) => _assets.TryGetValue(viewType, out asset);
 
+        public void Retain()
+        {
+            if (_references == 0) throw new ObjectDisposedException(nameof(UxmlCache));
+            _references++;
+        }
+
+        /// <summary>Drops one reference; the last one releases the handles.</summary>
         public void Release()
         {
+            if (_references == 0 || --_references > 0) return;
+
             List<Exception>? errors = null;
             for (int i = _handles.Count - 1; i >= 0; i--)
             {

@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
@@ -31,26 +32,30 @@ namespace Rubickanov.UI.Tests
 
         private VisualElement PopupLayer => _root.Q("popup-layer");
 
+        // A button off any panel gets no events: run its click handlers directly.
+        private static void Click(Button button) =>
+            typeof(Clickable).GetMethod("Invoke", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(button.clickable, new object?[] { null });
+
         [Test]
         public async Task Back_PopupViewThenEscapePopup_ClosesPopupThenViewThenReturnsFalse()
         {
             await _ui.Register<PopupA>();
-            var view = _ui.Get<PopupA>();
-            await _ui.Show<PopupA>(new FakeViewModel());
+            var view = _popups.ShowView<PopupA>(new FakeViewModel());
             var popup = _popups.Create().Message("hint").CloseOn(PopupCloseTriggers.Escape).Open();
 
             var first = _ui.Back();
             var popupOpenAfterFirst = popup.IsOpen;
-            var viewStateAfterFirst = view.State;
+            var viewOpenAfterFirst = view.IsOpen;
             var second = _ui.Back();
             var third = _ui.Back();
 
             Assert.IsTrue(first);
             Assert.IsFalse(popupOpenAfterFirst);
-            Assert.AreEqual(ViewState.Shown, viewStateAfterFirst);
+            Assert.IsTrue(viewOpenAfterFirst);
             Assert.AreEqual(PopupCloseReason.Escape, (await popup.Result).Reason);
             Assert.IsTrue(second);
-            Assert.AreEqual(ViewState.Hidden, view.State);
+            Assert.IsFalse(view.IsOpen);
             Assert.IsFalse(third);
         }
 
@@ -143,14 +148,143 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public void Dialog_Modal_OnOverlayLayerLikeModalPopups()
+        public void CreateDialog_Modal_OnOverlayLayerLikeModalPopups()
         {
-            IDialogService dialogs = new DialogService(_popups);
-
-            dialogs.CreateDialog("Abandon ship?").AddButton("Yes", "yes").ShowAsync().Forget();
+            _popups.CreateDialog("Abandon ship?").Button("Yes", "yes").Open();
 
             Assert.IsNotNull(_root.Q("overlay-layer").Q(className: PopupStyle.Dialog));
             Assert.IsNull(PopupLayer.Q(className: PopupStyle.Dialog));
+        }
+
+        [Test]
+        public async Task ShowConfirm_ConfirmClicked_True()
+        {
+            var confirm = _popups.ShowConfirm("Abandon ship?", "The crew stays behind.");
+            var button = _root.Q("overlay-layer").Query<Button>(className: PopupStyle.ButtonPrimary).First();
+
+            Click(button);
+
+            Assert.IsTrue(await confirm);
+        }
+
+        [Test]
+        public async Task ShowConfirm_Back_False()
+        {
+            var confirm = _popups.ShowConfirm("Abandon ship?", "The crew stays behind.");
+
+            _ui.Back();
+
+            Assert.IsFalse(await confirm);
+        }
+
+        [Test]
+        public void ShowModal_DisposeHandle_Closes()
+        {
+            var modal = _popups.ShowModal("Saving", "Please wait");
+            var capturedWhileOpen = _ui.PointerCaptured.CurrentValue;
+
+            modal.Dispose();
+
+            Assert.IsTrue(capturedWhileOpen);
+            Assert.IsFalse(modal.IsOpen);
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+            Assert.IsFalse(_ui.Back());
+        }
+
+        [Test]
+        public async Task Button_Clicked_ClosesWithItsId()
+        {
+            var popup = _popups.Create().Message("choose").Button("Later", "later").Open();
+
+            Click(PopupLayer.Q<Button>(className: PopupStyle.Button));
+
+            var result = await popup.Result;
+            Assert.AreEqual("later", result.ButtonId);
+            Assert.AreEqual(PopupCloseReason.Button, result.Reason);
+        }
+
+        [Test]
+        public void CloseButton_Text_IsMultiplicationSign()
+        {
+            _popups.Create().Message("info").CloseOn(PopupCloseTriggers.CloseButton).Open();
+
+            Assert.AreEqual("\u00D7", PopupLayer.Q<Button>(className: PopupStyle.Close).text);
+        }
+
+        [Test]
+        public void SetTitleAndMessage_OpenPopup_ChangesLabels()
+        {
+            var popup = _popups.Create().Title("Loading").Message("0%").Open();
+
+            popup.SetTitle("Loaded");
+            popup.SetMessage("100%");
+
+            Assert.AreEqual("Loaded", PopupLayer.Q<Label>(className: PopupStyle.Title).text);
+            Assert.AreEqual("100%", PopupLayer.Q<Label>(className: PopupStyle.Message).text);
+            Assert.AreSame(PopupLayer.Q(className: PopupStyle.Panel), popup.Panel);
+        }
+
+        [Test]
+        public void Fill_Placement_PanelStretchedOverLayer()
+        {
+            var popup = (PopupInstance)_popups.Create().Message("full").At(PopupPlacement.Fill()).Open();
+
+            popup.Reposition();
+
+            var style = popup.Panel.style;
+            Assert.AreEqual(0f, style.left.value.value);
+            Assert.AreEqual(0f, style.top.value.value);
+            Assert.AreEqual(0f, style.right.value.value);
+            Assert.AreEqual(0f, style.bottom.value.value);
+        }
+
+        [Test]
+        public void SetPlacement_FromFill_ReleasesRightAndBottom()
+        {
+            var popup = (PopupInstance)_popups.Create().Message("full").At(PopupPlacement.Fill()).Open();
+            popup.Reposition();
+
+            popup.SetPlacement(PopupPlacement.ScreenCenter());
+
+            Assert.AreEqual(StyleKeyword.Null, popup.Panel.style.right.keyword);
+            Assert.AreEqual(StyleKeyword.Null, popup.Panel.style.bottom.keyword);
+        }
+
+        [Test]
+        public void Reposition_WorldAnchorBehindCamera_ReleasesInputUntilBackInView()
+        {
+            var cameraObject = new GameObject("camera");
+            var anchor = new GameObject("anchor");
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                anchor.transform.position = new Vector3(0f, 0f, -10f);
+                var popup = (PopupInstance)_popups.Create().Message("marker").Modal()
+                    .CloseOn(PopupCloseTriggers.Escape)
+                    .At(PopupPlacement.AtWorld(anchor.transform, camera: camera)).Open();
+                var backdrop = _root.Q(className: PopupStyle.Backdrop);
+
+                popup.Reposition();
+                var capturedWhileHidden = _ui.PointerCaptured.CurrentValue;
+                var backdropWhileHidden = backdrop.style.display.value;
+                var backWhileHidden = _ui.Back();
+                anchor.transform.position = new Vector3(0f, 0f, 10f);
+                popup.Reposition();
+
+                Assert.IsFalse(capturedWhileHidden);
+                Assert.AreEqual(DisplayStyle.None, backdropWhileHidden);
+                Assert.IsFalse(backWhileHidden);
+                Assert.IsTrue(popup.IsOpen);
+                Assert.IsTrue(_ui.PointerCaptured.CurrentValue);
+                Assert.AreEqual(DisplayStyle.Flex, backdrop.style.display.value);
+                Assert.IsTrue(_ui.Back());
+                Assert.IsFalse(popup.IsOpen);
+            }
+            finally
+            {
+                Object.DestroyImmediate(anchor);
+                Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]
@@ -234,7 +368,10 @@ namespace Rubickanov.UI.Tests
         [Test]
         public void Tooltip_OnOverlayLayerAboveDialogs()
         {
-            _popups.Open(TooltipExtensions.CreateConfig(new VisualElement(), config => config.Message = "hint"));
+            var tooltip = _popups.Create();
+            TooltipExtensions.Configure(tooltip, new VisualElement(), popup => popup.Message("hint"));
+
+            tooltip.Open();
 
             Assert.IsNotNull(_root.Q("overlay-layer").Q(className: PopupStyle.Tooltip));
         }

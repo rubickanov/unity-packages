@@ -6,25 +6,6 @@ using UnityEngine.UIElements;
 
 namespace Rubickanov.UI
 {
-    /// <summary>Callbacks a <see cref="PopupInstance"/> needs from its host.</summary>
-    internal interface IPopupHostCallbacks
-    {
-        /// <summary>Latest pointer position in panel space (for cursor placement).</summary>
-        Vector2 CursorPanelPosition { get; }
-
-        /// <summary>Camera for world placements without their own camera; looked up once per frame.</summary>
-        Camera? WorldCamera { get; }
-
-        IUIService Ui { get; }
-        IViewAnimation DefaultAnimation { get; }
-
-        /// <summary>A new instance of a registered view, bound and shown, for the popup to own.</summary>
-        View CreateContentView(Type viewType, ViewModelBase viewModel);
-
-        void OnPopupClosed(PopupInstance instance);
-        void OnPlacementChanged(PopupInstance instance);
-    }
-
     /// <summary>
     /// One open popup: owns its backdrop (modal only) and panel elements, builds content from a
     /// <see cref="PopupConfig"/>, wires close triggers, and positions itself via <see cref="PopupPlacementResolver"/>.
@@ -32,11 +13,11 @@ namespace Rubickanov.UI
     internal sealed class PopupInstance : IPopupHandle
     {
         private readonly VisualElement _layer;
-        private readonly IPopupHostCallbacks _host;
+        private readonly PopupHost _host;
         private readonly UniTaskCompletionSource<PopupResult> _completion = new();
         private readonly IViewAnimation _animation;
 
-        private PopupConfig _config;
+        private readonly PopupConfig _config;
         private PopupPlacement _placement;
 
         private VisualElement? _backdrop;
@@ -50,23 +31,26 @@ namespace Rubickanov.UI
 
         private IVisualElementScheduledItem? _timeout;
         private PopupSide? _appliedSide;
+        private bool _filled;
 
+        // A world popup whose anchor is off screen is hidden: it lets go of the pointer and Back until it returns.
+        private bool _hidden;
         private IDisposable? _pointerCapture;
         private IDisposable? _backHandle;
         private CancellationTokenSource? _show;
 
         public bool IsOpen { get; private set; }
         public UniTask<PopupResult> Result => _completion.Task;
+        public VisualElement Panel => _panel;
         public bool IsFollower => _placement.IsFollower;
         public bool IsModal => _config.Behaviour == PopupBehaviour.Modal;
 
-        public PopupInstance(PopupConfig config, VisualElement layer, IPopupHostCallbacks host)
+        public PopupInstance(PopupConfig config, VisualElement layer, PopupHost host)
         {
             _config = config;
             _placement = config.Placement;
             _layer = layer;
             _host = host;
-            _animation = config.Animation ?? host.DefaultAnimation;
 
             _panel = new VisualElement { name = "popup-panel" };
             _panel.AddToClassList(PopupStyle.Panel);
@@ -83,16 +67,22 @@ namespace Rubickanov.UI
                 config.ContentViewModel?.Dispose();
                 throw;
             }
+
+            _animation = config.Animation ?? ContentViewAnimation() ?? host.DefaultAnimation;
+            _contentView?.SetPopup(this);
+
             Attach();
             IsOpen = true;
-
-            if (IsModal || _interactive)
-                _pointerCapture = host.Ui.CapturePointer();
-            if (Has(PopupCloseTriggers.Escape))
-                _backHandle = host.Ui.PushBackHandler(OnBack);
+            AcquireInput();
 
             _show = new CancellationTokenSource();
             PlayShowAsync(_show.Token).Forget();
+        }
+
+        private IViewAnimation? ContentViewAnimation()
+        {
+            var animation = _contentView?.ResolveAnimation();
+            return animation == null || ReferenceEquals(animation, NoneAnimation.Instance) ? null : animation;
         }
 
         // ── Construction ─────────────────────────────────────────
@@ -113,14 +103,15 @@ namespace Rubickanov.UI
             }
 
             _panel.AddToClassList(modal ? PopupStyle.Modal : PopupStyle.Passive);
-            if (!string.IsNullOrEmpty(_config.RootClass))
-                _panel.AddToClassList(_config.RootClass);
+            foreach (var className in _config.Classes)
+                _panel.AddToClassList(className);
             if (_config.StyleSheet != null)
                 _panel.styleSheets.Add(_config.StyleSheet);
 
             if (Has(PopupCloseTriggers.CloseButton))
             {
-                var close = new Button(() => Close(null, PopupCloseReason.CloseButton)) { text = "✕" };
+                // U+00D7: in LiberationSans and Arial, unlike U+2715.
+                var close = new Button(() => Close(null, PopupCloseReason.CloseButton)) { text = "×" };
                 close.AddToClassList(PopupStyle.Close);
                 _panel.Add(close);
             }
@@ -179,11 +170,7 @@ namespace Rubickanov.UI
                 foreach (var btn in _config.Buttons)
                 {
                     var id = btn.Id;
-                    var closes = btn.ClosesOnClick || Has(PopupCloseTriggers.ActionButton);
-                    var button = new Button(() => { if (closes) Close(id, PopupCloseReason.Button); })
-                    {
-                        text = btn.Text
-                    };
+                    var button = new Button(() => Close(id, PopupCloseReason.Button)) { text = btn.Text };
                     button.AddToClassList(PopupStyle.Button);
                     if (btn.IsPrimary)
                         button.AddToClassList(PopupStyle.ButtonPrimary);
@@ -220,12 +207,32 @@ namespace Rubickanov.UI
             if (_backdrop != null) _layer.Add(_backdrop);
             _layer.Add(_panel);
 
-            if (_config.TimeoutSeconds > 0f && Has(PopupCloseTriggers.Timeout))
+            if (_config.TimeoutSeconds > 0f)
             {
                 _timeout = _panel.schedule
                     .Execute(() => Close(null, PopupCloseReason.Timeout))
                     .StartingIn((long)(_config.TimeoutSeconds * 1000f));
             }
+        }
+
+        // ── Input ────────────────────────────────────────────────
+
+        private void AcquireInput()
+        {
+            if ((IsModal || _interactive) && _pointerCapture == null)
+                _pointerCapture = _host.Ui.CapturePointer();
+            if (Has(PopupCloseTriggers.Escape) && _backHandle == null)
+                _backHandle = _host.Ui.PushBackHandler(OnBack);
+        }
+
+        private void ReleaseInput()
+        {
+            var capture = _pointerCapture;
+            var back = _backHandle;
+            _pointerCapture = null;
+            _backHandle = null;
+            capture?.Dispose();
+            back?.Dispose();
         }
 
         // ── Animation ────────────────────────────────────────────
@@ -296,6 +303,24 @@ namespace Rubickanov.UI
                 return;
             }
 
+            if (_placement.Mode == PopupPlacementMode.Fill)
+            {
+                SetHidden(false);
+                _panel.style.left = 0;
+                _panel.style.top = 0;
+                _panel.style.right = 0;
+                _panel.style.bottom = 0;
+                _filled = true;
+                return;
+            }
+
+            if (_filled)
+            {
+                _panel.style.right = StyleKeyword.Null;
+                _panel.style.bottom = StyleKeyword.Null;
+                _filled = false;
+            }
+
             var size = new Vector2(_panel.resolvedStyle.width, _panel.resolvedStyle.height);
             var camera = _placement.Mode == PopupPlacementMode.World && _placement.Camera == null
                 ? _host.WorldCamera
@@ -303,13 +328,9 @@ namespace Rubickanov.UI
             var visible = PopupPlacementResolver.TryResolve(
                 _layer, _placement, size, _host.CursorPanelPosition, camera, out var topLeft, out var side);
 
-            if (!visible)
-            {
-                _panel.style.display = DisplayStyle.None;
-                return;
-            }
+            SetHidden(!visible);
+            if (!visible) return;
 
-            _panel.style.display = DisplayStyle.Flex;
             _panel.style.left = topLeft.x;
             _panel.style.top = topLeft.y;
 
@@ -322,12 +343,27 @@ namespace Rubickanov.UI
             }
         }
 
+        private void SetHidden(bool hidden)
+        {
+            if (_hidden == hidden) return;
+            _hidden = hidden;
+
+            var display = hidden ? DisplayStyle.None : DisplayStyle.Flex;
+            _panel.style.display = display;
+            if (_backdrop != null) _backdrop.style.display = display;
+
+            if (hidden) ReleaseInput();
+            else AcquireInput();
+        }
+
         private void OnPanelGeometryChanged(GeometryChangedEvent _) => Reposition();
 
         // ── Close triggers ───────────────────────────────────────
 
         private bool OnBack()
         {
+            // A popup view may consume Back itself (close its own sub-panel) before the popup closes.
+            if (_contentView != null && _contentView.HandleBack()) return true;
             Close(null, PopupCloseReason.Escape);
             return true;
         }
@@ -347,6 +383,8 @@ namespace Rubickanov.UI
         public void Close(string? buttonId = null, PopupCloseReason reason = PopupCloseReason.Code)
             => Close(buttonId, reason, animate: true);
 
+        public void Dispose() => Close();
+
         /// <summary>Closes and removes the elements at once, without the hide animation.</summary>
         internal void CloseImmediate() => Close(null, PopupCloseReason.Code, animate: false);
 
@@ -360,12 +398,7 @@ namespace Rubickanov.UI
 
             var input = _config.HasInput ? _input?.value : null;
 
-            var capture = _pointerCapture;
-            var back = _backHandle;
-            _pointerCapture = null;
-            _backHandle = null;
-            capture?.Dispose();
-            back?.Dispose();
+            ReleaseInput();
 
             var show = _show;
             _show = null;
@@ -388,11 +421,19 @@ namespace Rubickanov.UI
                 RemoveElements();
         }
 
-        public void UpdateContent(Action<PopupContentContext> mutate)
+        public void SetTitle(string text)
         {
-            if (!IsOpen) return;
-            mutate(new PopupContentContext(_panel, _title, _message, _icon));
-            Reposition();
+            if (_title != null) _title.text = text;
+        }
+
+        public void SetMessage(string text)
+        {
+            if (_message != null) _message.text = text;
+        }
+
+        public void SetIcon(Texture2D texture)
+        {
+            if (_icon != null) _icon.style.backgroundImage = new StyleBackground(texture);
         }
 
         public void SetPlacement(in PopupPlacement placement)

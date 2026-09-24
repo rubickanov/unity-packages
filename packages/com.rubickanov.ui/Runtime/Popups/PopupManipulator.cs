@@ -4,22 +4,23 @@ using UnityEngine.UIElements;
 namespace Rubickanov.UI
 {
     /// <summary>
-    /// Shows a popup while the pointer hovers the target element, after a delay, opening a
-    /// full <see cref="PopupConfig"/> via <see cref="IPopupService"/>.
+    /// Shows a popup while the pointer hovers the target element, after a delay. Closes it when the pointer leaves or
+    /// the target leaves the panel (a rebuilt list row gets no <see cref="PointerLeaveEvent"/>).
     /// </summary>
     public sealed class PopupManipulator : Manipulator
     {
         private readonly IPopupService _service;
-        private readonly Func<PopupConfig> _configFactory;
+        private readonly Action<PopupBuilder> _configure;
         private readonly float _delay;
 
         private IVisualElementScheduledItem? _scheduledShow;
         private IPopupHandle? _handle;
 
-        public PopupManipulator(IPopupService service, Func<PopupConfig> configFactory, float delay = 0.3f)
+        /// <param name="configure">Describes the popup each time it opens.</param>
+        public PopupManipulator(IPopupService service, Action<PopupBuilder> configure, float delay = 0.3f)
         {
-            _service = service;
-            _configFactory = configFactory;
+            _service = service ?? throw new ArgumentNullException(nameof(service));
+            _configure = configure ?? throw new ArgumentNullException(nameof(configure));
             _delay = delay;
         }
 
@@ -27,6 +28,7 @@ namespace Rubickanov.UI
         {
             target.RegisterCallback<PointerEnterEvent>(OnPointerEnter);
             target.RegisterCallback<PointerLeaveEvent>(OnPointerLeave);
+            target.RegisterCallback<DetachFromPanelEvent>(OnDetach);
         }
 
         protected override void UnregisterCallbacksFromTarget()
@@ -35,6 +37,7 @@ namespace Rubickanov.UI
             CloseCurrent();
             target.UnregisterCallback<PointerEnterEvent>(OnPointerEnter);
             target.UnregisterCallback<PointerLeaveEvent>(OnPointerLeave);
+            target.UnregisterCallback<DetachFromPanelEvent>(OnDetach);
         }
 
         private void OnPointerEnter(PointerEnterEvent evt)
@@ -50,7 +53,11 @@ namespace Rubickanov.UI
             _scheduledShow = target.schedule.Execute(ShowPopup).StartingIn((long)(_delay * 1000f));
         }
 
-        private void OnPointerLeave(PointerLeaveEvent evt)
+        private void OnPointerLeave(PointerLeaveEvent evt) => Hide();
+
+        private void OnDetach(DetachFromPanelEvent evt) => Hide();
+
+        private void Hide()
         {
             CancelScheduledShow();
             CloseCurrent();
@@ -60,7 +67,9 @@ namespace Rubickanov.UI
         {
             _scheduledShow = null;
             CloseCurrent();
-            _handle = _service.Open(_configFactory());
+            var popup = _service.Create();
+            _configure(popup);
+            _handle = popup.Open();
         }
 
         private void CloseCurrent()

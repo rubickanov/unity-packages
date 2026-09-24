@@ -1,6 +1,6 @@
 {
   "name": "com.rubickanov.ui.animations",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "license": "MIT",
   "displayName": "UI Animations",
   "description": "LitMotion-based view animations for UI Framework.",
@@ -8,6 +8,6 @@
   "author": { "name": "rubickanov" },
   "keywords": [ "ui", "animation", "litmotion" ],
   "dependencies": {
-    "com.rubickanov.ui": "2.0.0"
+    "com.rubickanov.ui": "3.0.0"
   }
 }

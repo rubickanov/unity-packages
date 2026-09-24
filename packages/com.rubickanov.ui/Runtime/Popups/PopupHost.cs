@@ -9,10 +9,9 @@ namespace Rubickanov.UI
 {
     /// <summary>
     /// Default <see cref="IPopupService"/>. Owns popup elements directly on the UI layers,
-    /// supports many open at once, and drives world/cursor followers from one MonoBehaviour-free loop
-    /// (the <see cref="SpinnerHost"/> pattern).
+    /// supports many open at once, and drives world/cursor followers from one MonoBehaviour-free loop.
     /// </summary>
-    public sealed class PopupHost : IPopupService, IPopupHostCallbacks, IDisposable
+    public sealed class PopupHost : IPopupService, IDisposable
     {
         private readonly VisualElement _root;
         private readonly UILayerElements _layers;
@@ -21,7 +20,7 @@ namespace Rubickanov.UI
         private readonly List<PopupInstance> _open = new();
         private readonly List<PopupInstance> _followers = new();
 
-        private readonly IUIService _ui;
+        private readonly UIService _ui;
         private readonly Func<Vector2>? _pointerScreenPosition;
         private readonly Func<Camera?>? _cameraProvider;
         private readonly IViewAnimation _defaultAnimation;
@@ -38,7 +37,7 @@ namespace Rubickanov.UI
         /// <param name="root">Element holding the standard layer elements (for example <c>uiDocument.rootVisualElement</c>).</param>
         /// <param name="ui">
         /// Receives a pointer capture for every open modal or interactive popup and a back handler for every popup
-        /// closing on <see cref="PopupCloseTriggers.Escape"/>.
+        /// closing on <see cref="PopupCloseTriggers.Escape"/>; builds the popup views and views as content.
         /// </param>
         /// <param name="defaultStyleSheet">Optional stylesheet applied to every popup.</param>
         /// <param name="pointerScreenPosition">
@@ -50,7 +49,7 @@ namespace Rubickanov.UI
         /// </param>
         /// <param name="camera">Camera for world placements without their own camera. Default: <c>Camera.main</c>.</param>
         /// <param name="animation">Played by popups whose config has no animation. Default: none.</param>
-        public PopupHost(VisualElement root, IUIService ui, StyleSheet? defaultStyleSheet = null,
+        public PopupHost(VisualElement root, UIService ui, StyleSheet? defaultStyleSheet = null,
             Func<Vector2>? pointerScreenPosition = null, Func<Camera?>? camera = null, IViewAnimation? animation = null)
         {
             _root = root ?? throw new ArgumentNullException(nameof(root));
@@ -71,15 +70,17 @@ namespace Rubickanov.UI
 
         // ── IPopupService ────────────────────────────────────────
 
-        public IPopupHandle Open(PopupConfig config)
+        public IPopupHandle Open(PopupBuilder popup)
         {
+            if (popup == null) throw new ArgumentNullException(nameof(popup));
             if (_disposed)
                 throw new ObjectDisposedException(nameof(PopupHost));
 
+            var config = popup.Config;
             if (config.DismissOthers)
                 CloseAll(PopupCloseReason.Replaced);
 
-            var layer = _layers[config.Layer];
+            var layer = _layers[config.ResolveLayer()];
             var instance = new PopupInstance(config, layer, this);
             _open.Add(instance);
 
@@ -111,14 +112,15 @@ namespace Rubickanov.UI
                 popup.CloseImmediate();
         }
 
-        // ── IPopupHostCallbacks (explicit: PopupInstance is internal) ─
+        // ── For PopupInstance ────────────────────────────────────
 
-        Vector2 IPopupHostCallbacks.CursorPanelPosition =>
+        internal Vector2 CursorPanelPosition =>
             _pointerScreenPosition != null
                 ? PopupPlacementResolver.ScreenToPanel(_root, _pointerScreenPosition())
                 : _cursorPanelPosition;
 
-        Camera? IPopupHostCallbacks.WorldCamera
+        /// <summary>Camera for world placements without their own camera; looked up once per frame.</summary>
+        internal Camera? WorldCamera
         {
             get
             {
@@ -133,19 +135,14 @@ namespace Rubickanov.UI
             }
         }
 
-        IUIService IPopupHostCallbacks.Ui => _ui;
+        internal UIService Ui => _ui;
+        internal IViewAnimation DefaultAnimation => _defaultAnimation;
 
-        View IPopupHostCallbacks.CreateContentView(Type viewType, ViewModelBase viewModel)
-        {
-            if (_ui is not UIService service)
-                throw new NotSupportedException(
-                    $"A view as popup content needs PopupHost built over UIService, which loads its UXML; " +
-                    $"this one was given {_ui.GetType().Name}.");
-            return service.CreateDetached(viewType, viewModel);
-        }
-        IViewAnimation IPopupHostCallbacks.DefaultAnimation => _defaultAnimation;
+        /// <summary>A new instance of a registered view, bound and shown, for the popup to own.</summary>
+        internal View CreateContentView(Type viewType, ViewModelBase viewModel) =>
+            _ui.CreateDetached(viewType, viewModel);
 
-        void IPopupHostCallbacks.OnPopupClosed(PopupInstance instance)
+        internal void OnPopupClosed(PopupInstance instance)
         {
             _open.Remove(instance);
             _followers.Remove(instance);
@@ -153,7 +150,7 @@ namespace Rubickanov.UI
                 StopTick();
         }
 
-        void IPopupHostCallbacks.OnPlacementChanged(PopupInstance instance)
+        internal void OnPlacementChanged(PopupInstance instance)
         {
             var shouldFollow = instance.IsFollower;
             var isFollowing = _followers.Contains(instance);
@@ -171,7 +168,7 @@ namespace Rubickanov.UI
             }
         }
 
-        // ── Follower loop (SpinnerHost pattern) ──────────────────
+        // ── Follower loop ────────────────────────────────────────
 
         private void EnsureTick()
         {
@@ -200,7 +197,9 @@ namespace Rubickanov.UI
                     catch (Exception ex) { Debug.LogException(ex); }
                 }
 
-                try { await UniTask.NextFrame(ct); }
+                // After the UI Toolkit panel update and LateUpdate (a following camera moves there), before the
+                // repaint: the popup lands where the camera is this frame, not where it was the last one.
+                try { await UniTask.NextFrame(PlayerLoopTiming.LastPreLateUpdate, ct); }
                 catch (OperationCanceledException) { return; }
             }
         }

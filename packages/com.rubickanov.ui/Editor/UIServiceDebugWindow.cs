@@ -25,7 +25,7 @@ namespace Rubickanov.UI.Editor
 
     public sealed class UIServiceDebugWindow : EditorWindow
     {
-        private static readonly UILayer[] LayerOrder = { UILayer.Screen, UILayer.HUD, UILayer.Popup, UILayer.Overlay };
+        private static readonly UILayer[] LayerOrder = { UILayer.Screen, UILayer.HUD, UILayer.Overlay };
 
         private readonly Dictionary<int, bool> _instanceFoldouts = new();
         private Vector2 _scroll;
@@ -80,7 +80,7 @@ namespace Rubickanov.UI.Editor
             DrawInput(service);
             DrawActiveScreen(service);
             DrawScreenHistory(service);
-            DrawPopupStack(service);
+            DrawPopupViews(service);
             DrawRegisteredViews(service);
             DrawActions(service);
             EditorGUI.indentLevel--;
@@ -127,20 +127,20 @@ namespace Rubickanov.UI.Editor
             EditorGUI.indentLevel--;
         }
 
-        private static void DrawPopupStack(UIService service)
+        private static void DrawPopupViews(UIService service)
         {
-            var stack = service.DebugPopupStack;
-            EditorGUILayout.LabelField($"Popup Stack (top → bottom): {stack.Count}", EditorStyles.boldLabel);
+            var popupViews = service.DebugPopupViews;
+            EditorGUILayout.LabelField($"Popup Views: {popupViews.Count}", EditorStyles.boldLabel);
             EditorGUI.indentLevel++;
-            if (stack.Count == 0)
+            if (popupViews.Count == 0)
             {
-                EditorGUILayout.LabelField("Empty");
+                EditorGUILayout.LabelField("None");
             }
             else
             {
-                for (var i = stack.Count - 1; i >= 0; i--)
+                foreach (var type in popupViews)
                 {
-                    DrawViewRow(stack[i].GetType(), stack[i]);
+                    EditorGUILayout.LabelField(type.Name);
                 }
             }
 
@@ -196,11 +196,11 @@ namespace Rubickanov.UI.Editor
         private static void DrawActions(UIService service)
         {
             EditorGUILayout.Space();
-            using (new EditorGUI.DisabledScope(service.DebugActiveScreen == null && service.DebugPopupStack.Count == 0))
+            using (new EditorGUI.DisabledScope(service.DebugActiveScreen == null))
             {
-                if (GUILayout.Button("Hide All"))
+                if (GUILayout.Button("Hide Screen"))
                 {
-                    service.HideAll();
+                    service.HideScreen();
                 }
             }
         }

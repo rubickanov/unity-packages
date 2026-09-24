@@ -12,16 +12,20 @@ namespace Rubickanov.UI
         private readonly UILayerElements _layers;
         private readonly Dictionary<Type, View> _views = new();
         private readonly Dictionary<Type, UILayer> _viewLayers = new();
+        // Popup views: an instance never shown, holding the UXML every popup's own instance is built from.
+        private readonly Dictionary<Type, View> _popupViews = new();
         private readonly Dictionary<Type, object> _loading = new();
         private View? _activeScreen;
         private readonly List<HistoryEntry> _history = new();
-        private readonly List<View> _popupStack = new();
         private readonly ReactiveProperty<bool> _pointerCaptured = new(false);
         private int _captureCount;
         private readonly List<BackHandler> _backHandlers = new();
         private bool _disposed;
 
-        /// <param name="root">Element holding the layer children: screen-layer, hud-layer, popup-layer, overlay-layer.</param>
+        /// <param name="root">
+        /// Element holding the layer children: screen-layer, hud-layer, popup-layer, overlay-layer. The popup layer
+        /// belongs to <see cref="PopupHost"/>.
+        /// </param>
         /// <param name="loader">Loads the UXML asset of a view by name.</param>
         public UIService(VisualElement root, UxmlLoader loader)
         {
@@ -36,7 +40,7 @@ namespace Rubickanov.UI
         internal IReadOnlyDictionary<Type, View> DebugViews => _views;
         internal IReadOnlyDictionary<Type, UILayer> DebugViewLayers => _viewLayers;
         internal View? DebugActiveScreen => _activeScreen;
-        internal IReadOnlyList<View> DebugPopupStack => _popupStack;
+        internal IReadOnlyCollection<Type> DebugPopupViews => _popupViews.Keys;
         internal int DebugPointerCaptureCount => _captureCount;
         internal int DebugBackStackDepth => _backHandlers.Count;
 
@@ -58,7 +62,7 @@ namespace Rubickanov.UI
             if (_disposed) throw new ObjectDisposedException(nameof(UIService));
 
             var type = typeof(T);
-            if (_views.ContainsKey(type))
+            if (_views.ContainsKey(type) || _popupViews.ContainsKey(type))
                 throw new InvalidOperationException($"View {type.Name} is already registered in UIService.");
             if (_loading.ContainsKey(type))
                 throw new InvalidOperationException($"View {type.Name} is already being registered in UIService.");
@@ -88,11 +92,22 @@ namespace Rubickanov.UI
             }
             _loading.Remove(type);
 
+            var layer = view.ResolveLayer();
+            if (layer == UILayer.Popup)
+            {
+                view.Uxml = cache;
+                view.OwnsUxml = true;
+                view.Owner = this;
+                _popupViews[type] = view;
+                return;
+            }
+
             try
             {
                 cache.TryGet(type, out var asset);
                 view.Root = asset != null ? asset.CloneTree() : new VisualElement();
                 view.Uxml = cache;
+                view.OwnsUxml = true;
                 view.Root.pickingMode = PickingMode.Ignore;
                 view.Root.style.display = DisplayStyle.None;
                 view.Root.style.position = Position.Absolute;
@@ -107,7 +122,6 @@ namespace Rubickanov.UI
                 throw;
             }
 
-            var layer = view.ResolveLayer();
             _layers[layer].Add(view.Root);
             _views[type] = view;
             _viewLayers[type] = layer;
@@ -146,34 +160,40 @@ namespace Rubickanov.UI
         {
             var type = typeof(T);
             if (_loading.Remove(type)) return;
+            if (_popupViews.Remove(type, out var popupView))
+            {
+                // Popups still showing it keep the UXML until they close.
+                ReleaseTemplate(popupView);
+                return;
+            }
             if (!_views.TryGetValue(type, out var view)) return;
 
             _views.Remove(type);
             _viewLayers.Remove(type);
-            RemoveFromStacks(view);
+            RemoveFromScreen(view);
             _history.RemoveAll(entry => entry.ViewType == type);
-            DestroyView(view);
+            view.Destroy();
         }
 
-        private static void DestroyView(View view)
+        private static void ReleaseTemplate(View template)
         {
-            try
-            {
-                view.Destroy();
-            }
-            finally
-            {
-                view.Uxml?.Release();
-                view.Uxml = null;
-            }
+            if (!template.OwnsUxml) return;
+            template.OwnsUxml = false;
+            template.Uxml?.Release();
         }
 
+        /// <exception cref="InvalidOperationException">
+        /// <typeparamref name="T"/> is not registered, or is a popup view, which has no instance of its own.
+        /// </exception>
         public T Get<T>() where T : View
         {
-            if (!_views.TryGetValue(typeof(T), out var view))
+            if (_views.TryGetValue(typeof(T), out var view))
+                return (T)view;
+            if (_popupViews.ContainsKey(typeof(T)))
                 throw new InvalidOperationException(
-                    $"View {typeof(T).Name} is not registered in UIService.");
-            return (T)view;
+                    $"View {typeof(T).Name} is a popup view: every popup builds its own instance. " +
+                    "Show it with IPopupService.ShowView.");
+            throw new InvalidOperationException($"View {typeof(T).Name} is not registered in UIService.");
         }
 
         public async UniTask Show<T>(ViewModelBase viewModel) where T : View
@@ -197,28 +217,21 @@ namespace Rubickanov.UI
             }
             catch
             {
-                RemoveFromStacks(view);
+                RemoveFromScreen(view);
                 throw;
             }
 
-            switch (_viewLayers[view.GetType()])
+            if (_viewLayers[view.GetType()] == UILayer.Screen)
             {
-                case UILayer.Screen:
-                    var previous = _activeScreen;
-                    _activeScreen = view;
-                    if (previous != null && previous != view)
-                    {
-                        ReleaseInput(previous);
-                        previous.HideAsync().Forget();
-                    }
-                    AcquireInput(view, screen: true);
-                    onScreenShown();
-                    break;
-                case UILayer.Popup:
-                    _popupStack.Remove(view);
-                    _popupStack.Add(view);
-                    AcquireInput(view, screen: false);
-                    break;
+                var previous = _activeScreen;
+                _activeScreen = view;
+                if (previous != null && previous != view)
+                {
+                    ReleaseInput(previous);
+                    previous.HideAsync().Forget();
+                }
+                AcquireInput(view);
+                onScreenShown();
             }
 
             try
@@ -229,7 +242,7 @@ namespace Rubickanov.UI
             {
                 if (view.State == ViewState.Showing)
                 {
-                    RemoveFromStacks(view);
+                    RemoveFromScreen(view);
                     view.Hide();
                 }
                 throw;
@@ -319,26 +332,33 @@ namespace Rubickanov.UI
 
         /// <summary>
         /// Creates a new instance of the registered view <paramref name="viewType"/> from its UXML, apart from its
-        /// layer and stacks, bound to <paramref name="viewModel"/> and shown. The caller adds its root and destroys it.
+        /// layer and the screen, bound to <paramref name="viewModel"/> and shown. The caller adds its root and destroys
+        /// it; until then it holds the UXML, even through <see cref="Unregister{T}"/>.
         /// </summary>
         internal View CreateDetached(Type viewType, ViewModelBase viewModel)
         {
             if (viewModel == null) throw new ArgumentNullException(nameof(viewModel));
-            if (!_views.TryGetValue(viewType, out var registered))
+            if (!_views.TryGetValue(viewType, out var registered) && !_popupViews.TryGetValue(viewType, out registered))
                 throw new InvalidOperationException(
                     $"View {viewType.Name} is not registered in UIService: register it to load its UXML before " +
-                    "showing it as popup content.");
+                    "showing it in a popup.");
             EnsureViewModelType(registered, viewModel);
 
+            var uxml = registered.Uxml!;
+            uxml.Retain();
             var view = (View)Activator.CreateInstance(viewType);
-            view.InitializeFrom(registered.Uxml, $"view {viewType.Name} is being unregistered");
+            view.Uxml = uxml;
+            view.OwnsUxml = true;
             try
             {
+                view.InitializeFrom(uxml, $"view {viewType.Name} is being unregistered");
+                view.Owner = this;
                 view.ShowAsChild(viewModel);
             }
             catch
             {
-                view.Destroy();
+                if (view.Root != null) view.Destroy();
+                else ReleaseTemplate(view);
                 throw;
             }
             return view;
@@ -348,7 +368,7 @@ namespace Rubickanov.UI
         {
             if (!_views.TryGetValue(typeof(T), out var view)) return;
 
-            RemoveFromStacks(view);
+            RemoveFromScreen(view);
             view.Hide();
         }
 
@@ -356,84 +376,45 @@ namespace Rubickanov.UI
         {
             if (!_views.TryGetValue(typeof(T), out var view)) return UniTask.CompletedTask;
 
-            return HideViewAsync(view);
-        }
-
-        internal UniTask HideViewAsync(View view)
-        {
-            RemoveFromStacks(view);
+            RemoveFromScreen(view);
             return view.HideAsync();
         }
 
-        public void HideTop()
+        public void HideScreen() => TakeScreen()?.Hide();
+
+        public UniTask HideScreenAsync() => TakeScreen()?.HideAsync() ?? UniTask.CompletedTask;
+
+        /// <summary>Clears the active screen and the history, returning the screen.</summary>
+        private View? TakeScreen()
         {
-            if (_popupStack.Count == 0) return;
-
-            var top = _popupStack[^1];
-            RemoveFromStacks(top);
-            top.Hide();
-        }
-
-        public UniTask HideTopAsync()
-        {
-            if (_popupStack.Count == 0) return UniTask.CompletedTask;
-
-            return HideViewAsync(_popupStack[^1]);
-        }
-
-        public void HideAll()
-        {
-            var views = TakeScreenAndPopups();
-            foreach (var view in views) view.Hide();
-        }
-
-        public UniTask HideAllAsync()
-        {
-            var views = TakeScreenAndPopups();
-            if (views.Count == 0) return UniTask.CompletedTask;
-
-            var tasks = new UniTask[views.Count];
-            for (int i = 0; i < views.Count; i++) tasks[i] = views[i].HideAsync();
-            return UniTask.WhenAll(tasks);
-        }
-
-        /// <summary>Clears the popup stack (top first), the active screen and the history, returning what they held.</summary>
-        private List<View> TakeScreenAndPopups()
-        {
-            var views = new List<View>(_popupStack.Count + 1);
-            for (int i = _popupStack.Count - 1; i >= 0; i--) views.Add(_popupStack[i]);
-            if (_activeScreen != null) views.Add(_activeScreen);
-
-            _popupStack.Clear();
+            var screen = _activeScreen;
             _activeScreen = null;
             _history.Clear();
-            foreach (var view in views) ReleaseInput(view);
-            return views;
+            if (screen != null) ReleaseInput(screen);
+            return screen;
         }
 
-        private void RemoveFromStacks(View view)
+        private void RemoveFromScreen(View view)
         {
             if (_activeScreen == view)
             {
                 _activeScreen = null;
                 _history.Clear();
             }
-            _popupStack.Remove(view);
             ReleaseInput(view);
         }
 
         // ── Input: pointer capture and back stack (D8, D9) ───────
 
         /// <summary>
-        /// Takes a fresh capture and back handler for a visible screen or popup. A popup's handler goes on top of the
-        /// others; a screen's goes under all of them, so whatever is open over the screen answers Back first, even
-        /// when it opened before the screen was shown.
+        /// Takes a fresh capture and back handler for the visible screen. Its handler goes under all the others, so
+        /// whatever is open over the screen answers Back first, even when it opened before the screen was shown.
         /// </summary>
-        private void AcquireInput(View view, bool screen)
+        private void AcquireInput(View screen)
         {
-            ReleaseInput(view);
-            view.PointerCapture = CapturePointer();
-            view.BackHandle = AddBackHandler(view.HandleBack, bottom: screen);
+            ReleaseInput(screen);
+            screen.PointerCapture = CapturePointer();
+            screen.BackHandle = AddBackHandler(screen.HandleBack, bottom: true);
         }
 
         private static void ReleaseInput(View view)
@@ -534,7 +515,6 @@ namespace Rubickanov.UI
             if (_disposed) return;
 
             _loading.Clear();
-            _popupStack.Clear();
             _activeScreen = null;
             _history.Clear();
             foreach (var view in _views.Values) ReleaseInput(view);
@@ -542,12 +522,18 @@ namespace Rubickanov.UI
             List<Exception>? errors = null;
             foreach (var view in _views.Values)
             {
-                try { DestroyView(view); }
+                try { view.Destroy(); }
+                catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
+            }
+            foreach (var template in _popupViews.Values)
+            {
+                try { ReleaseTemplate(template); }
                 catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
             }
 
             _views.Clear();
             _viewLayers.Clear();
+            _popupViews.Clear();
 
             foreach (var entry in _backHandlers.ToArray()) entry.Dispose();
             _captureCount = 0;

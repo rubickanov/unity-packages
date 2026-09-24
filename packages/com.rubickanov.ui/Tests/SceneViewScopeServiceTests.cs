@@ -75,10 +75,10 @@ namespace Rubickanov.UI.Tests
             await first.Register<ScreenA>();
 
             var second = service.Begin();
-            await second.Register<PopupA>();
+            await second.Register<HudA>();
 
             Assert.Throws<InvalidOperationException>(() => _ui.Get<ScreenA>());
-            Assert.DoesNotThrow(() => _ui.Get<PopupA>());
+            Assert.DoesNotThrow(() => _ui.Get<HudA>());
         }
 
         [Test]

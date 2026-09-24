@@ -1,8 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
-using Cysharp.Threading.Tasks;
-using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace Rubickanov.UI
@@ -27,7 +24,7 @@ namespace Rubickanov.UI
         private Label? _label;
 
         private readonly List<Handle> _activeHandles = new();
-        private CancellationTokenSource? _rotationCts;
+        private IVisualElementScheduledItem? _rotation;
         private float _angle;
         private bool _disposed;
 
@@ -84,40 +81,26 @@ namespace Rubickanov.UI
             if (_root.parent == null)
                 _overlayLayer.Add(_root);
 
-            if (_rotationCts == null)
-            {
-                _rotationCts = new CancellationTokenSource();
-                RunRotationLoop(_rotationCts.Token).Forget();
-            }
+            // The panel's scheduler runs it on every panel update while the spinner is on a panel.
+            if (_rotation == null)
+                _rotation = _root.schedule.Execute(Rotate).Every(0);
+            else
+                _rotation.Resume();
         }
 
         private void Detach()
         {
-            _rotationCts?.Cancel();
-            _rotationCts?.Dispose();
-            _rotationCts = null;
+            _rotation?.Pause();
 
             if (_root != null && _root.parent != null)
                 _root.RemoveFromHierarchy();
         }
 
-        private async UniTaskVoid RunRotationLoop(CancellationToken ct)
+        private void Rotate(TimerState timer)
         {
-            while (!ct.IsCancellationRequested)
-            {
-                _angle = (_angle + Time.unscaledDeltaTime * 360f) % 360f;
-                if (_icon != null)
-                    _icon.style.rotate = new Rotate(new Angle(_angle, AngleUnit.Degree));
-
-                try
-                {
-                    await UniTask.NextFrame(ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-            }
+            _angle = (_angle + timer.deltaTime * 0.36f) % 360f;
+            if (_icon != null)
+                _icon.style.rotate = new Rotate(new Angle(_angle, AngleUnit.Degree));
         }
 
         private void EnsureBuilt()
@@ -143,6 +126,7 @@ namespace Rubickanov.UI
             _disposed = true;
             _activeHandles.Clear();
             Detach();
+            _rotation = null;
             _root = null;
             _icon = null;
             _label = null;

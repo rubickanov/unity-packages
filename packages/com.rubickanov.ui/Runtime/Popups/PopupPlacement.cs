@@ -61,6 +61,10 @@ namespace Rubickanov.UI
         /// <summary>True for placements that must be re-evaluated every frame.</summary>
         public bool IsFollower => Mode == PopupPlacementMode.World || Mode == PopupPlacementMode.Cursor;
 
+        /// <summary>Covers the whole layer, like a screen. What a popup view (<see cref="IPopupService"/>.ShowView) uses.</summary>
+        public static PopupPlacement Fill()
+            => new(PopupPlacementMode.Fill, PopupAnchorCorner.Center, default, null, PopupSide.Bottom, false, null, default, false, null, default);
+
         /// <summary>Centered on the screen.</summary>
         public static PopupPlacement ScreenCenter(Vector2 offset = default)
             => Screen(PopupAnchorCorner.Center, offset);

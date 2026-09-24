@@ -22,6 +22,8 @@ namespace Rubickanov.UI
         public const string Passive = "popup--passive";
         public const string Dialog = "popup--dialog";
         public const string Tooltip = "popup--tooltip";
+        /// <summary>A popup view: no panel chrome, the view draws itself.</summary>
+        public const string View = "popup--view";
         public const string SideTop = "popup--side-top";
         public const string SideBottom = "popup--side-bottom";
         public const string SideLeft = "popup--side-left";

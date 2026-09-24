@@ -6,7 +6,10 @@ namespace Rubickanov.UI
 {
     public interface IUIService
     {
-        /// <summary>Loads the view's UXML (and its child views') and attaches it to the layer the view declares.</summary>
+        /// <summary>
+        /// Loads the view's UXML (and its child views') and attaches it to the layer the view declares. A popup view
+        /// (<see cref="UILayer.Popup"/>) is only loaded: <see cref="IPopupService"/> builds an instance per popup.
+        /// </summary>
         UniTask Register<T>() where T : View;
 
         /// <summary>Destroys the view, or cancels its registration while it is still loading.</summary>
@@ -42,14 +45,13 @@ namespace Rubickanov.UI
         void Hide<T>() where T : View;
         UniTask HideAsync<T>() where T : View;
 
-        void HideTop();
-        UniTask HideTopAsync();
-        void HideAll();
-        UniTask HideAllAsync();
+        /// <summary>Hides the active screen, whichever it is, and clears the history.</summary>
+        void HideScreen();
+        UniTask HideScreenAsync();
 
         /// <summary>
         /// Asks for a free pointer. Counted: <see cref="PointerCaptured"/> stays true while any handle is alive.
-        /// Screen and popup views, and modal or interactive popups, hold one while visible.
+        /// The visible screen, and modal or interactive popups while on screen, hold one.
         /// </summary>
         IDisposable CapturePointer();
 

@@ -20,11 +20,15 @@ namespace Rubickanov.UI
         /// </summary>
         protected virtual string? UxmlName => GetType().Name;
 
-        /// <summary>Layer the view lives on. Not used for a child view.</summary>
+        /// <summary>
+        /// Layer the view lives on. Not used for a child view. A view on <see cref="UILayer.Popup"/> is a popup view:
+        /// registering it only loads its UXML, and every <see cref="IPopupService"/> popup showing it builds its own
+        /// instance.
+        /// </summary>
         protected abstract UILayer Layer { get; }
 
-        /// <summary>Whether the view's root blocks pointer events while visible. Screens and popups do.</summary>
-        protected virtual bool InterceptsInput => Layer is UILayer.Screen or UILayer.Popup;
+        /// <summary>Whether the view's root blocks pointer events while visible. Screens do.</summary>
+        protected virtual bool InterceptsInput => Layer is UILayer.Screen;
 
         /// <summary>Played on show and hide.</summary>
         protected virtual IViewAnimation Animation => NoneAnimation.Instance;
@@ -38,9 +42,18 @@ namespace Rubickanov.UI
         internal UILayer ResolveLayer() => Layer;
         internal IReadOnlyList<Type> ResolveChildViews() => ChildViews;
         internal UxmlCache? Uxml { get; set; }
+
+        /// <summary>Whether this view holds a reference on <see cref="Uxml"/>, released when it is destroyed.</summary>
+        internal bool OwnsUxml { get; set; }
         internal UIService? Owner { get; set; }
         internal IDisposable? PointerCapture { get; set; }
         internal IDisposable? BackHandle { get; set; }
+
+        /// <summary>The popup showing this view as its content, or null.</summary>
+        protected IPopupHandle? Popup { get; private set; }
+
+        internal void SetPopup(IPopupHandle? popup) => Popup = popup;
+        internal IViewAnimation ResolveAnimation() => Animation;
 
         internal abstract Type ViewModelType { get; }
         internal abstract ViewModelBase? BoundViewModel { get; }
@@ -72,26 +85,14 @@ namespace Rubickanov.UI
         internal bool HandleBack() => OnBack();
 
         /// <summary>
-        /// Called by <see cref="IUIService.Back"/> while this screen or popup is visible and its handler is the top one.
-        /// Return true when the back press was consumed. Default: a popup hides itself and returns true; a screen
-        /// returns to the previous screen of the history (<see cref="IUIService.Navigate{T}"/>) and returns true, or
-        /// returns false when it is the first.
+        /// Called by <see cref="IUIService.Back"/> while this screen is visible and its handler is the top one, or
+        /// while this view is the content of a popup that closes on <see cref="PopupCloseTriggers.Escape"/>, before
+        /// the popup closes. Return true when the back press was consumed. Default: a screen returns to the previous
+        /// screen of the history (<see cref="IUIService.Navigate{T}"/>) and returns true, or returns false when it is
+        /// the first; popup content returns false, and the popup closes.
         /// </summary>
-        protected virtual bool OnBack()
-        {
-            if (Owner == null) return false;
-
-            switch (Layer)
-            {
-                case UILayer.Popup:
-                    Owner.HideViewAsync(this).Forget();
-                    return true;
-                case UILayer.Screen:
-                    return Owner.NavigateBackFrom(this);
-                default:
-                    return false;
-            }
-        }
+        protected virtual bool OnBack() =>
+            Layer == UILayer.Screen && Owner != null && Owner.NavigateBackFrom(this);
 
         /// <summary>
         /// Binds <paramref name="viewModel"/> (unless it is already bound) and makes the view visible. Returns the show
@@ -181,6 +182,7 @@ namespace Rubickanov.UI
             Unbind();
         }
 
+        /// <summary>Hides, removes the root and releases the UXML this view holds.</summary>
         internal void Destroy()
         {
             try
@@ -190,6 +192,12 @@ namespace Rubickanov.UI
             finally
             {
                 Root.RemoveFromHierarchy();
+                Popup = null;
+                if (OwnsUxml)
+                {
+                    OwnsUxml = false;
+                    Uxml?.Release();
+                }
             }
         }
 

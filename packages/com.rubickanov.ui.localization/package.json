@@ -1,6 +1,6 @@
 {
   "name": "com.rubickanov.ui.localization",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "license": "MIT",
   "displayName": "UI Localization",
   "description": "Localization binding helpers for UI views.",
@@ -8,7 +8,7 @@
   "author": { "name": "rubickanov" },
   "keywords": ["ui", "localization", "binding"],
   "dependencies": {
-    "com.rubickanov.ui": "2.0.0",
+    "com.rubickanov.ui": "3.0.0",
     "com.rubickanov.localization": "1.0.0"
   }
 }

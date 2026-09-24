@@ -12,7 +12,10 @@ namespace Rubickanov.UI
         Modal
     }
 
-    /// <summary>Ways a popup can be dismissed. Combine as flags.</summary>
+    /// <summary>
+    /// Ways a popup can be dismissed besides its buttons, which always close it, and its timeout
+    /// (<see cref="PopupBuilder.Timeout"/>). Combine as flags.
+    /// </summary>
     [Flags]
     public enum PopupCloseTriggers
     {
@@ -21,9 +24,6 @@ namespace Rubickanov.UI
         /// <summary>Render an X button in the corner that closes the popup.</summary>
         CloseButton = 1 << 0,
 
-        /// <summary>Any content button closes the popup when clicked.</summary>
-        ActionButton = 1 << 1,
-
         /// <summary>Clicking the modal backdrop (outside the panel) closes it. Modal only.</summary>
         ClickOutside = 1 << 2,
 
@@ -31,10 +31,7 @@ namespace Rubickanov.UI
         Escape = 1 << 3,
 
         /// <summary>Closes when the pointer leaves the panel (hover dismiss).</summary>
-        PointerLeave = 1 << 4,
-
-        /// <summary>Auto-closes after <see cref="PopupConfig.TimeoutSeconds"/>.</summary>
-        Timeout = 1 << 5
+        PointerLeave = 1 << 4
     }
 
     /// <summary>Why a popup closed, reported on <see cref="PopupResult"/>.</summary>
@@ -71,7 +68,10 @@ namespace Rubickanov.UI
         World,
 
         /// <summary>Follows the mouse cursor.</summary>
-        Cursor
+        Cursor,
+
+        /// <summary>Stretched over the whole layer.</summary>
+        Fill
     }
 
     /// <summary>Which side of the anchor an element-placed popup sits on.</summary>

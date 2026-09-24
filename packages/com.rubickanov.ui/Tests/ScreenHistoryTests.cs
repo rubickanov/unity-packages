@@ -9,12 +9,15 @@ namespace Rubickanov.UI.Tests
     public class ScreenHistoryTests
     {
         private UIService _ui = null!;
+        private PopupHost _popups = null!;
 
         [SetUp]
         public void SetUp()
         {
             // Code-only views register synchronously.
-            _ui = new UIService(TestRoot.Create(), new RecordingUxmlLoader().Load);
+            var root = TestRoot.Create();
+            _ui = new UIService(root, new RecordingUxmlLoader().Load);
+            _popups = new PopupHost(root, _ui);
             _ui.Register<ScreenA>().GetAwaiter().GetResult();
             _ui.Register<ScreenB>().GetAwaiter().GetResult();
             _ui.Register<ScreenC>().GetAwaiter().GetResult();
@@ -22,7 +25,11 @@ namespace Rubickanov.UI.Tests
         }
 
         [TearDown]
-        public void TearDown() => _ui?.Dispose();
+        public void TearDown()
+        {
+            _popups?.Dispose();
+            _ui?.Dispose();
+        }
 
         [Test]
         public async Task NavigateBack_AfterTwoScreens_ShowsFirstWithNewViewModel()
@@ -75,15 +82,15 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task Back_PopupOverNavigatedScreen_HidesPopupBeforeGoingBack()
+        public async Task Back_PopupOverNavigatedScreen_ClosesPopupBeforeGoingBack()
         {
             await _ui.Navigate<ScreenA>(() => new FakeViewModel());
             await _ui.Navigate<ScreenB>(() => new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
+            var popup = _popups.ShowView<PopupA>(new FakeViewModel());
 
             _ui.Back();
 
-            Assert.AreEqual(ViewState.Hidden, _ui.Get<PopupA>().State);
+            Assert.IsFalse(popup.IsOpen);
             Assert.AreEqual(ViewState.Shown, _ui.Get<ScreenB>().State);
             Assert.IsTrue(_ui.CanNavigateBack);
         }
@@ -102,12 +109,12 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task Show_Popup_KeepsHistory()
+        public async Task ShowView_Popup_KeepsHistory()
         {
             await _ui.Navigate<ScreenA>(() => new FakeViewModel());
             await _ui.Navigate<ScreenB>(() => new FakeViewModel());
 
-            await _ui.Show<PopupA>(new FakeViewModel());
+            _popups.ShowView<PopupA>(new FakeViewModel());
 
             Assert.IsTrue(_ui.CanNavigateBack);
         }
@@ -147,12 +154,12 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task HideAll_ClearsHistory()
+        public async Task HideScreen_ClearsHistory()
         {
             await _ui.Navigate<ScreenA>(() => new FakeViewModel());
             await _ui.Navigate<ScreenB>(() => new FakeViewModel());
 
-            _ui.HideAll();
+            _ui.HideScreen();
 
             Assert.IsFalse(_ui.CanNavigateBack);
         }
@@ -194,13 +201,13 @@ namespace Rubickanov.UI.Tests
         public async Task Back_ScreenShownOverOpenPopupView_PopupAnswersFirst()
         {
             await _ui.Navigate<ScreenA>(() => new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
+            var popup = _popups.ShowView<PopupA>(new FakeViewModel());
             await _ui.Navigate<ScreenB>(() => new FakeViewModel());
 
             var consumed = _ui.Back();
 
             Assert.IsTrue(consumed);
-            Assert.AreEqual(ViewState.Hidden, _ui.Get<PopupA>().State);
+            Assert.IsFalse(popup.IsOpen);
             Assert.AreEqual(ViewState.Shown, _ui.Get<ScreenB>().State);
             Assert.IsTrue(_ui.CanNavigateBack);
         }

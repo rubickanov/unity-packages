@@ -62,7 +62,7 @@ namespace Rubickanov.UI.Loading.Tests
 
     internal sealed class FakeViewB : FakeView
     {
-        protected override UILayer Layer => UILayer.Popup;
+        protected override UILayer Layer => UILayer.Overlay;
     }
 
     internal sealed class FakeViewC : FakeView

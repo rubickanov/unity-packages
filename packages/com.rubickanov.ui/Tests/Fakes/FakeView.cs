@@ -143,10 +143,13 @@ namespace Rubickanov.UI.Tests
     public sealed class PopupA : FakePopup { }
     public sealed class PopupB : FakePopup { }
 
-    public sealed class HudA : FakeView
+    public abstract class FakeHud : FakeView
     {
         protected override UILayer Layer => UILayer.HUD;
     }
+
+    public sealed class HudA : FakeHud { }
+    public sealed class HudB : FakeHud { }
 
     public sealed class UxmlScreen : View<FakeViewModel>
     {

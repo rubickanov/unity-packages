@@ -206,7 +206,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.rubickanov.ui": "2.0.0"
+        "com.rubickanov.ui": "3.0.0"
       }
     },
     "com.rubickanov.ui.loading": {
@@ -214,7 +214,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.rubickanov.ui": "2.0.0",
+        "com.rubickanov.ui": "3.0.0",
         "com.rubickanov.loading": "1.0.0"
       }
     },
@@ -223,7 +223,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.rubickanov.ui": "2.0.0",
+        "com.rubickanov.ui": "3.0.0",
         "com.rubickanov.localization": "1.0.0"
       }
     },
