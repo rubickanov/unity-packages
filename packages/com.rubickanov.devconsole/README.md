@@ -262,8 +262,6 @@ DevConsoleIMGUI.Toggled += open => { };   // static event Action<bool>
 
 `Instance` is null until the corresponding frontend exists in the scene.
 
-In the IMGUI console, press on a log line and drag to select whole lines, shift-press to extend the selection, and press Ctrl+C (Cmd+C on macOS) to copy them as plain text without rich-text tags. Escape or a press under the last line clears the selection. While lines are selected, new messages do not scroll the log.
-
 ### Logging
 
 ```csharp
