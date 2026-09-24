@@ -1,10 +1,14 @@
+using System;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.UIElements;
+using Object = UnityEngine.Object;
 
 namespace Rubickanov.UI.Tests
 {
@@ -248,6 +252,34 @@ namespace Rubickanov.UI.Tests
 
             Assert.AreEqual(StyleKeyword.Null, popup.Panel.style.right.keyword);
             Assert.AreEqual(StyleKeyword.Null, popup.Panel.style.bottom.keyword);
+        }
+
+        [Test]
+        public void RepositionFollowers_OneFollowerThrows_OthersStillMove()
+        {
+            var cameraObject = new GameObject("camera");
+            var anchor = new GameObject("anchor");
+            using var host = new PopupHost(_root, _ui,
+                pointerScreenPosition: () => throw new InvalidOperationException("pointer"));
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                anchor.transform.position = new Vector3(0f, 0f, 10f);
+                var marker = host.Create().Message("marker")
+                    .At(PopupPlacement.AtWorld(anchor.transform, camera: camera)).Open();
+                host.Create().Message("cursor").At(PopupPlacement.Cursor()).Open();
+                LogAssert.Expect(LogType.Exception, new Regex("pointer"));
+
+                host.RepositionFollowers();
+
+                Assert.AreNotEqual(StyleKeyword.Null, marker.Panel.style.left.keyword);
+                Assert.AreEqual(2, host.FollowerCount);
+            }
+            finally
+            {
+                Object.DestroyImmediate(anchor);
+                Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]

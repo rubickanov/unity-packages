@@ -325,8 +325,10 @@ namespace Rubickanov.UI
             var camera = _placement.Mode == PopupPlacementMode.World && _placement.Camera == null
                 ? _host.WorldCamera
                 : null;
+            // Only a cursor popup asks for the pointer: a failing pointer provider must not stop the others.
+            var cursor = _placement.Mode == PopupPlacementMode.Cursor ? _host.CursorPanelPosition : Vector2.zero;
             var visible = PopupPlacementResolver.TryResolve(
-                _layer, _placement, size, _host.CursorPanelPosition, camera, out var topLeft, out var side);
+                _layer, _placement, size, cursor, camera, out var topLeft, out var side);
 
             SetHidden(!visible);
             if (!visible) return;

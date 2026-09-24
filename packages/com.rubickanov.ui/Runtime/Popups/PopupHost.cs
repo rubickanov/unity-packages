@@ -188,19 +188,25 @@ namespace Rubickanov.UI
         {
             while (!ct.IsCancellationRequested)
             {
-                // Iterate by index: Reposition may close a popup (world anchor destroyed) and mutate the list.
-                for (var i = _followers.Count - 1; i >= 0; i--)
-                {
-                    if (i >= _followers.Count) continue;
-                    // One failing popup (a throwing pointer provider) must not stop the loop for the others.
-                    try { _followers[i].Reposition(); }
-                    catch (Exception ex) { Debug.LogException(ex); }
-                }
+                RepositionFollowers();
 
                 // After the UI Toolkit panel update and LateUpdate (a following camera moves there), before the
                 // repaint: the popup lands where the camera is this frame, not where it was the last one.
                 try { await UniTask.NextFrame(PlayerLoopTiming.LastPreLateUpdate, ct); }
                 catch (OperationCanceledException) { return; }
+            }
+        }
+
+        /// <summary>One frame of the follower loop.</summary>
+        internal void RepositionFollowers()
+        {
+            // Iterate by index: Reposition may close a popup (world anchor destroyed) and mutate the list.
+            for (var i = _followers.Count - 1; i >= 0; i--)
+            {
+                if (i >= _followers.Count) continue;
+                // One failing popup (a throwing pointer provider) must not stop the loop for the others.
+                try { _followers[i].Reposition(); }
+                catch (Exception ex) { Debug.LogException(ex); }
             }
         }
 
