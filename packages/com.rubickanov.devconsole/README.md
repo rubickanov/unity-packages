@@ -282,7 +282,7 @@ ConsoleLog.OnLogAdded += entry => Debug.Log(entry.Message);
 ConsoleLog.OnCleared += () => Debug.Log("Console cleared");
 ```
 
-Every Unity log message (`Debug.Log*`, exceptions, engine messages) is copied into `ConsoleLog` with an `[Unity]` prefix, from any thread and from the first moment scripts run, before any frontend exists. Errors, exceptions and asserts carry their stack trace. Messages from other threads appear at the start of the next frame. `log_unity false` stops the copying, `log_unity true` resumes it.
+Every Unity log message (`Debug.Log*`, exceptions, engine messages) is copied into `ConsoleLog` as is, from any thread and from the first moment scripts run, before any frontend exists. Errors, exceptions and asserts carry their stack trace. Messages from other threads appear at the start of the next frame. `log_unity false` stops the copying, `log_unity true` resumes it.
 
 Logs written to the console by a `ConsoleLog.OnLogAdded` subscriber through `Debug.Log` are not copied back, so a subscriber like the one above cannot loop.
 

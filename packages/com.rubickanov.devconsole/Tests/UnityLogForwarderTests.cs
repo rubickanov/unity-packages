@@ -27,7 +27,7 @@ namespace Rubickanov.DevConsole.Tests
             UnityLogForwarder.Receive("spawned", "", LogType.Log);
 
             Assert.AreEqual(1, ConsoleLog.Entries.Count);
-            Assert.AreEqual("[Unity] spawned", ConsoleLog.Entries[0].Message);
+            Assert.AreEqual("spawned", ConsoleLog.Entries[0].Message);
             Assert.AreEqual(ConsoleLog.LogType.Info, ConsoleLog.Entries[0].Type);
         }
 
@@ -37,7 +37,7 @@ namespace Rubickanov.DevConsole.Tests
             UnityLogForwarder.Receive("low health", "at Foo()", LogType.Warning);
 
             Assert.AreEqual(ConsoleLog.LogType.Warning, ConsoleLog.Entries[0].Type);
-            Assert.AreEqual("[Unity] low health", ConsoleLog.Entries[0].Message);
+            Assert.AreEqual("low health", ConsoleLog.Entries[0].Message);
         }
 
         [TestCase(LogType.Error)]
@@ -48,7 +48,7 @@ namespace Rubickanov.DevConsole.Tests
             UnityLogForwarder.Receive("broke", "at Foo()\nat Bar()\n", type);
 
             Assert.AreEqual(ConsoleLog.LogType.Error, ConsoleLog.Entries[0].Type);
-            Assert.AreEqual("[Unity] broke\nat Foo()\nat Bar()", ConsoleLog.Entries[0].Message);
+            Assert.AreEqual("broke\nat Foo()\nat Bar()", ConsoleLog.Entries[0].Message);
         }
 
         [Test]
@@ -56,7 +56,7 @@ namespace Rubickanov.DevConsole.Tests
         {
             UnityLogForwarder.Receive("broke", "", LogType.Error);
 
-            Assert.AreEqual("[Unity] broke", ConsoleLog.Entries[0].Message);
+            Assert.AreEqual("broke", ConsoleLog.Entries[0].Message);
         }
 
         [Test]
@@ -79,7 +79,7 @@ namespace Rubickanov.DevConsole.Tests
             UnityLogForwarder.Drain();
 
             Assert.AreEqual(1, ConsoleLog.Entries.Count);
-            Assert.AreEqual("[Unity] from worker", ConsoleLog.Entries[0].Message);
+            Assert.AreEqual("from worker", ConsoleLog.Entries[0].Message);
         }
 
         [Test]
@@ -90,8 +90,8 @@ namespace Rubickanov.DevConsole.Tests
             UnityLogForwarder.Receive("later", "", LogType.Log);
 
             Assert.AreEqual(2, ConsoleLog.Entries.Count);
-            Assert.AreEqual("[Unity] earlier", ConsoleLog.Entries[0].Message);
-            Assert.AreEqual("[Unity] later", ConsoleLog.Entries[1].Message);
+            Assert.AreEqual("earlier", ConsoleLog.Entries[0].Message);
+            Assert.AreEqual("later", ConsoleLog.Entries[1].Message);
         }
 
         [Test]
@@ -109,7 +109,7 @@ namespace Rubickanov.DevConsole.Tests
             }
 
             Assert.AreEqual(1, ConsoleLog.Entries.Count);
-            Assert.AreEqual("[Unity] outer", ConsoleLog.Entries[0].Message);
+            Assert.AreEqual("outer", ConsoleLog.Entries[0].Message);
         }
 
         private static void RunOnOtherThread(System.Action action)
