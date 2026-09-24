@@ -136,6 +136,28 @@
     margin-bottom: 0;
 }
 
+/* ── Popup view: the view fills the popup layer and draws itself ── */
+
+.popup--view {
+    background-color: rgba(0, 0, 0, 0);
+    border-left-width: 0;
+    border-right-width: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    padding: 0;
+    min-width: 0;
+    max-width: none;
+}
+
+.popup--view .popup-content {
+    flex-grow: 1;
+    margin-bottom: 0;
+}
+
 /* ── Spinner ───────────────────────────────────────────────── */
 
 .spinner {

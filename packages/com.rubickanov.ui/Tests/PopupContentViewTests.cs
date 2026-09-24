@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
@@ -44,7 +45,6 @@ namespace Rubickanov.UI.Tests
             Assert.IsNotNull(content);
             Assert.AreEqual("friends", content.name);
             Assert.AreSame(viewModel, FriendsView.LastBound);
-            Assert.AreEqual(ViewState.Hidden, _ui.Get<FriendsView>().State);
             CollectionAssert.AreEqual(new[] { nameof(FriendsView) }, _loader.Loaded);
         }
 
@@ -111,17 +111,94 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task Dialog_WithContentView_ShowsView()
+        public async Task CreateDialog_WithContentView_ShowsView()
         {
             await _ui.Register<FriendsView>();
-            var dialogs = new DialogService(_popups);
 
-            dialogs.CreateDialog("Invite").WithContent<FriendsView>(new FakeViewModel())
-                .AddButton("Close", "close").ShowAsync().Forget();
+            _popups.CreateDialog("Invite").Content<FriendsView>(new FakeViewModel()).Button("Close", "close").Open();
 
             var content = _root.Q(className: PopupStyle.Content);
             Assert.IsNotNull(content);
             Assert.AreEqual("friends", content.name);
+        }
+
+        [Test]
+        public async Task ShowView_PopupView_FillsPopupLayerWithoutChrome()
+        {
+            await _ui.Register<FriendsView>();
+
+            var popup = _popups.ShowView<FriendsView>(new FakeViewModel());
+
+            Assert.AreSame(PopupLayer, popup.Panel.parent);
+            Assert.IsTrue(popup.Panel.ClassListContains(PopupStyle.View));
+            Assert.IsTrue(_ui.PointerCaptured.CurrentValue);
+        }
+
+        [Test]
+        public async Task ShowView_ViewReachesItsPopup_ClosesItself()
+        {
+            await _ui.Register<SelfClosingView>();
+            var popup = _popups.ShowView<SelfClosingView>(new FakeViewModel());
+
+            SelfClosingView.Last!.CloseFromView();
+
+            Assert.IsFalse(popup.IsOpen);
+            Assert.AreEqual("done", (await popup.Result).ButtonId);
+        }
+
+        [Test]
+        public async Task Back_ContentViewConsumes_PopupStaysOpen()
+        {
+            await _ui.Register<SelfClosingView>();
+            var popup = _popups.ShowView<SelfClosingView>(new FakeViewModel());
+            SelfClosingView.Last!.ConsumeBack = true;
+
+            var first = _ui.Back();
+            SelfClosingView.Last.ConsumeBack = false;
+            var openAfterFirst = popup.IsOpen;
+            _ui.Back();
+
+            Assert.IsTrue(first);
+            Assert.IsTrue(openAfterFirst);
+            Assert.IsFalse(popup.IsOpen);
+            Assert.AreEqual(PopupCloseReason.Escape, (await popup.Result).Reason);
+        }
+
+        [Test]
+        public async Task Unregister_WhilePopupShowsView_UxmlReleasedWhenPopupCloses()
+        {
+            await _ui.Register<UxmlFriendsView>();
+            var popup = _popups.ShowView<UxmlFriendsView>(new FakeViewModel());
+
+            _ui.Unregister<UxmlFriendsView>();
+            var releasedWhileOpen = _loader.Released.Count;
+            popup.Close();
+
+            Assert.AreEqual(0, releasedWhileOpen);
+            CollectionAssert.AreEqual(new[] { nameof(UxmlFriendsView) }, _loader.Released);
+        }
+
+        [Test]
+        public async Task Unregister_WhilePopupShowsView_ViewStillCreatesChildren()
+        {
+            await _ui.Register<ListContent>();
+            _popups.ShowView<ListContent>(new FakeViewModel());
+
+            _ui.Unregister<ListContent>();
+
+            Assert.DoesNotThrow(() => ListContent.Last!.AddRow());
+            CollectionAssert.IsEmpty(_loader.Released);
+        }
+
+        [Test]
+        public async Task Open_ContentViewWithAnimation_PlaysIt()
+        {
+            await _ui.Register<AnimatedView>();
+            AnimatedView.TestAnimation = new ControlledAnimation();
+
+            _popups.ShowView<AnimatedView>(new FakeViewModel());
+
+            Assert.AreEqual(1, AnimatedView.TestAnimation.Shows.Count);
         }
 
         public sealed class FriendsView : View<FakeViewModel>
@@ -131,6 +208,50 @@ namespace Rubickanov.UI.Tests
             protected override UILayer Layer => UILayer.Popup;
             protected override void OnInitialize() => Root.name = "friends";
             protected override void OnBind() => LastBound = ViewModel;
+        }
+
+        public sealed class UxmlFriendsView : View<FakeViewModel>
+        {
+            protected override UILayer Layer => UILayer.Popup;
+            protected override void OnBind() { }
+        }
+
+        public sealed class ChildRow : View<FakeViewModel>
+        {
+            protected override UILayer Layer => UILayer.HUD;
+            protected override void OnBind() { }
+        }
+
+        public sealed class ListContent : View<FakeViewModel>
+        {
+            public static ListContent? Last;
+
+            protected override UILayer Layer => UILayer.Popup;
+            protected override IReadOnlyList<Type> ChildViews => new[] { typeof(ChildRow) };
+            protected override void OnBind() => Last = this;
+            public void AddRow() => CreateChild<ChildRow, FakeViewModel>(new FakeViewModel(), Root);
+        }
+
+        public sealed class SelfClosingView : View<FakeViewModel>
+        {
+            public static SelfClosingView? Last;
+            public bool ConsumeBack;
+
+            protected override UILayer Layer => UILayer.Popup;
+            protected override string? UxmlName => null;
+            protected override void OnBind() => Last = this;
+            protected override bool OnBack() => ConsumeBack;
+            public void CloseFromView() => Popup!.Close("done", PopupCloseReason.Button);
+        }
+
+        public sealed class AnimatedView : View<FakeViewModel>
+        {
+            public static ControlledAnimation TestAnimation = new();
+
+            protected override UILayer Layer => UILayer.Popup;
+            protected override string? UxmlName => null;
+            protected override IViewAnimation Animation => TestAnimation;
+            protected override void OnBind() { }
         }
     }
 }

@@ -110,23 +110,27 @@ namespace Rubickanov.UI
 
         // ── Two-way: element ↔ ReactiveProperty ─────────────────
 
-        // Bind applies the property's current value at once: a ReactiveProperty emits it on subscribe.
+        // Bind applies the property's current value at once: a ReactiveProperty emits it on subscribe. Setting a
+        // field's value to the one it holds sends no ChangeEvent, and the property does not re-emit an equal value,
+        // so the round trip ends by itself.
 
         protected void BindTextField(TextField field, ReactiveProperty<string> property)
         {
+            // TextField rewrites its displayed text even for an equal value, which would drop an IME composition in
+            // progress: set it only when the value differs.
             Bind(property, v => { if (field.value != v) field.value = v; });
             BindValueChanged<TextField, string>(field, v => property.Value = v);
         }
 
         protected void BindSlider(Slider slider, ReactiveProperty<float> property)
         {
-            Bind(property, v => { if (slider.value != v) slider.value = v; });
+            Bind(property, v => slider.value = v);
             BindValueChanged<Slider, float>(slider, v => property.Value = v);
         }
 
         protected void BindToggle(Toggle toggle, ReactiveProperty<bool> property)
         {
-            Bind(property, v => { if (toggle.value != v) toggle.value = v; });
+            Bind(property, v => toggle.value = v);
             BindValueChanged<Toggle, bool>(toggle, v => property.Value = v);
         }
 
@@ -134,7 +138,7 @@ namespace Rubickanov.UI
             List<string> choices)
         {
             dropdown.choices = choices;
-            Bind(property, v => { if (dropdown.index != v) dropdown.index = v; });
+            Bind(property, v => dropdown.index = v);
             BindValueChanged<DropdownField, string>(dropdown, _ => property.Value = dropdown.index);
         }
 
@@ -426,7 +430,8 @@ namespace Rubickanov.UI
             }
 
             /// <summary>
-            /// Makes the rows match the source again, keeping the row (and view model) of every item still in it.
+            /// Makes the rows match the source again, keeping the row (and view model) of every item still in it. When
+            /// a new row fails, the old rows not matched yet stay as rows, so the next change still finds them.
             /// </summary>
             private void Reconcile()
             {
@@ -434,31 +439,47 @@ namespace Rubickanov.UI
                 var old = new List<Row>(_rows);
                 _rows.Clear();
 
-                foreach (var item in _source)
+                try
                 {
-                    var match = -1;
-                    for (int i = 0; i < old.Count; i++)
+                    foreach (var item in _source)
                     {
-                        if (!_comparer.Equals(old[i].Item, item)) continue;
-                        match = i;
-                        break;
-                    }
+                        var match = -1;
+                        for (int i = 0; i < old.Count; i++)
+                        {
+                            if (!_comparer.Equals(old[i].Item, item)) continue;
+                            match = i;
+                            break;
+                        }
 
-                    if (match >= 0)
-                    {
-                        _rows.Add(old[match]);
-                        old.RemoveAt(match);
+                        if (match >= 0)
+                        {
+                            _rows.Add(old[match]);
+                            old.RemoveAt(match);
+                        }
+                        else
+                        {
+                            var view = _owner.AddChild<TView>(_createViewModel(item), _container,
+                                _container.childCount);
+                            _rows.Add(new Row(item, view));
+                        }
                     }
-                    else
-                    {
-                        var view = _owner.AddChild<TView>(_createViewModel(item), _container, _container.childCount);
-                        _rows.Add(new Row(item, view));
-                    }
+                }
+                catch
+                {
+                    _rows.AddRange(old);
+                    PlaceRows(anchor);
+                    throw;
                 }
 
                 foreach (var row in old)
                     _owner.DestroyChild(row.View);
 
+                PlaceRows(anchor);
+            }
+
+            /// <summary>Puts the rows together, in order, from <paramref name="anchor"/> in the container.</summary>
+            private void PlaceRows(int anchor)
+            {
                 for (int i = 0; i < _rows.Count; i++)
                     _rows[i].View.Root.RemoveFromHierarchy();
                 anchor = Math.Min(anchor, _container.childCount);

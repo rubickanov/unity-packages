@@ -81,6 +81,10 @@ namespace Rubickanov.UI
                     topLeft = cursorPanelPos + p.Offset;
                     break;
 
+                case PopupPlacementMode.Fill:
+                    topLeft = Vector2.zero;
+                    return true;
+
                 default:
                     topLeft = Vector2.zero;
                     break;

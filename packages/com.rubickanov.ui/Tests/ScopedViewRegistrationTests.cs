@@ -146,10 +146,8 @@ namespace Rubickanov.UI.Tests
             public UniTask<bool> NavigateBack() => UniTask.FromResult(false);
             public void Hide<T>() where T : View { }
             public UniTask HideAsync<T>() where T : View => UniTask.CompletedTask;
-            public void HideTop() { }
-            public UniTask HideTopAsync() => UniTask.CompletedTask;
-            public void HideAll() { }
-            public UniTask HideAllAsync() => UniTask.CompletedTask;
+            public void HideScreen() { }
+            public UniTask HideScreenAsync() => UniTask.CompletedTask;
             public IDisposable CapturePointer() => throw new NotSupportedException();
             public ReadOnlyReactiveProperty<bool> PointerCaptured => throw new NotSupportedException();
             public IDisposable PushBackHandler(Func<bool> handler) => throw new NotSupportedException();

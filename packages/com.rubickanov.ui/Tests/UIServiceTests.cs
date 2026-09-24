@@ -48,15 +48,42 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task Register_PopupView_AttachedToPopupLayerAndHidden()
+        public async Task Register_PopupView_NothingAttachedAndGetThrows()
         {
             await _ui.Register<PopupA>();
 
-            var view = _ui.Get<PopupA>();
+            var ex = Assert.Throws<InvalidOperationException>(() => _ui.Get<PopupA>());
 
-            Assert.AreSame(_root.Q("popup-layer"), view.Root.parent);
-            Assert.AreEqual(ViewState.Hidden, view.State);
-            Assert.AreEqual(DisplayStyle.None, view.Root.style.display.value);
+            StringAssert.Contains("ShowView", ex.Message);
+            Assert.AreEqual(0, _root.Q("popup-layer").childCount);
+            CollectionAssert.AreEqual(new[] { typeof(PopupA) }, _ui.DebugPopupViews);
+        }
+
+        [Test]
+        public async Task Register_PopupViewTwice_Throws()
+        {
+            await _ui.Register<PopupA>();
+
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await _ui.Register<PopupA>());
+        }
+
+        [Test]
+        public async Task Show_PopupView_Throws()
+        {
+            await _ui.Register<PopupA>();
+
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await _ui.Show<PopupA>(new FakeViewModel()));
+        }
+
+        [Test]
+        public async Task Unregister_PopupViewWithUxml_ReleasesHandle()
+        {
+            await _ui.Register<UxmlPopup>();
+
+            _ui.Unregister<UxmlPopup>();
+
+            CollectionAssert.AreEqual(new[] { nameof(UxmlPopup) }, _loader.Released);
+            CollectionAssert.IsEmpty(_ui.DebugPopupViews);
         }
 
         [Test]
@@ -144,33 +171,32 @@ namespace Rubickanov.UI.Tests
         [Test]
         public async Task Show_WrongViewModelType_ThrowsBeforeAnyStateChange()
         {
-            var a = await Registered<PopupA>();
-            var b = await Registered<PopupB>();
+            var a = await Registered<HudA>();
+            var b = await Registered<HudB>();
             var vm = new FakeViewModel();
-            await _ui.Show<PopupA>(vm);
+            await _ui.Show<HudA>(vm);
 
-            var ex = Assert.ThrowsAsync<ArgumentException>(async () => await _ui.Show<PopupA>(new OtherViewModel()));
+            var ex = Assert.ThrowsAsync<ArgumentException>(async () => await _ui.Show<HudA>(new OtherViewModel()));
 
-            StringAssert.Contains(nameof(PopupA), ex.Message);
+            StringAssert.Contains(nameof(HudA), ex.Message);
             StringAssert.Contains(nameof(FakeViewModel), ex.Message);
             StringAssert.Contains(nameof(OtherViewModel), ex.Message);
-            Assert.ThrowsAsync<ArgumentException>(async () => await _ui.Show<PopupB>(new OtherViewModel()));
+            Assert.ThrowsAsync<ArgumentException>(async () => await _ui.Show<HudB>(new OtherViewModel()));
             Assert.AreEqual(ViewState.Shown, a.State);
             Assert.AreEqual(1, a.BindCalls);
             Assert.AreEqual(0, vm.DisposeCalls);
             Assert.AreEqual(ViewState.Hidden, b.State);
             Assert.AreEqual(0, b.BindCalls);
-            CollectionAssert.AreEqual(new[] { a }, _ui.DebugPopupStack);
         }
 
         [Test]
         public async Task Show_SameViewModelTwice_BindsOnceAndDoesNotDispose()
         {
-            var a = await Registered<PopupA>();
+            var a = await Registered<HudA>();
             var vm = new FakeViewModel();
 
-            await _ui.Show<PopupA>(vm);
-            await _ui.Show<PopupA>(vm);
+            await _ui.Show<HudA>(vm);
+            await _ui.Show<HudA>(vm);
 
             Assert.AreEqual(1, a.BindCalls);
             Assert.AreEqual(0, a.UnbindCalls);
@@ -179,14 +205,14 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task ShowPopup_AlreadyShownWithOtherViewModel_RebindsAndDisposesOld()
+        public async Task Show_AlreadyShownWithOtherViewModel_RebindsAndDisposesOld()
         {
-            var a = await Registered<PopupA>();
+            var a = await Registered<HudA>();
             var firstVm = new FakeViewModel();
             var secondVm = new FakeViewModel();
 
-            await _ui.Show<PopupA>(firstVm);
-            await _ui.Show<PopupA>(secondVm);
+            await _ui.Show<HudA>(firstVm);
+            await _ui.Show<HudA>(secondVm);
 
             Assert.AreEqual(2, a.BindCalls);
             Assert.AreEqual(1, a.UnbindCalls);
@@ -194,19 +220,6 @@ namespace Rubickanov.UI.Tests
             Assert.AreEqual(1, firstVm.DisposeCalls);
             Assert.AreEqual(0, secondVm.DisposeCalls);
             Assert.AreEqual(ViewState.Shown, a.State);
-        }
-
-        [Test]
-        public async Task ShowPopup_AlreadyShown_MovesToTopOnce()
-        {
-            var a = await Registered<PopupA>();
-            var b = await Registered<PopupB>();
-
-            await _ui.Show<PopupA>(new FakeViewModel());
-            await _ui.Show<PopupB>(new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
-
-            CollectionAssert.AreEqual(new FakeView[] { b, a }, _ui.DebugPopupStack);
         }
 
         [Test]
@@ -238,17 +251,18 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task ShowPopup_AnimationThrows_HiddenAndRemovedFromStack()
+        public async Task ShowScreen_AnimationThrows_HiddenAndNotActive()
         {
             var animation = new ControlledAnimation();
-            var a = await Registered<PopupA>(animation);
+            var a = await Registered<ScreenA>(animation);
             var vm = new FakeViewModel();
-            var show = _ui.Show<PopupA>(vm);
+            var show = _ui.Show<ScreenA>(vm);
 
             animation.FailShow(new InvalidOperationException("boom"));
 
             Assert.ThrowsAsync<InvalidOperationException>(async () => await show);
-            CollectionAssert.IsEmpty(_ui.DebugPopupStack);
+            Assert.IsNull(_ui.DebugActiveScreen);
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
             Assert.AreEqual(ViewState.Hidden, a.State);
             Assert.AreEqual(1, vm.DisposeCalls);
         }
@@ -256,23 +270,22 @@ namespace Rubickanov.UI.Tests
         // ── Transitions (F1, F2, D4) ─────────────────────────────
 
         [Test]
-        public async Task ShowPopup_DuringHide_ShownWithSecondViewModelAndFirstDisposedOnce()
+        public async Task Show_DuringHide_ShownWithSecondViewModelAndFirstDisposedOnce()
         {
             var animation = new ControlledAnimation();
-            var a = await Registered<PopupA>(animation);
+            var a = await Registered<HudA>(animation);
             var firstVm = new FakeViewModel();
             var secondVm = new FakeViewModel();
-            var firstShow = _ui.Show<PopupA>(firstVm);
+            var firstShow = _ui.Show<HudA>(firstVm);
             animation.CompleteShow();
             await firstShow;
 
-            var hide = _ui.HideAsync<PopupA>();
-            var secondShow = _ui.Show<PopupA>(secondVm);
+            var hide = _ui.HideAsync<HudA>();
+            var secondShow = _ui.Show<HudA>(secondVm);
 
             Assert.AreEqual(ViewState.Showing, a.State);
             Assert.AreSame(secondVm, a.LastViewModel);
             Assert.AreEqual(1, firstVm.DisposeCalls);
-            CollectionAssert.AreEqual(new[] { a }, _ui.DebugPopupStack);
 
             animation.Hides[0].TrySetResult();
             animation.CompleteShow();
@@ -283,21 +296,20 @@ namespace Rubickanov.UI.Tests
             Assert.AreEqual(DisplayStyle.Flex, a.Root.style.display.value);
             Assert.AreEqual(1, firstVm.DisposeCalls);
             Assert.AreEqual(0, secondVm.DisposeCalls);
-            CollectionAssert.AreEqual(new[] { a }, _ui.DebugPopupStack);
         }
 
         [Test]
-        public async Task ShowPopup_DuringHideWithSameViewModel_KeepsBindingAndShows()
+        public async Task Show_DuringHideWithSameViewModel_KeepsBindingAndShows()
         {
             var animation = new ControlledAnimation();
-            var a = await Registered<PopupA>(animation);
+            var a = await Registered<HudA>(animation);
             var vm = new FakeViewModel();
-            var firstShow = _ui.Show<PopupA>(vm);
+            var firstShow = _ui.Show<HudA>(vm);
             animation.CompleteShow();
             await firstShow;
 
-            var hide = _ui.HideAsync<PopupA>();
-            var secondShow = _ui.Show<PopupA>(vm);
+            var hide = _ui.HideAsync<HudA>();
+            var secondShow = _ui.Show<HudA>(vm);
             animation.CompleteShow();
             await hide;
             await secondShow;
@@ -308,19 +320,18 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task HideAsync_DuringShow_StopsInterceptingAtOnceThenHidesAndDisposes()
+        public async Task HideAsync_DuringShow_HidingAtOnceThenHiddenAndDisposed()
         {
             var animation = new ControlledAnimation();
-            var a = await Registered<PopupA>(animation);
+            var a = await Registered<HudA>(animation);
             var vm = new FakeViewModel();
-            var show = _ui.Show<PopupA>(vm);
+            var show = _ui.Show<HudA>(vm);
 
-            var hide = _ui.HideAsync<PopupA>();
+            var hide = _ui.HideAsync<HudA>();
 
             Assert.AreEqual(ViewState.Hiding, a.State);
             Assert.IsFalse(a.IsVisible);
             Assert.AreEqual(PickingMode.Ignore, a.Root.pickingMode);
-            CollectionAssert.IsEmpty(_ui.DebugPopupStack);
             Assert.AreEqual(0, vm.DisposeCalls);
 
             await show;
@@ -336,16 +347,15 @@ namespace Rubickanov.UI.Tests
         public async Task Hide_DuringShow_HiddenAtOnce()
         {
             var animation = new ControlledAnimation();
-            var a = await Registered<PopupA>(animation);
+            var a = await Registered<HudA>(animation);
             var vm = new FakeViewModel();
-            var show = _ui.Show<PopupA>(vm);
+            var show = _ui.Show<HudA>(vm);
 
-            _ui.Hide<PopupA>();
+            _ui.Hide<HudA>();
             await show;
 
             Assert.AreEqual(ViewState.Hidden, a.State);
             Assert.AreEqual(1, vm.DisposeCalls);
-            CollectionAssert.IsEmpty(_ui.DebugPopupStack);
         }
 
         [Test]
@@ -408,72 +418,67 @@ namespace Rubickanov.UI.Tests
         // ── Layers (D2, F9, F14) ─────────────────────────────────
 
         [Test]
-        public async Task ShowHud_NotOnStackAndDoesNotInterceptInput()
+        public async Task ShowHud_NotActiveScreenAndDoesNotInterceptInput()
         {
             var hud = await Registered<HudA>();
 
             await _ui.Show<HudA>(new FakeViewModel());
 
             Assert.AreEqual(ViewState.Shown, hud.State);
-            CollectionAssert.IsEmpty(_ui.DebugPopupStack);
             Assert.IsNull(_ui.DebugActiveScreen);
             Assert.AreEqual(PickingMode.Ignore, hud.Root.pickingMode);
         }
 
         [Test]
-        public async Task ShowPopup_InterceptsInputByDefault()
+        public async Task ShowScreen_InterceptsInputByDefault()
         {
-            var a = await Registered<PopupA>();
+            var a = await Registered<ScreenA>();
 
-            await _ui.Show<PopupA>(new FakeViewModel());
+            await _ui.Show<ScreenA>(new FakeViewModel());
 
             Assert.AreEqual(PickingMode.Position, a.Root.pickingMode);
         }
 
         [Test]
-        public async Task HideTop_HudAndPopupShown_HidesPopupAndLeavesHud()
+        public async Task HideScreen_HudShown_HidesScreenAndLeavesHud()
         {
             var hud = await Registered<HudA>();
-            var popup = await Registered<PopupA>();
-            await _ui.Show<HudA>(new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
-
-            _ui.HideTop();
-            _ui.HideTop();
-
-            Assert.AreEqual(ViewState.Hidden, popup.State);
-            Assert.AreEqual(ViewState.Shown, hud.State);
-        }
-
-        [Test]
-        public async Task HideAll_HudShown_LeavesHud()
-        {
-            var hud = await Registered<HudA>();
-            await Registered<ScreenA>();
-            await Registered<PopupA>();
+            var screen = await Registered<ScreenA>();
             await _ui.Show<HudA>(new FakeViewModel());
             await _ui.Show<ScreenA>(new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
 
-            _ui.HideAll();
+            _ui.HideScreen();
 
             Assert.AreEqual(ViewState.Shown, hud.State);
-            Assert.AreEqual(ViewState.Hidden, _ui.Get<ScreenA>().State);
-            Assert.AreEqual(ViewState.Hidden, _ui.Get<PopupA>().State);
+            Assert.AreEqual(ViewState.Hidden, screen.State);
+            Assert.IsNull(_ui.DebugActiveScreen);
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
         }
 
         [Test]
-        public async Task HideAllAsync_HudShown_LeavesHud()
+        public async Task HideScreenAsync_ClearsAtOnceAndHidesAfterAnimation()
         {
-            var hud = await Registered<HudA>();
-            await Registered<PopupA>();
-            await _ui.Show<HudA>(new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
+            var animation = new ControlledAnimation();
+            var a = await Registered<ScreenA>(animation);
+            var show = _ui.Show<ScreenA>(new FakeViewModel());
+            animation.CompleteShow();
+            await show;
 
-            await _ui.HideAllAsync();
+            var hide = _ui.HideScreenAsync();
 
-            Assert.AreEqual(ViewState.Shown, hud.State);
-            Assert.AreEqual(ViewState.Hidden, _ui.Get<PopupA>().State);
+            Assert.IsNull(_ui.DebugActiveScreen);
+            Assert.AreEqual(ViewState.Hiding, a.State);
+            animation.CompleteHide();
+            await hide;
+            Assert.AreEqual(ViewState.Hidden, a.State);
+        }
+
+        [Test]
+        public async Task HideScreenAsync_NoScreen_NoOp()
+        {
+            await _ui.HideScreenAsync();
+
+            Assert.IsNull(_ui.DebugActiveScreen);
         }
 
         // ── Hide ─────────────────────────────────────────────────
@@ -499,98 +504,18 @@ namespace Rubickanov.UI.Tests
             Assert.AreEqual(1, vm.DisposeCalls);
         }
 
-        [Test]
-        public async Task HideTop_EmptyStack_NoOp()
-        {
-            await Registered<PopupA>();
-
-            Assert.DoesNotThrow(() => _ui.HideTop());
-        }
-
-        [Test]
-        public async Task HideTop_RemovesTopmostPopup()
-        {
-            var a = await Registered<PopupA>();
-            var b = await Registered<PopupB>();
-            await _ui.Show<PopupA>(new FakeViewModel());
-            await _ui.Show<PopupB>(new FakeViewModel());
-
-            _ui.HideTop();
-
-            Assert.AreEqual(ViewState.Shown, a.State);
-            Assert.AreEqual(ViewState.Hidden, b.State);
-            CollectionAssert.AreEqual(new[] { a }, _ui.DebugPopupStack);
-        }
-
-        [Test]
-        public async Task HideTopAsync_RemovesTopmostAtOnceAndHidesAfterAnimation()
-        {
-            var animation = new ControlledAnimation();
-            var a = await Registered<PopupA>(animation);
-            var show = _ui.Show<PopupA>(new FakeViewModel());
-            animation.CompleteShow();
-            await show;
-
-            var hide = _ui.HideTopAsync();
-
-            CollectionAssert.IsEmpty(_ui.DebugPopupStack);
-            Assert.AreEqual(ViewState.Hiding, a.State);
-            animation.CompleteHide();
-            await hide;
-            Assert.AreEqual(ViewState.Hidden, a.State);
-        }
-
-        [Test]
-        public async Task HideAll_ClearsScreenAndPopups()
-        {
-            var a = await Registered<ScreenA>();
-            var b = await Registered<PopupA>();
-            var c = await Registered<PopupB>();
-            await _ui.Show<ScreenA>(new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
-            await _ui.Show<PopupB>(new FakeViewModel());
-
-            _ui.HideAll();
-
-            Assert.AreEqual(1, a.UnbindCalls);
-            Assert.AreEqual(1, b.UnbindCalls);
-            Assert.AreEqual(1, c.UnbindCalls);
-            Assert.IsNull(_ui.DebugActiveScreen);
-            CollectionAssert.IsEmpty(_ui.DebugPopupStack);
-        }
-
-        [Test]
-        public async Task HideAllAsync_EmptyState_NoOp()
-        {
-            await _ui.HideAllAsync();
-        }
-
-        [Test]
-        public async Task HideAllAsync_HidesEverything()
-        {
-            var a = await Registered<ScreenA>();
-            var b = await Registered<PopupA>();
-            await _ui.Show<ScreenA>(new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
-
-            await _ui.HideAllAsync();
-
-            Assert.AreEqual(ViewState.Hidden, a.State);
-            Assert.AreEqual(ViewState.Hidden, b.State);
-        }
-
         // ── Pointer capture (D8, F7) ─────────────────────────────
 
         [Test]
-        public async Task ShowPopup_PointerCapturedUntilHide()
+        public async Task ShowScreen_PointerCapturedUntilHide()
         {
-            await Registered<PopupA>();
+            await Registered<ScreenA>();
             var events = new List<bool>();
             using var subscription = _ui.PointerCaptured.Subscribe(events.Add);
 
-            await _ui.Show<PopupA>(new FakeViewModel());
+            await _ui.Show<ScreenA>(new FakeViewModel());
             var capturedWhileShown = _ui.PointerCaptured.CurrentValue;
-            _ui.Hide<PopupA>();
+            _ui.Hide<ScreenA>();
 
             Assert.IsTrue(capturedWhileShown);
             Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
@@ -600,11 +525,11 @@ namespace Rubickanov.UI.Tests
         [Test]
         public async Task CapturePointer_ViewAndHandle_ReleasedOnlyWhenBothRelease()
         {
-            await Registered<PopupA>();
-            await _ui.Show<PopupA>(new FakeViewModel());
+            await Registered<ScreenA>();
+            await _ui.Show<ScreenA>(new FakeViewModel());
             var handle = _ui.CapturePointer();
 
-            _ui.Hide<PopupA>();
+            _ui.Hide<ScreenA>();
             var capturedAfterHide = _ui.PointerCaptured.CurrentValue;
             handle.Dispose();
             handle.Dispose();
@@ -627,18 +552,18 @@ namespace Rubickanov.UI.Tests
         public async Task HideAsync_ReleasesCaptureWhenHideStarts()
         {
             var animation = new ControlledAnimation();
-            await Registered<PopupA>(animation);
-            var show = _ui.Show<PopupA>(new FakeViewModel());
+            await Registered<ScreenA>(animation);
+            var show = _ui.Show<ScreenA>(new FakeViewModel());
             animation.CompleteShow();
             await show;
 
-            var hide = _ui.HideAsync<PopupA>();
+            var hide = _ui.HideAsync<ScreenA>();
             var capturedDuringHide = _ui.PointerCaptured.CurrentValue;
             animation.CompleteHide();
             await hide;
 
             Assert.IsFalse(capturedDuringHide);
-            Assert.AreEqual(ViewState.Hidden, _ui.Get<PopupA>().State);
+            Assert.AreEqual(ViewState.Hidden, _ui.Get<ScreenA>().State);
         }
 
         [Test]
@@ -653,19 +578,6 @@ namespace Rubickanov.UI.Tests
             _ui.Hide<ScreenB>();
 
             Assert.IsTrue(capturedWithB);
-            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
-        }
-
-        [Test]
-        public async Task HideAll_ReleasesEveryCapture()
-        {
-            await Registered<ScreenA>();
-            await Registered<PopupA>();
-            await _ui.Show<ScreenA>(new FakeViewModel());
-            await _ui.Show<PopupA>(new FakeViewModel());
-
-            _ui.HideAll();
-
             Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
         }
 
@@ -687,37 +599,6 @@ namespace Rubickanov.UI.Tests
 
             Assert.IsFalse(consumed);
             Assert.AreEqual(ViewState.Shown, screen.State);
-        }
-
-        [Test]
-        public async Task Back_TwoPopups_HidesTopmostFirst()
-        {
-            var a = await Registered<PopupA>();
-            var b = await Registered<PopupB>();
-            await _ui.Show<PopupA>(new FakeViewModel());
-            await _ui.Show<PopupB>(new FakeViewModel());
-
-            var consumed = _ui.Back();
-
-            Assert.IsTrue(consumed);
-            Assert.AreEqual(ViewState.Hidden, b.State);
-            Assert.AreEqual(ViewState.Shown, a.State);
-        }
-
-        [Test]
-        public async Task Back_PopupShownAgain_MovesToTopOfBackStack()
-        {
-            var a = await Registered<PopupA>();
-            var b = await Registered<PopupB>();
-            var viewModel = new FakeViewModel();
-            await _ui.Show<PopupA>(viewModel);
-            await _ui.Show<PopupB>(new FakeViewModel());
-            await _ui.Show<PopupA>(viewModel);
-
-            _ui.Back();
-
-            Assert.AreEqual(ViewState.Hidden, a.State);
-            Assert.AreEqual(ViewState.Shown, b.State);
         }
 
         [Test]
@@ -785,14 +666,12 @@ namespace Rubickanov.UI.Tests
         {
             var a = await Registered<ScreenA>();
             await _ui.Register<UxmlPopup>();
-            var uxmlView = _ui.Get<UxmlPopup>();
             var vm = new FakeViewModel();
             await _ui.Show<ScreenA>(vm);
 
             _ui.Dispose();
 
             Assert.IsNull(a.Root.parent);
-            Assert.IsNull(uxmlView.Root.parent);
             Assert.AreEqual(1, vm.DisposeCalls);
             CollectionAssert.AreEqual(new[] { nameof(UxmlPopup) }, _loader.Released);
         }

@@ -1,16 +1,12 @@
 namespace Rubickanov.UI
 {
-    /// <summary>
-    /// Shows flexible popups: configurable panels placed anywhere on screen, modal or passive,
-    /// with configurable dismiss rules. Multiple popups can be open at once.
-    /// </summary>
     public interface IPopupService
     {
-        /// <summary>Opens a popup from a fully-built config and returns a handle to control it.</summary>
-        IPopupHandle Open(PopupConfig config);
-
-        /// <summary>Starts a fluent builder for a popup.</summary>
+        /// <summary>Starts describing a popup; <see cref="PopupBuilder.Open"/> shows it.</summary>
         PopupBuilder Create();
+
+        /// <summary>Shows the popup <paramref name="popup"/> describes. <see cref="PopupBuilder.Open"/> calls it.</summary>
+        IPopupHandle Open(PopupBuilder popup);
 
         /// <summary>Closes every open popup.</summary>
         void CloseAll();

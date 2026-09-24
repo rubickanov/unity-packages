@@ -23,7 +23,7 @@ namespace Rubickanov.UI
             float delay = 0.3f)
         {
             if (text == null) throw new ArgumentNullException(nameof(text));
-            return Attach(element, popups, delay, config => config.Message = text());
+            return Attach(element, popups, delay, popup => popup.Message(text()));
         }
 
         /// <param name="content">Builds the tooltip's content each time it opens.</param>
@@ -31,30 +31,24 @@ namespace Rubickanov.UI
             Func<VisualElement> content, float delay = 0.3f)
         {
             if (content == null) throw new ArgumentNullException(nameof(content));
-            return Attach(element, popups, delay, config => config.ContentFactory = content);
+            return Attach(element, popups, delay, popup => popup.Content(content));
         }
 
         private static PopupManipulator Attach(VisualElement element, IPopupService popups, float delay,
-            Action<PopupConfig> setContent)
+            Action<PopupBuilder> setContent)
         {
             if (element == null) throw new ArgumentNullException(nameof(element));
             if (popups == null) throw new ArgumentNullException(nameof(popups));
 
-            return element.AttachPopup(popups, () => CreateConfig(element, setContent), delay);
+            return element.AttachPopup(popups, popup => Configure(popup, element, setContent), delay);
         }
 
-        internal static PopupConfig CreateConfig(VisualElement element, Action<PopupConfig> setContent)
+        internal static void Configure(PopupBuilder popup, VisualElement element, Action<PopupBuilder> setContent)
         {
-            var config = new PopupConfig
-            {
-                Placement = PopupPlacement.AtElement(element, PopupSide.Bottom),
-                Behaviour = PopupBehaviour.Passive,
-                CloseTriggers = PopupCloseTriggers.None,
-                Layer = UILayer.Overlay,
-                RootClass = PopupStyle.Tooltip
-            };
-            setContent(config);
-            return config;
+            popup.At(PopupPlacement.AtElement(element, PopupSide.Bottom))
+                .OnLayer(UILayer.Overlay)
+                .Class(PopupStyle.Tooltip);
+            setContent(popup);
         }
     }
 }
