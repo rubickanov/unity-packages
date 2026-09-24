@@ -78,6 +78,7 @@ namespace Rubickanov.UI.Editor
             EditorGUI.indentLevel++;
             DrawInput(service);
             DrawActiveScreen(service);
+            DrawScreenHistory(service);
             DrawPopupStack(service);
             DrawRegisteredViews(service);
             DrawActions(service);
@@ -102,6 +103,26 @@ namespace Rubickanov.UI.Editor
             var active = service.DebugActiveScreen;
             if (active != null) DrawViewRow(active.GetType(), active);
             else EditorGUILayout.LabelField("None");
+            EditorGUI.indentLevel--;
+        }
+
+        private static void DrawScreenHistory(UIService service)
+        {
+            var history = service.DebugScreenHistory;
+            EditorGUILayout.LabelField($"Screen History (current → first): {history.Count}", EditorStyles.boldLabel);
+            EditorGUI.indentLevel++;
+            if (history.Count == 0)
+            {
+                EditorGUILayout.LabelField("Empty");
+            }
+            else
+            {
+                for (var i = history.Count - 1; i >= 0; i--)
+                {
+                    EditorGUILayout.LabelField(history[i].Name);
+                }
+            }
+
             EditorGUI.indentLevel--;
         }
 

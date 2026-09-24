@@ -19,6 +19,17 @@ namespace Rubickanov.UI
         /// <summary>Arbitrary content appended below the message.</summary>
         public Func<VisualElement>? ContentFactory;
 
+        /// <summary>
+        /// A registered view shown below the message (and below <see cref="ContentFactory"/>'s content): a new
+        /// instance built from its UXML, bound to <see cref="ContentViewModel"/>. The popup owns both: the view is
+        /// destroyed and the view model disposed when the popup's elements are removed. A config with a content view
+        /// is opened once: a second open would bind the disposed view model.
+        /// </summary>
+        public Type? ContentViewType;
+
+        /// <summary>The view model of <see cref="ContentViewType"/>.</summary>
+        public ViewModelBase? ContentViewModel;
+
         public bool HasInput;
         public string InputPlaceholder = "";
         public string InputDefault = "";
