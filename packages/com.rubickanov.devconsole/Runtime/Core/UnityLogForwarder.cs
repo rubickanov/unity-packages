@@ -16,8 +16,6 @@ namespace Rubickanov.DevConsole
     /// </summary>
     internal static class UnityLogForwarder
     {
-        private const string Prefix = "[Unity] ";
-
         private readonly struct Pending
         {
             public readonly string Condition;
@@ -128,15 +126,13 @@ namespace Rubickanov.DevConsole
                 case LogType.Exception:
                 case LogType.Assert:
                     var trace = stackTrace?.TrimEnd();
-                    ConsoleLog.LogError(string.IsNullOrEmpty(trace)
-                        ? Prefix + condition
-                        : Prefix + condition + "\n" + trace);
+                    ConsoleLog.LogError(string.IsNullOrEmpty(trace) ? condition : condition + "\n" + trace);
                     break;
                 case LogType.Warning:
-                    ConsoleLog.LogWarning(Prefix + condition);
+                    ConsoleLog.LogWarning(condition);
                     break;
                 default:
-                    ConsoleLog.Log(Prefix + condition);
+                    ConsoleLog.Log(condition);
                     break;
             }
         }
