@@ -13,6 +13,7 @@ namespace Rubickanov.UI
     {
         private readonly IPopupService _service;
         private readonly PopupConfig _config = new();
+        private UILayer? _layer;
 
         internal PopupBuilder(IPopupService service) => _service = service;
 
@@ -47,10 +48,10 @@ namespace Rubickanov.UI
         }
 
         public PopupBuilder At(in PopupPlacement placement) { _config.Placement = placement; return this; }
+        /// <summary>Adds a backdrop. Puts the popup on the overlay layer unless <see cref="OnLayer"/> names one.</summary>
         public PopupBuilder Modal(bool modal = true)
         {
             _config.Behaviour = modal ? PopupBehaviour.Modal : PopupBehaviour.Passive;
-            if (modal) _config.Layer = UILayer.Overlay;
             return this;
         }
 
@@ -62,16 +63,22 @@ namespace Rubickanov.UI
             return this;
         }
 
-        public PopupBuilder OnLayer(UILayer layer) { _config.Layer = layer; return this; }
+        public PopupBuilder OnLayer(UILayer layer) { _layer = layer; return this; }
         public PopupBuilder Style(StyleSheet sheet) { _config.StyleSheet = sheet; return this; }
         public PopupBuilder Class(string rootClass) { _config.RootClass = rootClass; return this; }
         public PopupBuilder DismissOthers(bool dismiss = true) { _config.DismissOthers = dismiss; return this; }
         public PopupBuilder Animation(IViewAnimation animation) { _config.Animation = animation; return this; }
 
         /// <summary>Builds and shows the popup.</summary>
-        public IPopupHandle Open() => _service.Open(_config);
+        public IPopupHandle Open() => _service.Open(Build());
 
         /// <summary>Shows the popup and awaits its result.</summary>
-        public UniTask<PopupResult> OpenAsync() => _service.Open(_config).Result;
+        public UniTask<PopupResult> OpenAsync() => Open().Result;
+
+        private PopupConfig Build()
+        {
+            _config.Layer = _layer ?? (_config.Behaviour == PopupBehaviour.Modal ? UILayer.Overlay : UILayer.Popup);
+            return _config;
+        }
     }
 }

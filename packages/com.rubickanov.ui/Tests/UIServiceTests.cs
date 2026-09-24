@@ -796,5 +796,30 @@ namespace Rubickanov.UI.Tests
             Assert.AreEqual(1, vm.DisposeCalls);
             CollectionAssert.AreEqual(new[] { nameof(UxmlPopup) }, _loader.Released);
         }
+
+        [Test]
+        public void Register_AfterDispose_ThrowsObjectDisposed()
+        {
+            _ui.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() => _ui.Register<ScreenA>().GetAwaiter().GetResult());
+        }
+
+        [Test]
+        public async Task Hide_OnUnbindThrows_ViewEndsUnboundAndViewModelDisposed()
+        {
+            var view = await Registered<ScreenA>();
+            var vm = new FakeViewModel();
+            await _ui.Show<ScreenA>(vm);
+            view.ThrowOnUnbind = new InvalidOperationException("boom");
+
+            Assert.Throws<InvalidOperationException>(() => _ui.Hide<ScreenA>());
+            view.ThrowOnUnbind = null;
+            await _ui.Show<ScreenA>(new FakeViewModel());
+
+            Assert.AreEqual(1, vm.DisposeCalls);
+            Assert.AreEqual(1, view.UnbindCalls);
+            Assert.AreEqual(ViewState.Shown, view.State);
+        }
     }
 }

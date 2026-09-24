@@ -9,6 +9,7 @@ namespace Rubickanov.UI
         /// <summary>
         /// Shows a fully custom popup while hovering this element. The factory controls placement,
         /// content and behaviour; anchor it to the element with <see cref="PopupPlacement.AtElement"/>.
+        /// For a text hint use <see cref="TooltipExtensions.AttachTooltip(VisualElement, IPopupService, string, float)"/>.
         /// </summary>
         public static PopupManipulator AttachPopup(this VisualElement element, IPopupService service,
             Func<PopupConfig> configFactory, float delay = 0.3f)
@@ -16,23 +17,6 @@ namespace Rubickanov.UI
             var manipulator = new PopupManipulator(service, configFactory, delay);
             element.AddManipulator(manipulator);
             return manipulator;
-        }
-
-        /// <summary>
-        /// Convenience: shows a passive title/message popup anchored below this element on hover,
-        /// auto-flipping near screen edges. Closes when the pointer leaves.
-        /// </summary>
-        public static PopupManipulator AttachPopup(this VisualElement element, IPopupService service,
-            string title, string? message = null, float delay = 0.3f)
-        {
-            return element.AttachPopup(service, () => new PopupConfig
-            {
-                Title = title,
-                Message = message,
-                Placement = PopupPlacement.AtElement(element),
-                Behaviour = PopupBehaviour.Passive,
-                CloseTriggers = PopupCloseTriggers.PointerLeave
-            }, delay);
         }
 
         public static void RemovePopup(this VisualElement element, PopupManipulator manipulator)

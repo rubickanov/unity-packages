@@ -2,6 +2,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace Rubickanov.UI.Tests
@@ -144,7 +145,7 @@ namespace Rubickanov.UI.Tests
         [Test]
         public void Dialog_Modal_OnOverlayLayerLikeModalPopups()
         {
-            var dialogs = new DialogService(_popups);
+            IDialogService dialogs = new DialogService(_popups);
 
             dialogs.CreateDialog("Abandon ship?").AddButton("Yes", "yes").ShowAsync().Forget();
 
@@ -174,6 +175,80 @@ namespace Rubickanov.UI.Tests
 
             Assert.AreEqual(0, PopupLayer.childCount);
             Assert.AreEqual(0, animation.Hides.Count);
+        }
+
+        [Test]
+        public void SetPlacement_ClosedPopup_DoesNotStartFollowing()
+        {
+            var popup = _popups.Create().Message("info").Open();
+            popup.Close();
+
+            popup.SetPlacement(PopupPlacement.Cursor());
+
+            Assert.AreEqual(0, _popups.FollowerCount);
+        }
+
+        [Test]
+        public async Task Reposition_WorldAnchorDestroyed_ClosesAndReleasesPointer()
+        {
+            var anchor = new GameObject("anchor");
+            var popup = _popups.Create().Message("marker").Button("OK", "ok")
+                .At(PopupPlacement.AtWorld(anchor.transform)).Open();
+            Object.DestroyImmediate(anchor);
+
+            ((PopupInstance)popup).Reposition();
+
+            Assert.IsFalse(popup.IsOpen);
+            Assert.AreEqual(PopupCloseReason.AnchorDestroyed, (await popup.Result).Reason);
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+            Assert.AreEqual(0, _popups.FollowerCount);
+        }
+
+        [Test]
+        public async Task Open_DismissOthers_ClosesOthersAsReplaced()
+        {
+            var first = _popups.Create().Message("first").Open();
+
+            _popups.Create().Message("second").DismissOthers().Open();
+
+            Assert.AreEqual(PopupCloseReason.Replaced, (await first.Result).Reason);
+        }
+
+        [Test]
+        public void Builder_Modal_OnOverlayLayer()
+        {
+            _popups.Create().Message("modal").Modal().Open();
+
+            Assert.IsNotNull(_root.Q("overlay-layer").Q(className: PopupStyle.Modal));
+        }
+
+        [Test]
+        public void Builder_OnLayerThenModal_KeepsNamedLayer()
+        {
+            _popups.Create().Message("modal").OnLayer(UILayer.Popup).Modal().Open();
+
+            Assert.IsNotNull(PopupLayer.Q(className: PopupStyle.Modal));
+            Assert.IsNull(_root.Q("overlay-layer").Q(className: PopupStyle.Modal));
+        }
+
+        [Test]
+        public void Tooltip_OnOverlayLayerAboveDialogs()
+        {
+            _popups.Open(TooltipExtensions.CreateConfig(new VisualElement(), config => config.Message = "hint"));
+
+            Assert.IsNotNull(_root.Q("overlay-layer").Q(className: PopupStyle.Tooltip));
+        }
+
+        [Test]
+        public void Dispose_DefaultStyleSheet_RemovedFromRoot()
+        {
+            var sheet = ScriptableObject.CreateInstance<StyleSheet>();
+            var host = new PopupHost(_root, _ui, sheet);
+
+            host.Dispose();
+
+            Assert.IsFalse(_root.styleSheets.Contains(sheet));
+            Object.DestroyImmediate(sheet);
         }
     }
 }

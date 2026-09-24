@@ -144,7 +144,6 @@ namespace Rubickanov.UI
             {
                 _message = new Label(_config.Message);
                 _message.AddToClassList(PopupStyle.Message);
-                _message.style.whiteSpace = WhiteSpace.Normal;
                 _panel.Add(_message);
             }
 
@@ -220,7 +219,6 @@ namespace Rubickanov.UI
         {
             if (_backdrop != null) _layer.Add(_backdrop);
             _layer.Add(_panel);
-            Reposition();
 
             if (_config.TimeoutSeconds > 0f && Has(PopupCloseTriggers.Timeout))
             {
@@ -290,6 +288,13 @@ namespace Rubickanov.UI
         public void Reposition()
         {
             if (!IsOpen) return;
+
+            // A destroyed anchor never comes back: close rather than hold the pointer and the back stack unseen.
+            if (_placement.Mode == PopupPlacementMode.World && _placement.WorldAnchor == null)
+            {
+                Close(null, PopupCloseReason.AnchorDestroyed);
+                return;
+            }
 
             var size = new Vector2(_panel.resolvedStyle.width, _panel.resolvedStyle.height);
             var camera = _placement.Mode == PopupPlacementMode.World && _placement.Camera == null
@@ -392,6 +397,8 @@ namespace Rubickanov.UI
 
         public void SetPlacement(in PopupPlacement placement)
         {
+            if (!IsOpen) return;
+
             _placement = placement;
             _host.OnPlacementChanged(this);
             Reposition();

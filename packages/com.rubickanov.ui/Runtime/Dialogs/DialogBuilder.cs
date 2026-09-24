@@ -23,7 +23,7 @@ namespace Rubickanov.UI
                 Layer = UILayer.Overlay,
                 Placement = PopupPlacement.ScreenCenter(),
                 RootClass = PopupStyle.Dialog,
-                CloseTriggers = PopupCloseTriggers.Escape | PopupCloseTriggers.ActionButton
+                CloseTriggers = PopupCloseTriggers.Escape
             };
         }
 

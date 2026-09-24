@@ -52,7 +52,7 @@ UxmlLoader ◄── UxmlLoaders.FromCatalog(UxmlCatalog)
 | `Popup` | A stack. `Show` pushes (a popup already visible is rebound and moves to the top), `HideTop` pops. Intercepts input, captures the pointer, pushes a back handler. |
 | `HUD`, `Overlay` | Independent. `Show`/`Hide` only; not on any stack, no pointer capture, no back handler, untouched by `HideTop` and `HideAll`. Do not intercept input. |
 
-**View model lifetime** — the view model passed to `Show` belongs to that show. When the view unbinds it (hide finished, another `Show` replaced it, `Unregister`, service disposed) the service disposes it, together with everything it made through `CreateProperty`, `CreateCommand`, `CreateSubject` and `TrackDisposable`. `Show` with the instance already bound rebinds and disposes nothing. Never reuse a view model after its view hid: build a new one per show.
+**View model lifetime** — the view model passed to `Show` belongs to that show. When the view unbinds it (hide finished, another `Show` replaced it, `Unregister`, service disposed) the service disposes it, together with everything it made through `CreateProperty`, `CreateCommand`, `CreateSubject` and `TrackDisposable`. `Show` with the instance already bound keeps the binding: `OnBind` does not run again and nothing is disposed. Never reuse a view model after its view hid: build a new one per show.
 
 **ViewState** — `Hidden`, `Showing`, `Shown`, `Hiding`; `IsVisible` is `Showing` or `Shown`. A new transition cancels the running one, so show and hide can be called in any order at any time.
 
@@ -220,7 +220,7 @@ if (Keyboard.current.escapeKey.wasPressedThisFrame && !ui.Back())
 using var back = ui.PushBackHandler(() => { targeting.Cancel(); return true; });
 ```
 
-The package does not read the keyboard. `Back()` runs handlers last-pushed first until one returns `true`. Visible screen and popup views push `OnBack()`; popups with `PopupCloseTriggers.Escape` close on `Back()`.
+The package does not read the keyboard. `Back()` runs handlers last-pushed first until one returns `true`. Visible screen and popup views push `OnBack()`; popups with `PopupCloseTriggers.Escape` close on `Back()`. The visible screen's handler always runs last, so anything open over a screen answers first even if it opened before the screen was shown.
 
 ### Screen history
 
@@ -239,7 +239,7 @@ await ui.Navigate<MainMenuView>(() => new MainMenuViewModel(session));
 await ui.Show<ShipScreen>(new ShipScreenViewModel(ship));
 ```
 
-`Navigate` takes a factory, not a view model: a view model lives for one show, so every return builds a new one. A screen's default `OnBack()` goes back while its screen is the current one of the history, so a popup over it still closes first. `Show` of a screen, `Hide` of the current screen and `HideAll` clear the history; `Unregister` drops the screen from it. `CanNavigateBack` says whether there is a screen to return to. `Navigate` to a view on another layer throws.
+`Navigate` takes a factory, not a view model: a view model lives for one show, so every return builds a new one. A screen's default `OnBack()` goes back while its screen is the current one of the history; its handler runs after every other one, so a popup over it still closes first. `Show` of a screen, `Hide` of the current screen and `HideAll` clear the history; `Unregister` drops the screen from it. `CanNavigateBack` says whether there is a screen to return to. `Navigate` to a view on another layer throws.
 
 ### Scene-scoped registration
 
@@ -275,7 +275,7 @@ var handle = popups.Create()
     .Message("Freighter Kestrel asks to dock at bay 2.")
     .Button("Accept", "accept", isPrimary: true)
     .Button("Deny", "deny")
-    .At(PopupPlacement.Screen(PopupAnchorCorner.TopRight, new Vector2(-16, 16)))
+    .At(PopupPlacement.Screen(PopupAnchorCorner.TopRight, new Vector2(16, 16)))   // 16 px in from the corner
     .CloseOn(PopupCloseTriggers.ActionButton | PopupCloseTriggers.Escape)
     .Open();
 
@@ -285,7 +285,7 @@ handle.UpdateContent(c => c.SetMessage("Kestrel is waiting."));
 popups.Create().Message("Autosaved").Timeout(2f).Open(); // passive, clicks pass through
 ```
 
-`Modal()` adds a backdrop and moves the popup to the overlay layer. Other triggers: `CloseButton`, `ClickOutside` (modal), `PointerLeave`, `Timeout`. `Close()` completes `Result` at once, then plays the hide animation (`.Animation(...)` or the `PopupHost` default) and removes the elements. `CloseAll()` closes every popup.
+`Modal()` adds a backdrop and puts the popup on the overlay layer, unless `OnLayer(...)` names another. Other triggers: `CloseButton`, `ClickOutside` (modal), `PointerLeave`, `Timeout`. `Close()` completes `Result` at once, then plays the hide animation (`.Animation(...)` or the `PopupHost` default) and removes the elements. `CloseAll()` closes every popup; `DismissOthers()` closes them with `PopupCloseReason.Replaced`.
 
 ### A view as popup content
 
@@ -318,7 +318,7 @@ PopupPlacement.AtWorld(crewMember.Head, worldOffset: Vector3.up * 0.3f,
     screenOffset: new Vector2(0, -8), clampToScreen: false);  // marker may leave the screen
 ```
 
-World and cursor popups follow every frame. The camera is the placement's own, else the `camera` provider given to `PopupHost`, else `Camera.main` looked up once per frame. A world popup hides while its anchor is behind the camera. Pass `pointerScreenPosition` to `PopupHost` for cursor popups; without it the position only updates over pickable elements.
+World and cursor popups follow every frame. The camera is the placement's own, else the `camera` provider given to `PopupHost`, else `Camera.main` looked up once per frame. A world popup hides while its anchor is behind the camera and closes with `PopupCloseReason.AnchorDestroyed` once the anchor is destroyed. `SetPlacement` on a closed popup does nothing. Pass `pointerScreenPosition` to `PopupHost` for cursor popups; without it the position only updates over pickable elements.
 
 ### Dialogs
 
@@ -346,7 +346,7 @@ var manipulator = moduleIcon.AttachTooltip(popups, () => BuildModuleCard(module)
 moduleIcon.RemovePopup(manipulator);
 ```
 
-A tooltip is a passive popup with the `popup--tooltip` class below the element, closed when the pointer leaves it. For a 3D object open a popup with `PopupPlacement.Cursor()` or `AtWorld` and close its handle. `AttachPopup` takes a full `Func<PopupConfig>` for custom hover popups.
+A tooltip is a passive popup with the `popup--tooltip` class below the element, closed when the pointer leaves it. It sits on the overlay layer, so it shows over dialogs too. For a 3D object open a popup with `PopupPlacement.Cursor()` or `AtWorld` and close its handle. `AttachPopup` takes a full `Func<PopupConfig>` for custom hover popups.
 
 ### Spinner
 

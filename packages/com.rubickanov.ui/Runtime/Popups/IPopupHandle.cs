@@ -18,7 +18,7 @@ namespace Rubickanov.UI
         /// <summary>Mutates the live content (title/message/icon or the raw panel).</summary>
         void UpdateContent(Action<PopupContentContext> mutate);
 
-        /// <summary>Re-anchors the popup to a new placement.</summary>
+        /// <summary>Re-anchors the popup to a new placement. No-op if already closed.</summary>
         void SetPlacement(in PopupPlacement placement);
     }
 }

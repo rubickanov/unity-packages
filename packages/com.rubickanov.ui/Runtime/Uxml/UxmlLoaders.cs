@@ -18,9 +18,9 @@ namespace Rubickanov.UI
             {
                 if (!catalog.TryGet(name, out var asset))
                     throw new InvalidOperationException(
-                        $"UXML catalog '{catalog.name}' has no asset '{name}' for the view with UxmlName '{name}'. " +
+                        $"UXML catalog '{catalog.name}' has no asset '{name}' for the view with that UxmlName. " +
                         "Add the view's UXML to the catalog.");
-                return UniTask.FromResult<(VisualTreeAsset asset, IDisposable handle)>((asset, NoRelease.Instance));
+                return UniTask.FromResult<(VisualTreeAsset? asset, IDisposable? handle)>((asset, NoRelease.Instance));
             };
         }
 

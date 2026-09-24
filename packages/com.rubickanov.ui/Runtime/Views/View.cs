@@ -183,8 +183,14 @@ namespace Rubickanov.UI
 
         internal void Destroy()
         {
-            Hide();
-            Root.RemoveFromHierarchy();
+            try
+            {
+                Hide();
+            }
+            finally
+            {
+                Root.RemoveFromHierarchy();
+            }
         }
 
         /// <summary>Binds and shows a child view created by its parent, with no animation.</summary>

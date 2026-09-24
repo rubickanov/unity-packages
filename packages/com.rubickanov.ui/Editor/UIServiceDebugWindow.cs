@@ -69,8 +69,9 @@ namespace Rubickanov.UI.Editor
         private void DrawInstance(int index, UIService service)
         {
             var key = service.GetHashCode();
-            _instanceFoldouts.TryGetValue(key, out var expanded);
-            expanded = EditorGUILayout.Foldout(expanded || index == 0, $"Instance #{index}", true);
+            if (!_instanceFoldouts.TryGetValue(key, out var expanded))
+                expanded = index == 0;
+            expanded = EditorGUILayout.Foldout(expanded, $"Instance #{index}", true);
             _instanceFoldouts[key] = expanded;
 
             if (!expanded) return;

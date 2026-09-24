@@ -9,10 +9,7 @@ namespace Rubickanov.UI
     public class UIService : IUIService, IDisposable
     {
         private readonly UxmlLoader _loadUxml;
-        private readonly VisualElement _screenLayer;
-        private readonly VisualElement _hudLayer;
-        private readonly VisualElement _popupLayer;
-        private readonly VisualElement _overlayLayer;
+        private readonly UILayerElements _layers;
         private readonly Dictionary<Type, View> _views = new();
         private readonly Dictionary<Type, UILayer> _viewLayers = new();
         private readonly Dictionary<Type, object> _loading = new();
@@ -29,24 +26,21 @@ namespace Rubickanov.UI
         public UIService(VisualElement root, UxmlLoader loader)
         {
             _loadUxml = loader;
-            _screenLayer = RequireLayer(root, "screen-layer");
-            _hudLayer = RequireLayer(root, "hud-layer");
-            _popupLayer = RequireLayer(root, "popup-layer");
-            _overlayLayer = RequireLayer(root, "overlay-layer");
+            _layers = new UILayerElements(root);
 #if UNITY_EDITOR
             DebugRegistry.Register(this);
 #endif
         }
 
 #if UNITY_EDITOR
-        public IReadOnlyDictionary<Type, View> DebugViews => _views;
-        public IReadOnlyDictionary<Type, UILayer> DebugViewLayers => _viewLayers;
-        public View? DebugActiveScreen => _activeScreen;
-        public IReadOnlyList<View> DebugPopupStack => _popupStack;
-        public int DebugPointerCaptureCount => _captureCount;
-        public int DebugBackStackDepth => _backHandlers.Count;
+        internal IReadOnlyDictionary<Type, View> DebugViews => _views;
+        internal IReadOnlyDictionary<Type, UILayer> DebugViewLayers => _viewLayers;
+        internal View? DebugActiveScreen => _activeScreen;
+        internal IReadOnlyList<View> DebugPopupStack => _popupStack;
+        internal int DebugPointerCaptureCount => _captureCount;
+        internal int DebugBackStackDepth => _backHandlers.Count;
 
-        public IReadOnlyList<Type> DebugScreenHistory
+        internal IReadOnlyList<Type> DebugScreenHistory
         {
             get
             {
@@ -61,6 +55,8 @@ namespace Rubickanov.UI
 
         public async UniTask Register<T>() where T : View
         {
+            if (_disposed) throw new ObjectDisposedException(nameof(UIService));
+
             var type = typeof(T);
             if (_views.ContainsKey(type))
                 throw new InvalidOperationException($"View {type.Name} is already registered in UIService.");
@@ -112,7 +108,7 @@ namespace Rubickanov.UI
             }
 
             var layer = view.ResolveLayer();
-            GetLayerContainer(layer).Add(view.Root);
+            _layers[layer].Add(view.Root);
             _views[type] = view;
             _viewLayers[type] = layer;
         }
@@ -144,25 +140,6 @@ namespace Rubickanov.UI
                 var child = (View)Activator.CreateInstance(childType);
                 await LoadUxml(cache, child, childType);
             }
-        }
-
-        private VisualElement GetLayerContainer(UILayer layer) => layer switch
-        {
-            UILayer.Screen => _screenLayer,
-            UILayer.HUD => _hudLayer,
-            UILayer.Popup => _popupLayer,
-            UILayer.Overlay => _overlayLayer,
-            _ => throw new ArgumentOutOfRangeException(nameof(layer), layer, null)
-        };
-
-        private static VisualElement RequireLayer(VisualElement root, string name)
-        {
-            var element = root.Q(name);
-            if (element == null)
-                throw new InvalidOperationException(
-                    $"UI root is missing required child '{name}'. " +
-                    "Expected elements: screen-layer, hud-layer, popup-layer, overlay-layer.");
-            return element;
         }
 
         public void Unregister<T>() where T : View
@@ -234,13 +211,13 @@ namespace Rubickanov.UI
                         ReleaseInput(previous);
                         previous.HideAsync().Forget();
                     }
-                    AcquireInput(view);
+                    AcquireInput(view, screen: true);
                     onScreenShown();
                     break;
                 case UILayer.Popup:
                     _popupStack.Remove(view);
                     _popupStack.Add(view);
-                    AcquireInput(view);
+                    AcquireInput(view, screen: false);
                     break;
             }
 
@@ -447,12 +424,16 @@ namespace Rubickanov.UI
 
         // ── Input: pointer capture and back stack (D8, D9) ───────
 
-        /// <summary>Takes a fresh capture and back handler for a visible screen or popup, on top of the others.</summary>
-        private void AcquireInput(View view)
+        /// <summary>
+        /// Takes a fresh capture and back handler for a visible screen or popup. A popup's handler goes on top of the
+        /// others; a screen's goes under all of them, so whatever is open over the screen answers Back first, even
+        /// when it opened before the screen was shown.
+        /// </summary>
+        private void AcquireInput(View view, bool screen)
         {
             ReleaseInput(view);
             view.PointerCapture = CapturePointer();
-            view.BackHandle = PushBackHandler(view.HandleBack);
+            view.BackHandle = AddBackHandler(view.HandleBack, bottom: screen);
         }
 
         private static void ReleaseInput(View view)
@@ -485,10 +466,17 @@ namespace Rubickanov.UI
         public IDisposable PushBackHandler(Func<bool> handler)
         {
             if (handler == null) throw new ArgumentNullException(nameof(handler));
+
+            return AddBackHandler(handler, bottom: false);
+        }
+
+        private BackHandler AddBackHandler(Func<bool> handler, bool bottom)
+        {
             if (_disposed) throw new ObjectDisposedException(nameof(UIService));
 
             var entry = new BackHandler(this, handler);
-            _backHandlers.Add(entry);
+            if (bottom) _backHandlers.Insert(0, entry);
+            else _backHandlers.Add(entry);
             return entry;
         }
 
@@ -575,7 +563,7 @@ namespace Rubickanov.UI
     }
 
 #if UNITY_EDITOR
-    public static class DebugRegistry
+    internal static class DebugRegistry
     {
         public static readonly List<UIService> Instances = new();
         public static void Register(UIService service) => Instances.Add(service);

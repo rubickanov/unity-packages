@@ -30,15 +30,15 @@ namespace Rubickanov.UI.Tests
         public readonly List<string> Released = new();
         public bool Deferred { get; set; }
 
-        private readonly Dictionary<string, UniTaskCompletionSource<(VisualTreeAsset asset, IDisposable handle)>> _pending = new();
+        private readonly Dictionary<string, UniTaskCompletionSource<(VisualTreeAsset? asset, IDisposable? handle)>> _pending = new();
 
-        public UniTask<(VisualTreeAsset asset, IDisposable handle)> Load(string name)
+        public UniTask<(VisualTreeAsset? asset, IDisposable? handle)> Load(string name)
         {
             Loaded.Add(name);
             if (!Deferred)
                 return UniTask.FromResult(CreateResult(name));
 
-            var source = new UniTaskCompletionSource<(VisualTreeAsset asset, IDisposable handle)>();
+            var source = new UniTaskCompletionSource<(VisualTreeAsset? asset, IDisposable? handle)>();
             _pending[name] = source;
             return source.Task;
         }
@@ -50,7 +50,7 @@ namespace Rubickanov.UI.Tests
             source.TrySetResult(CreateResult(name));
         }
 
-        private (VisualTreeAsset asset, IDisposable handle) CreateResult(string name)
+        private (VisualTreeAsset? asset, IDisposable? handle) CreateResult(string name)
         {
             var asset = ScriptableObject.CreateInstance<VisualTreeAsset>();
             asset.name = name;
@@ -112,6 +112,7 @@ namespace Rubickanov.UI.Tests
         public int UnbindCalls { get; private set; }
         public FakeViewModel? LastViewModel { get; private set; }
         public Exception? ThrowOnBind { get; set; }
+        public Exception? ThrowOnUnbind { get; set; }
 
         protected override void OnBind()
         {
@@ -120,7 +121,11 @@ namespace Rubickanov.UI.Tests
             if (ThrowOnBind != null) throw ThrowOnBind;
         }
 
-        protected override void OnUnbind() => UnbindCalls++;
+        protected override void OnUnbind()
+        {
+            UnbindCalls++;
+            if (ThrowOnUnbind != null) throw ThrowOnUnbind;
+        }
     }
 
     public abstract class FakeScreen : FakeView
