@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -15,6 +16,7 @@ namespace Rubickanov.DevConsole
     {
         private const string InputControlName = "DevConsoleInput";
         private const int MaxSuggestions = 10;
+        private static readonly int LogSelectionHint = "DevConsoleLogSelection".GetHashCode();
 
         private static DevConsoleIMGUI? _instance;
 
@@ -36,8 +38,43 @@ namespace Rubickanov.DevConsole
         private bool _scrollToBottom;
 
         // Reused per frame so the measured total height matches what is drawn exactly.
-        private readonly List<GUIContent> _logContents = new();
+        // _logSlots[i] is the cache slot of ConsoleLog.Entries[i].
+        private readonly List<int> _logSlots = new();
         private readonly List<float> _logHeights = new();
+
+        // Per entry: the text as drawn (colour tags only) and as copied (no tags). Slot = entry number % capacity.
+        private long[] _lineNumbers = Array.Empty<long>();
+        private GUIContent[] _lineDrawn = Array.Empty<GUIContent>();
+        private GUIContent[] _linePlain = Array.Empty<GUIContent>();
+
+        // Log geometry of the last pass, for mouse hit tests outside the scroll view.
+        private Rect _logView;
+        private float _logInnerWidth;
+        private float _logContentHeight;
+        private const float LogPadLeft = 10f;
+        private const float LogPadTop = 8f;
+
+        // Text selected in the log, from the anchor (where the press was) to the caret (where the mouse is).
+        // Positions are entry numbers, not buffer indices, so dropping old entries does not move the selection.
+        private LogPos _selAnchor;
+        private LogPos _selCaret;
+        private bool _hasSelection;
+        private int _selectionControl;
+
+        private readonly struct LogPos
+        {
+            public readonly long Entry;
+            public readonly int Char;
+
+            public LogPos(long entry, int ch)
+            {
+                Entry = entry;
+                Char = ch;
+            }
+
+            public bool Before(LogPos other) => Entry < other.Entry || (Entry == other.Entry && Char < other.Char);
+            public bool Same(LogPos other) => Entry == other.Entry && Char == other.Char;
+        }
 
         // Autocomplete state
         private readonly List<string> _suggestions = new();
@@ -48,6 +85,7 @@ namespace Rubickanov.DevConsole
         // IMGUI styles (lazy init)
         private bool _stylesInitialized;
         private GUIStyle _logStyle = default!;
+        private GUIStyle _logPlainStyle = default!;
         private GUIStyle _inputStyle = default!;
         private GUIStyle _promptStyle = default!;
         private GUIStyle _acNameStyle = default!;
@@ -100,8 +138,14 @@ namespace Rubickanov.DevConsole
             DestroyTex(ref _clearTex);
         }
 
-        private void OnLogAdded(ConsoleLog.LogEntry entry) => _scrollToBottom = true;
-        private void OnCleared() => _scrollToBottom = true;
+        // While text is selected the log stays where it is, so the selection does not scroll away.
+        private void OnLogAdded(ConsoleLog.LogEntry entry) => _scrollToBottom |= !_hasSelection;
+
+        private void OnCleared()
+        {
+            ClearSelection();
+            _scrollToBottom = true;
+        }
 
         // Drive the built-in toggle from DevConsoleSettings, mirroring DevConsoleUIToolkit so the
         // two frontends honor the same Toggle Key / Use Built-in Toggle options. Polling the Input
@@ -132,6 +176,7 @@ namespace Rubickanov.DevConsole
             if (_isOpen == open) return;
 
             _isOpen = open;
+            ClearSelection();
             if (open)
             {
                 _requestFocus = true;
@@ -181,6 +226,15 @@ namespace Rubickanov.DevConsole
                 _pendingComplete = false;
                 if (_suggestions.Count > 0)
                     ApplySelectedSuggestion();
+            }
+
+            // Copy the log selection before the command field is drawn: the field would take the
+            // shortcut for its own, usually empty, selection.
+            if (_hasSelection && IsCopyEvent(e))
+            {
+                if (e.type != EventType.ValidateCommand)
+                    GUIUtility.systemCopyBuffer = SelectedText();
+                e.Use();
             }
 
             KeyCode capturedKey = KeyCode.None;
@@ -275,6 +329,8 @@ namespace Rubickanov.DevConsole
                 case KeyCode.Escape:
                     if (hasSuggestions)
                         HideAutocomplete();
+                    else if (_hasSelection)
+                        ClearSelection();
                     else
                         SetOpen(false);
                     break;
@@ -309,32 +365,38 @@ namespace Rubickanov.DevConsole
 
         private void DrawLogArea(float height)
         {
-            const float padLeft = 10f;
             const float padRight = 10f;
-            const float padTop = 8f;
             const float padBottom = 8f;
             const float scrollbarWidth = 16f;
 
             var entries = ConsoleLog.Entries;
+            long first = ConsoleLog.FirstNumber;
             var position = new Rect(0, 0, Screen.width, height);
 
             // Reserve the scrollbar gutter up front so the wrap width used for measuring is the same
             // one used for drawing — otherwise CalcHeight and GUI.Label disagree and the scroll range
             // is wrong.
             float contentWidth = Screen.width - scrollbarWidth;
-            float innerWidth = contentWidth - padLeft - padRight;
+            float innerWidth = contentWidth - LogPadLeft - padRight;
 
-            _logContents.Clear();
+            _logSlots.Clear();
             _logHeights.Clear();
-            float contentHeight = padTop + padBottom;
+            float contentHeight = LogPadTop + padBottom;
             for (int i = 0; i < entries.Count; i++)
             {
-                var content = new GUIContent(ColorizeEntry(entries[i]));
-                float h = _logStyle.CalcHeight(content, innerWidth);
-                _logContents.Add(content);
+                int slot = CacheLine(first + i, entries[i]);
+                float h = _logStyle.CalcHeight(_lineDrawn[slot], innerWidth);
+                _logSlots.Add(slot);
                 _logHeights.Add(h);
                 contentHeight += h;
             }
+
+            _logView = position;
+            _logInnerWidth = innerWidth;
+            _logContentHeight = contentHeight;
+
+            DropEvictedSelection(first, entries.Count);
+            HandleLogMouse(contentWidth);
 
             var scrollContent = new Rect(0, 0, contentWidth, contentHeight);
 
@@ -346,26 +408,312 @@ namespace Rubickanov.DevConsole
 
             _scrollPos = GUI.BeginScrollView(position, _scrollPos, scrollContent);
 
-            float y = padTop;
-            for (int i = 0; i < _logContents.Count; i++)
+            bool drawSelection = _hasSelection && Event.current.type == EventType.Repaint;
+            float y = LogPadTop;
+            for (int i = 0; i < _logSlots.Count; i++)
             {
-                GUI.Label(new Rect(padLeft, y, innerWidth, _logHeights[i]), _logContents[i], _logStyle);
+                var rect = new Rect(LogPadLeft, y, innerWidth, _logHeights[i]);
+                if (drawSelection)
+                    DrawLineSelection(first + i, _logSlots[i], rect);
+
+                GUI.Label(rect, _lineDrawn[_logSlots[i]], _logStyle);
                 y += _logHeights[i];
             }
 
             GUI.EndScrollView();
         }
 
-        private static string ColorizeEntry(ConsoleLog.LogEntry entry)
+        /// <summary>Fills the cache slot of an entry if it holds another one; returns the slot.</summary>
+        private int CacheLine(long number, in ConsoleLog.LogEntry entry)
         {
-            return entry.Type switch
+            if (_lineNumbers.Length != ConsoleLog.Capacity)
             {
-                ConsoleLog.LogType.Warning => $"<color=#ffd23c>{entry.Message}</color>",
-                ConsoleLog.LogType.Error => $"<color=#ff5050>{entry.Message}</color>",
-                ConsoleLog.LogType.Success => $"<color=#50dc64>{entry.Message}</color>",
-                ConsoleLog.LogType.Input => $"<color=#a0a0aa>{entry.Message}</color>",
-                _ => entry.Message
+                _lineNumbers = new long[ConsoleLog.Capacity];
+                Array.Fill(_lineNumbers, -1L);
+                _lineDrawn = new GUIContent[ConsoleLog.Capacity];
+                _linePlain = new GUIContent[ConsoleLog.Capacity];
+            }
+
+            int slot = (int)(number % _lineNumbers.Length);
+            if (_lineNumbers[slot] != number)
+            {
+                _lineNumbers[slot] = number;
+                _lineDrawn[slot] = new GUIContent(ColorizeEntry(entry.Type, RichText.KeepColor(entry.Message)));
+                _linePlain[slot] = new GUIContent(RichText.Strip(entry.Message));
+            }
+
+            return slot;
+        }
+
+        private static string ColorizeEntry(ConsoleLog.LogType type, string message)
+        {
+            return type switch
+            {
+                ConsoleLog.LogType.Warning => $"<color=#ffd23c>{message}</color>",
+                ConsoleLog.LogType.Error => $"<color=#ff5050>{message}</color>",
+                ConsoleLog.LogType.Success => $"<color=#50dc64>{message}</color>",
+                ConsoleLog.LogType.Input => $"<color=#a0a0aa>{message}</color>",
+                _ => message
             };
+        }
+
+        // ── Log selection ───────────────────────────────────────────
+
+        // Press and drag to select, shift-press to extend, double-press for a word, triple for the whole entry.
+        // Handled in screen space before the scroll view, so the scrollbar keeps its own clicks and the
+        // command field keeps keyboard focus.
+        private void HandleLogMouse(float contentWidth)
+        {
+            var e = Event.current;
+            int id = GUIUtility.GetControlID(LogSelectionHint, FocusType.Passive);
+            _selectionControl = id;
+
+            switch (e.GetTypeForControl(id))
+            {
+                case EventType.MouseDown:
+                {
+                    if (e.button != 0) return;
+
+                    bool onText = _logView.Contains(e.mousePosition) && e.mousePosition.x < _logView.x + contentWidth;
+                    if (!onText)
+                    {
+                        // A press on the command field or a suggestion drops the selection; the scrollbar keeps it.
+                        if (!_logView.Contains(e.mousePosition))
+                            ClearSelection();
+                        return;
+                    }
+
+                    if (_logSlots.Count == 0) return;
+
+                    var pos = PosAt(e.mousePosition);
+                    if (e.shift && _hasSelection)
+                    {
+                        _selCaret = pos;
+                    }
+                    else if (e.clickCount == 2)
+                    {
+                        SelectWord(pos);
+                    }
+                    else if (e.clickCount >= 3)
+                    {
+                        _selAnchor = new LogPos(pos.Entry, 0);
+                        _selCaret = new LogPos(pos.Entry, PlainOf(pos.Entry).Length);
+                    }
+                    else
+                    {
+                        _selAnchor = pos;
+                        _selCaret = pos;
+                    }
+
+                    _hasSelection = true;
+                    GUIUtility.hotControl = id;
+                    e.Use();
+                    break;
+                }
+
+                case EventType.MouseDrag:
+                {
+                    if (GUIUtility.hotControl != id) return;
+
+                    // Dragging past the top or bottom edge scrolls towards it, faster the further out.
+                    float maxScroll = Mathf.Max(0f, _logContentHeight - _logView.height);
+                    if (e.mousePosition.y < _logView.yMin)
+                        _scrollPos.y = Mathf.Max(0f, _scrollPos.y - (_logView.yMin - e.mousePosition.y));
+                    else if (e.mousePosition.y > _logView.yMax)
+                        _scrollPos.y = Mathf.Min(maxScroll, _scrollPos.y + (e.mousePosition.y - _logView.yMax));
+
+                    if (_logSlots.Count > 0)
+                        _selCaret = PosAt(e.mousePosition);
+                    e.Use();
+                    break;
+                }
+
+                case EventType.MouseUp:
+                {
+                    if (GUIUtility.hotControl != id) return;
+
+                    GUIUtility.hotControl = 0;
+                    // A plain click without a drag selects nothing.
+                    if (_selAnchor.Same(_selCaret))
+                        ClearSelection();
+                    e.Use();
+                    break;
+                }
+            }
+        }
+
+        /// <summary>The entry and character under a screen point, clamped to the log text.</summary>
+        private LogPos PosAt(Vector2 screen)
+        {
+            long first = ConsoleLog.FirstNumber;
+            var content = new Vector2(screen.x - _logView.x + _scrollPos.x, screen.y - _logView.y + _scrollPos.y);
+
+            if (content.y < LogPadTop)
+                return new LogPos(first, 0);
+
+            float y = LogPadTop;
+            for (int i = 0; i < _logSlots.Count; i++)
+            {
+                float h = _logHeights[i];
+                if (content.y < y + h)
+                {
+                    var rect = new Rect(LogPadLeft, y, _logInnerWidth, h);
+                    var plain = _linePlain[_logSlots[i]];
+                    int ch = _logPlainStyle.GetCursorStringIndex(rect, plain, content);
+                    return new LogPos(first + i, Mathf.Clamp(ch, 0, plain.text.Length));
+                }
+
+                y += h;
+            }
+
+            int last = _logSlots.Count - 1;
+            return new LogPos(first + last, _linePlain[_logSlots[last]].text.Length);
+        }
+
+        private void SelectWord(LogPos pos)
+        {
+            string text = PlainOf(pos.Entry);
+            int at = Mathf.Min(pos.Char, text.Length - 1);
+            if (at < 0)
+            {
+                _selAnchor = _selCaret = pos;
+                return;
+            }
+
+            // A run of word characters, a run of spaces, or a single other character.
+            int from = at, to = at + 1;
+            if (IsWordChar(text[at]))
+            {
+                while (from > 0 && IsWordChar(text[from - 1])) from--;
+                while (to < text.Length && IsWordChar(text[to])) to++;
+            }
+            else if (char.IsWhiteSpace(text[at]))
+            {
+                while (from > 0 && char.IsWhiteSpace(text[from - 1]) && text[from - 1] != '\n') from--;
+                while (to < text.Length && char.IsWhiteSpace(text[to]) && text[to] != '\n') to++;
+            }
+
+            _selAnchor = new LogPos(pos.Entry, from);
+            _selCaret = new LogPos(pos.Entry, to);
+        }
+
+        private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+        /// <summary>Highlights the selected part of one entry, line by line where it wraps.</summary>
+        private void DrawLineSelection(long number, int slot, Rect rect)
+        {
+            OrderedSelection(out var start, out var end);
+            if (number < start.Entry || number > end.Entry) return;
+
+            var plain = _linePlain[slot];
+            int length = plain.text.Length;
+            int from = number == start.Entry ? Mathf.Min(start.Char, length) : 0;
+            int to = number == end.Entry ? Mathf.Min(end.Char, length) : length;
+
+            // The line break after an entry is part of the selection when the next entry is too.
+            float breakWidth = number < end.Entry ? 6f : 0f;
+            if (from >= to && breakWidth == 0f) return;
+
+            Vector2 a = _logPlainStyle.GetCursorPixelPosition(rect, plain, from);
+            Vector2 b = _logPlainStyle.GetCursorPixelPosition(rect, plain, to);
+            float lineHeight = _logPlainStyle.lineHeight;
+
+            if (Mathf.Abs(a.y - b.y) < 1f)
+            {
+                FillSelection(a.x, a.y, b.x - a.x + breakWidth, lineHeight);
+                return;
+            }
+
+            FillSelection(a.x, a.y, rect.xMax - a.x, lineHeight);
+            if (b.y - a.y > lineHeight + 1f)
+                FillSelection(rect.x, a.y + lineHeight, rect.width, b.y - a.y - lineHeight);
+            FillSelection(rect.x, b.y, b.x - rect.x + breakWidth, lineHeight);
+        }
+
+        private void FillSelection(float x, float y, float width, float height)
+        {
+            if (width > 0f)
+                GUI.DrawTexture(new Rect(x, y, width, height), _selectedBgTex!);
+        }
+
+        /// <summary>The selected text without rich text tags, entries separated by line breaks.</summary>
+        private string SelectedText()
+        {
+            OrderedSelection(out var start, out var end);
+            long first = ConsoleLog.FirstNumber;
+            long last = first + ConsoleLog.Entries.Count - 1;
+
+            var sb = new StringBuilder();
+            for (long n = Math.Max(start.Entry, first); n <= Math.Min(end.Entry, last); n++)
+            {
+                string text = PlainOf(n);
+                int from = n == start.Entry ? Mathf.Min(start.Char, text.Length) : 0;
+                int to = n == end.Entry ? Mathf.Min(end.Char, text.Length) : text.Length;
+                if (to > from)
+                    sb.Append(text, from, to - from);
+                if (n < end.Entry)
+                    sb.Append('\n');
+            }
+
+            return sb.ToString();
+        }
+
+        private string PlainOf(long number)
+        {
+            long first = ConsoleLog.FirstNumber;
+            var entries = ConsoleLog.Entries;
+            if (number < first || number >= first + entries.Count) return "";
+
+            return _linePlain[CacheLine(number, entries[(int)(number - first)])].text;
+        }
+
+        private void OrderedSelection(out LogPos start, out LogPos end)
+        {
+            bool forward = !_selCaret.Before(_selAnchor);
+            start = forward ? _selAnchor : _selCaret;
+            end = forward ? _selCaret : _selAnchor;
+        }
+
+        // The ring buffer drops its oldest entries; a selection that starts in them starts at the first one left.
+        private void DropEvictedSelection(long first, int count)
+        {
+            if (!_hasSelection) return;
+
+            OrderedSelection(out var start, out var end);
+            if (count == 0 || end.Entry < first)
+            {
+                ClearSelection();
+                return;
+            }
+
+            if (start.Entry < first)
+            {
+                var clamped = new LogPos(first, 0);
+                if (_selAnchor.Before(_selCaret))
+                    _selAnchor = clamped;
+                else
+                    _selCaret = clamped;
+            }
+        }
+
+        private void ClearSelection()
+        {
+            _hasSelection = false;
+            if (_selectionControl != 0 && GUIUtility.hotControl == _selectionControl)
+                GUIUtility.hotControl = 0;
+        }
+
+        // Ctrl+C, Cmd+C on macOS; the editor may send the Copy command instead of the key.
+        private static bool IsCopyEvent(Event e)
+        {
+            if (e.type == EventType.KeyDown)
+            {
+                if (!e.control && !e.command) return false;
+                return e.keyCode == KeyCode.C || e.character == 'c' || e.character == 'C' || e.character == '\u0003';
+            }
+
+            return (e.type == EventType.ValidateCommand || e.type == EventType.ExecuteCommand) &&
+                   e.commandName == "Copy";
         }
 
         // ── Suggestions ─────────────────────────────────────────────
@@ -503,6 +851,9 @@ namespace Rubickanov.DevConsole
             var text = _inputText.Trim();
             if (string.IsNullOrEmpty(text)) return;
 
+            // Lets the command's output scroll into view.
+            ClearSelection();
+
             _history.Add(text);
             _history.ResetCursor();
             ExecuteInput(text);
@@ -580,6 +931,9 @@ namespace Rubickanov.DevConsole
                 normal = { textColor = new Color(0.863f, 0.863f, 0.863f) },
                 padding = new RectOffset(0, 0, 1, 1)
             };
+
+            // Lays out the tag-free text exactly like _logStyle lays out the coloured one, for selection.
+            _logPlainStyle = new GUIStyle(_logStyle) { richText = false };
 
             _inputStyle = new GUIStyle(GUI.skin.textField)
             {

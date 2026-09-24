@@ -20,7 +20,17 @@ namespace Rubickanov.DevConsole
         private static readonly LogEntry[] Buffer = new LogEntry[MaxEntries];
         private static int _head;
         private static int _count;
+        private static long _added;
         private const int MaxEntries = 1000;
+
+        /// <summary>How many entries the buffer holds before it drops the oldest.</summary>
+        public static int Capacity => MaxEntries;
+
+        /// <summary>
+        /// Number of the first entry in <see cref="Entries"/> since startup. Entry <c>i</c> is number
+        /// <c>FirstNumber + i</c>, which stays the same while older entries are dropped or cleared.
+        /// </summary>
+        public static long FirstNumber => _added - _count;
 
         /// <summary>Read-only view of all current log entries.</summary>
         public static RingBufferView Entries => new(Buffer, _head, _count);
@@ -36,6 +46,7 @@ namespace Rubickanov.DevConsole
         {
             _head = 0;
             _count = 0;
+            _added = 0;
             Array.Clear(Buffer, 0, Buffer.Length);
             OnLogAdded = null;
             OnCleared = null;
@@ -56,6 +67,8 @@ namespace Rubickanov.DevConsole
                 Buffer[_head] = entry;
                 _head = (_head + 1) % MaxEntries;
             }
+
+            _added++;
 
             OnLogAdded?.Invoke(entry);
         }
