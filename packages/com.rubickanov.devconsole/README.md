@@ -262,6 +262,10 @@ DevConsoleIMGUI.Toggled += open => { };   // static event Action<bool>
 
 `Instance` is null until the corresponding frontend exists in the scene.
 
+The IMGUI log is selectable with the mouse: drag to select, double-click for a word, triple-click for a whole entry,
+shift-click to extend. Ctrl+C (Cmd+C on macOS) copies the selection as plain text, without rich text tags. The log
+draws colour tags only, so bold and size tags in messages show as plain text there.
+
 ### Logging
 
 ```csharp
@@ -280,6 +284,9 @@ foreach (var entry in ConsoleLog.Entries)   // RingBufferView, oldest-first
 
 ConsoleLog.OnLogAdded += entry => Debug.Log(entry.Message);
 ConsoleLog.OnCleared += () => Debug.Log("Console cleared");
+
+long number = ConsoleLog.FirstNumber;   // number of Entries[0]; entry i is FirstNumber + i
+int capacity = ConsoleLog.Capacity;     // the oldest entry is dropped past this
 ```
 
 Every Unity log message (`Debug.Log*`, exceptions, engine messages) is copied into `ConsoleLog` as is, from any thread and from the first moment scripts run, before any frontend exists. Errors, exceptions and asserts carry their stack trace. Messages from other threads appear at the start of the next frame. `log_unity false` stops the copying, `log_unity true` resumes it.
