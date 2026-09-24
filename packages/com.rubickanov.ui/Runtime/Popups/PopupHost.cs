@@ -134,6 +134,15 @@ namespace Rubickanov.UI
         }
 
         IUIService IPopupHostCallbacks.Ui => _ui;
+
+        View IPopupHostCallbacks.CreateContentView(Type viewType, ViewModelBase viewModel)
+        {
+            if (_ui is not UIService service)
+                throw new NotSupportedException(
+                    $"A view as popup content needs PopupHost built over UIService, which loads its UXML; " +
+                    $"this one was given {_ui.GetType().Name}.");
+            return service.CreateDetached(viewType, viewModel);
+        }
         IViewAnimation IPopupHostCallbacks.DefaultAnimation => _defaultAnimation;
 
         void IPopupHostCallbacks.OnPopupClosed(PopupInstance instance)

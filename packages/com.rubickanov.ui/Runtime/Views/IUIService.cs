@@ -16,9 +16,28 @@ namespace Rubickanov.UI
 
         /// <summary>
         /// Binds <paramref name="viewModel"/> and shows the view with its animation. The view model belongs to this
-        /// show: it is disposed when the view unbinds it.
+        /// show: it is disposed when the view unbinds it. Showing a screen clears the screen history.
         /// </summary>
         UniTask Show<T>(ViewModelBase viewModel) where T : View;
+
+        /// <summary>
+        /// Shows the screen <typeparamref name="T"/> with a view model from <paramref name="createViewModel"/> and
+        /// records it in the screen history, so <see cref="NavigateBack"/> (and <see cref="Back"/> through the
+        /// screen's default <c>OnBack</c>) returns to the screen before it. The factory runs again on every return,
+        /// since a view model lives for one show. A screen already in the history is returned to: everything above
+        /// it is dropped.
+        /// </summary>
+        /// <exception cref="InvalidOperationException"><typeparamref name="T"/> is not a screen.</exception>
+        UniTask Navigate<T>(Func<ViewModelBase> createViewModel) where T : View;
+
+        /// <summary>True while the screen history holds a screen to return to.</summary>
+        bool CanNavigateBack { get; }
+
+        /// <summary>
+        /// Shows the previous screen of the history with a new view model from its factory. Returns false, changing
+        /// nothing, when there is none.
+        /// </summary>
+        UniTask<bool> NavigateBack();
 
         void Hide<T>() where T : View;
         UniTask HideAsync<T>() where T : View;

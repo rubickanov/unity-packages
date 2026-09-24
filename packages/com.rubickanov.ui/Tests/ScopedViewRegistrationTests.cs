@@ -141,6 +141,9 @@ namespace Rubickanov.UI.Tests
 
             public T Get<T>() where T : View => throw new NotSupportedException();
             public UniTask Show<T>(ViewModelBase viewModel) where T : View => UniTask.CompletedTask;
+            public UniTask Navigate<T>(Func<ViewModelBase> createViewModel) where T : View => UniTask.CompletedTask;
+            public bool CanNavigateBack => false;
+            public UniTask<bool> NavigateBack() => UniTask.FromResult(false);
             public void Hide<T>() where T : View { }
             public UniTask HideAsync<T>() where T : View => UniTask.CompletedTask;
             public void HideTop() { }

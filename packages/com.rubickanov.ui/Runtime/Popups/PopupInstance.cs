@@ -18,6 +18,9 @@ namespace Rubickanov.UI
         IUIService Ui { get; }
         IViewAnimation DefaultAnimation { get; }
 
+        /// <summary>A new instance of a registered view, bound and shown, for the popup to own.</summary>
+        View CreateContentView(Type viewType, ViewModelBase viewModel);
+
         void OnPopupClosed(PopupInstance instance);
         void OnPlacementChanged(PopupInstance instance);
     }
@@ -42,6 +45,7 @@ namespace Rubickanov.UI
         private Label? _message;
         private VisualElement? _icon;
         private TextField? _input;
+        private View? _contentView;
         private bool _interactive;
 
         private IVisualElementScheduledItem? _timeout;
@@ -68,7 +72,17 @@ namespace Rubickanov.UI
             _panel.AddToClassList(PopupStyle.Panel);
             _panel.style.position = Position.Absolute;
 
-            Build();
+            try
+            {
+                Build();
+            }
+            catch
+            {
+                // The popup owns the content view model even when it never opened.
+                DestroyContentView();
+                config.ContentViewModel?.Dispose();
+                throw;
+            }
             Attach();
             IsOpen = true;
 
@@ -141,6 +155,15 @@ namespace Rubickanov.UI
                 _panel.Add(content);
             }
 
+            if (_config.ContentViewType != null)
+            {
+                var viewModel = _config.ContentViewModel ?? throw new InvalidOperationException(
+                    $"Popup content view {_config.ContentViewType.Name} has no ContentViewModel.");
+                _contentView = _host.CreateContentView(_config.ContentViewType, viewModel);
+                _contentView.Root.AddToClassList(PopupStyle.Content);
+                _panel.Add(_contentView.Root);
+            }
+
             if (_config.HasInput)
             {
                 _input = new TextField();
@@ -179,6 +202,7 @@ namespace Rubickanov.UI
             // pass through to the game underneath, like a tooltip. Anything interactive stays pickable
             // and captures the pointer.
             _interactive = _config.Buttons.Count > 0
+                           || _contentView != null
                            || Has(PopupCloseTriggers.CloseButton)
                            || _config.HasInput
                            || Has(PopupCloseTriggers.PointerLeave);
@@ -243,6 +267,22 @@ namespace Rubickanov.UI
         {
             _backdrop?.RemoveFromHierarchy();
             _panel.RemoveFromHierarchy();
+            DestroyContentView();
+        }
+
+        /// <summary>Destroys the content view, which unbinds and disposes its view model.</summary>
+        private void DestroyContentView()
+        {
+            var view = _contentView;
+            _contentView = null;
+            try
+            {
+                view?.Destroy();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
         }
 
         // ── Positioning ──────────────────────────────────────────

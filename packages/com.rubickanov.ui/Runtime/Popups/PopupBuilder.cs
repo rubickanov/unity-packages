@@ -21,6 +21,17 @@ namespace Rubickanov.UI
         public PopupBuilder Icon(Texture2D icon) { _config.Icon = icon; return this; }
         public PopupBuilder Content(Func<VisualElement> factory) { _config.ContentFactory = factory; return this; }
 
+        /// <summary>
+        /// Shows the registered view <typeparamref name="TView"/>, bound to <paramref name="viewModel"/>, as content.
+        /// The popup owns the view model. See <see cref="PopupConfig.ContentViewType"/>.
+        /// </summary>
+        public PopupBuilder Content<TView>(ViewModelBase viewModel) where TView : View
+        {
+            _config.ContentViewType = typeof(TView);
+            _config.ContentViewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
+            return this;
+        }
+
         public PopupBuilder Input(string placeholder = "", string defaultValue = "")
         {
             _config.HasInput = true;

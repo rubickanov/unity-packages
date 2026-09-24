@@ -44,6 +44,17 @@ namespace Rubickanov.UI
             return this;
         }
 
+        /// <summary>
+        /// Shows the registered view <typeparamref name="TView"/>, bound to <paramref name="viewModel"/>, as content.
+        /// The dialog owns the view model. See <see cref="PopupConfig.ContentViewType"/>.
+        /// </summary>
+        public DialogBuilder WithContent<TView>(ViewModelBase viewModel) where TView : View
+        {
+            _config.ContentViewType = typeof(TView);
+            _config.ContentViewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
+            return this;
+        }
+
         public DialogBuilder WithInput(string placeholder = "", string defaultValue = "")
         {
             _config.HasInput = true;

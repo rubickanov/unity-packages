@@ -49,19 +49,48 @@ namespace Rubickanov.UI
 
         internal void Initialize() => OnInitialize();
 
+        /// <summary>
+        /// Builds the tree of a view created apart from registration (a child view, a popup's content) from UXML
+        /// loaded for someone else, then runs <see cref="OnInitialize"/>.
+        /// </summary>
+        /// <param name="whyMissing">Ends the error thrown when the UXML is not in <paramref name="uxml"/>.</param>
+        internal void InitializeFrom(UxmlCache? uxml, string whyMissing)
+        {
+            var type = GetType();
+            var uxmlName = UxmlName;
+            if (uxmlName == null)
+                Root = new VisualElement();
+            else if (uxml != null && uxml.TryGet(type, out var asset) && asset != null)
+                Root = asset.CloneTree();
+            else
+                throw new InvalidOperationException($"UXML '{uxmlName}' of {type.Name} is not loaded: {whyMissing}.");
+
+            Uxml = uxml;
+            OnInitialize();
+        }
+
         internal bool HandleBack() => OnBack();
 
         /// <summary>
         /// Called by <see cref="IUIService.Back"/> while this screen or popup is visible and its handler is the top one.
         /// Return true when the back press was consumed. Default: a popup hides itself and returns true; a screen
-        /// returns false.
+        /// returns to the previous screen of the history (<see cref="IUIService.Navigate{T}"/>) and returns true, or
+        /// returns false when it is the first.
         /// </summary>
         protected virtual bool OnBack()
         {
-            if (Layer != UILayer.Popup || Owner == null) return false;
+            if (Owner == null) return false;
 
-            Owner.HideViewAsync(this).Forget();
-            return true;
+            switch (Layer)
+            {
+                case UILayer.Popup:
+                    Owner.HideViewAsync(this).Forget();
+                    return true;
+                case UILayer.Screen:
+                    return Owner.NavigateBackFrom(this);
+                default:
+                    return false;
+            }
         }
 
         /// <summary>

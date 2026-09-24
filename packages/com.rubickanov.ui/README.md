@@ -8,6 +8,7 @@ UI Toolkit framework: views with view models on four layers, popups, dialogs, to
 
 - `UniTask` — async register / show / hide and animations
 - `R3` — reactive properties, commands and bindings in `ViewModelBase` and `View<TViewModel>`
+- `ObservableCollections` — the source of `BindList` (NuGet, like `R3`)
 
 Show/hide animations live in the `com.rubickanov.ui.animations` extension; this package ships only `NoneAnimation`. Unity `6000.0+`.
 
@@ -15,7 +16,7 @@ Show/hide animations live in the `com.rubickanov.ui.animations` extension; this 
 
 ```text
 IUIService ── UIService(root, UxmlLoader)
-  ├── screen-layer   Screen views: one active
+  ├── screen-layer   Screen views: one active, a history to go back through
   ├── hud-layer      HUD views: independent
   ├── popup-layer    Popup views: a stack
   └── overlay-layer  Overlay views: independent
@@ -35,19 +36,19 @@ UxmlLoader ◄── UxmlLoaders.FromCatalog(UxmlCatalog)
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
 | **Rubickanov.UI** | Yes | Views, service, popups, dialogs, tooltips, spinner, UXML catalog, default stylesheet |
-| **Rubickanov.UI.Editor** | Editor | `Tools/Rubickanov/UI Debug` window |
+| **Rubickanov.UI.Editor** | Editor | `Rubickanov/UI Debug` window |
 
 ## Core Concepts
 
-**View** — authored UXML plus a view model, one instance per view type, registered once and shown many times. Repeated elements (list rows, markers) are child views or popups.
+**View** — authored UXML plus a view model, one instance per view type, registered once and shown many times. Repeated elements (list rows, markers) are child views, kept in step with an `ObservableList<T>` by `BindList`, or popups.
 
-**Popup** — a transient panel built in code from a `PopupConfig`: placement, modal or passive, close rules. Dialogs and tooltips are popup presets.
+**Popup** — a transient panel built in code from a `PopupConfig`: placement, modal or passive, close rules. Its content may be a registered view with its own view model. Dialogs and tooltips are popup presets.
 
 **Layer** — declared by the view, not by whoever registers it:
 
 | Layer | Behaviour |
 |---|---|
-| `Screen` | At most one visible. Showing a screen hides the current one. Intercepts input, captures the pointer, pushes a back handler. |
+| `Screen` | At most one visible. Showing a screen hides the current one; `Navigate` records it in a history that `Back()` returns through. Intercepts input, captures the pointer, pushes a back handler. |
 | `Popup` | A stack. `Show` pushes (a popup already visible is rebound and moves to the top), `HideTop` pops. Intercepts input, captures the pointer, pushes a back handler. |
 | `HUD`, `Overlay` | Independent. `Show`/`Hide` only; not on any stack, no pointer capture, no back handler, untouched by `HideTop` and `HideAll`. Do not intercept input. |
 
@@ -156,6 +157,30 @@ public sealed class CrewListView : View<CrewListViewModel>
 
 The UXML of every type in `ChildViews` loads when the parent registers, so `CreateChild` is synchronous. Children are destroyed, and their view models disposed, when the parent unbinds; `DestroyChildren()` does it earlier. Creating a type not listed throws.
 
+### Lists
+
+```csharp
+public sealed class LobbyViewModel : ViewModelBase
+{
+    public ObservableList<LobbyMember> Members { get; }
+    public LobbyViewModel(Lobby lobby) => Members = lobby.Members;
+}
+
+public sealed class LobbyView : View<LobbyViewModel>
+{
+    protected override UILayer Layer => UILayer.Screen;
+    protected override IReadOnlyList<Type> ChildViews => new[] { typeof(MemberRowView) };
+
+    protected override void OnBind()
+    {
+        BindList<LobbyMember, MemberRowView, MemberRowViewModel>(
+            ViewModel.Members, Root.Q("members"), member => new MemberRowViewModel(member));
+    }
+}
+```
+
+One child view per item, in the list's order. An added item gets a row with a new view model; a removed or replaced one loses its row, and the row's view model is disposed; a moved, sorted or reversed item keeps its row. `Clear` removes every row. Rows stay together after whatever else the container holds, such as a header or an "empty" label; put anything that goes below them in another element. The source is any `IObservableCollection<T>`: a collection without indices (`ObservableHashSet<T>`) finds rows by equality and appends. Change the source on the main thread. The binding ends when the view unbinds, like every other binding.
+
 ### Showing and hiding
 
 ```csharp
@@ -196,6 +221,25 @@ using var back = ui.PushBackHandler(() => { targeting.Cancel(); return true; });
 ```
 
 The package does not read the keyboard. `Back()` runs handlers last-pushed first until one returns `true`. Visible screen and popup views push `OnBack()`; popups with `PopupCloseTriggers.Escape` close on `Back()`.
+
+### Screen history
+
+```csharp
+await ui.Navigate<MainMenuView>(() => new MainMenuViewModel(session));
+await ui.Navigate<HostView>(() => new HostViewModel(session));
+await ui.Navigate<LobbyView>(() => new LobbyViewModel(session.Lobby));
+
+ui.Back();                // lobby → host; again → main menu; then false: the game's own Escape
+await ui.NavigateBack();  // the same from a "Back" button; false when there is nowhere to go
+
+// A screen already in the history is returned to: the screens above it are dropped.
+await ui.Navigate<MainMenuView>(() => new MainMenuViewModel(session));
+
+// Show of a screen is a jump, not a step: it clears the history.
+await ui.Show<ShipScreen>(new ShipScreenViewModel(ship));
+```
+
+`Navigate` takes a factory, not a view model: a view model lives for one show, so every return builds a new one. A screen's default `OnBack()` goes back while its screen is the current one of the history, so a popup over it still closes first. `Show` of a screen, `Hide` of the current screen and `HideAll` clear the history; `Unregister` drops the screen from it. `CanNavigateBack` says whether there is a screen to return to. `Navigate` to a view on another layer throws.
 
 ### Scene-scoped registration
 
@@ -242,6 +286,26 @@ popups.Create().Message("Autosaved").Timeout(2f).Open(); // passive, clicks pass
 ```
 
 `Modal()` adds a backdrop and moves the popup to the overlay layer. Other triggers: `CloseButton`, `ClickOutside` (modal), `PointerLeave`, `Timeout`. `Close()` completes `Result` at once, then plays the hide animation (`.Animation(...)` or the `PopupHost` default) and removes the elements. `CloseAll()` closes every popup.
+
+### A view as popup content
+
+```csharp
+await ui.Register<InviteFriendsView>();   // once, like any view: loads its UXML
+
+var picked = new InviteFriendsViewModel(friends);
+var handle = popups.Create()
+    .Title("Invite a friend")
+    .Content<InviteFriendsView>(picked)
+    .CloseOn(PopupCloseTriggers.CloseButton | PopupCloseTriggers.Escape)
+    .Modal()
+    .Open();
+picked.Invited.Subscribe(_ => handle.Close("invited"));
+
+await dialogs.CreateDialog("Crew").WithContent<CrewListView>(new CrewListViewModel(ship))
+    .AddButton("Close", "close").ShowAsync();
+```
+
+The popup builds a new instance of the registered view from its UXML, below the title and message, binds the view model and owns both: the view is destroyed and the view model disposed when the popup's elements are removed, after the hide animation; if `Open` throws, the view model is disposed at once. The registered instance itself stays hidden on its layer, so one view can be a screen and popup content at the same time, and several popups can show it at once. Its child views and lists work as anywhere else. A popup with a view is interactive: it captures the pointer. `PopupHost` must be built over `UIService`, which loads the UXML.
 
 ### Placement
 
@@ -310,12 +374,14 @@ Every rule reads a `--ui-*` variable with a fallback. Class names are constants 
 
 ### Debug window
 
-**Tools → Rubickanov → UI Debug** lists, per `UIService` in Play Mode: pointer capture count, back stack depth, the active screen, the popup stack, and registered views by layer with their `ViewState`.
+**Rubickanov → UI Debug** lists, per `UIService` in Play Mode: pointer capture count, back stack depth, the active screen, the screen history, the popup stack, and registered views by layer with their `ViewState`.
 
 ## Design Decisions
 
 - **Layer on the view** — a view's layer is a fact about the view; registration sites cannot disagree about it.
-- **Views and popups stay separate** — views are authored UXML bound to a view model; popups are transient panels with placement and close rules. A UXML view as popup content is not supported.
+- **Views and popups stay separate, a view can fill a popup** — views are authored UXML bound to a view model; popups are transient panels with placement and close rules. A popup borrows a registered view's UXML for a fresh instance instead of a view becoming a popup: placement, stacking and close rules stay with the popup, binding with the view.
+- **History of factories, not of view models** — a view model belongs to one show, so the history keeps how to build one. A screen returned to starts fresh; state that must survive a round trip lives in the model the factory reads.
+- **Rows are child views** — `BindList` creates and destroys child views; UI Toolkit's `ListView` virtualizes rows for thousands of items, which lobby and crew lists do not have.
 - **Catalog, not `Resources`** — `Resources` ships every asset in the folder and finds views by strings that break silently on rename; Addressables adds a build step for a few kilobytes of UXML. The loader stays a delegate, so a project can still use Addressables.
 - **No keyboard input in the package** — the game owns its input bindings and calls `Back()`; the package owns the order.
 - **The animation belongs to the view** — callers never pass durations; `Animation` decides how a view shows and hides.

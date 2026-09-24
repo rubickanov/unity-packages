@@ -17,6 +17,7 @@ namespace Rubickanov.UI
         private readonly Dictionary<Type, UILayer> _viewLayers = new();
         private readonly Dictionary<Type, object> _loading = new();
         private View? _activeScreen;
+        private readonly List<HistoryEntry> _history = new();
         private readonly List<View> _popupStack = new();
         private readonly ReactiveProperty<bool> _pointerCaptured = new(false);
         private int _captureCount;
@@ -44,6 +45,16 @@ namespace Rubickanov.UI
         public IReadOnlyList<View> DebugPopupStack => _popupStack;
         public int DebugPointerCaptureCount => _captureCount;
         public int DebugBackStackDepth => _backHandlers.Count;
+
+        public IReadOnlyList<Type> DebugScreenHistory
+        {
+            get
+            {
+                var types = new List<Type>(_history.Count);
+                foreach (var entry in _history) types.Add(entry.ViewType);
+                return types;
+            }
+        }
 #endif
 
         public ReadOnlyReactiveProperty<bool> PointerCaptured => _pointerCaptured;
@@ -163,6 +174,7 @@ namespace Rubickanov.UI
             _views.Remove(type);
             _viewLayers.Remove(type);
             RemoveFromStacks(view);
+            _history.RemoveAll(entry => entry.ViewType == type);
             DestroyView(view);
         }
 
@@ -192,11 +204,15 @@ namespace Rubickanov.UI
             if (viewModel == null) throw new ArgumentNullException(nameof(viewModel));
 
             var view = Get<T>();
-            if (!view.ViewModelType.IsInstanceOfType(viewModel))
-                throw new ArgumentException(
-                    $"View {typeof(T).Name} expects a view model of type {view.ViewModelType.Name}, " +
-                    $"got {viewModel.GetType().Name}.", nameof(viewModel));
+            EnsureViewModelType(view, viewModel);
+            await ShowView(view, viewModel, _history.Clear);
+        }
 
+        /// <param name="onScreenShown">
+        /// For a screen, updates the history once the view is bound and the screen is active, before the animation.
+        /// </param>
+        private async UniTask ShowView(View view, ViewModelBase viewModel, Action onScreenShown)
+        {
             UniTask animation;
             try
             {
@@ -208,7 +224,7 @@ namespace Rubickanov.UI
                 throw;
             }
 
-            switch (_viewLayers[typeof(T)])
+            switch (_viewLayers[view.GetType()])
             {
                 case UILayer.Screen:
                     var previous = _activeScreen;
@@ -219,6 +235,7 @@ namespace Rubickanov.UI
                         previous.HideAsync().Forget();
                     }
                     AcquireInput(view);
+                    onScreenShown();
                     break;
                 case UILayer.Popup:
                     _popupStack.Remove(view);
@@ -240,6 +257,114 @@ namespace Rubickanov.UI
                 }
                 throw;
             }
+        }
+
+        private static void EnsureViewModelType(View view, ViewModelBase viewModel)
+        {
+            if (!view.ViewModelType.IsInstanceOfType(viewModel))
+                throw new ArgumentException(
+                    $"View {view.GetType().Name} expects a view model of type {view.ViewModelType.Name}, " +
+                    $"got {viewModel.GetType().Name}.", nameof(viewModel));
+        }
+
+        // ── Screen history ───────────────────────────────────────
+
+        public bool CanNavigateBack => _history.Count > 1;
+
+        public async UniTask Navigate<T>(Func<ViewModelBase> createViewModel) where T : View
+        {
+            if (createViewModel == null) throw new ArgumentNullException(nameof(createViewModel));
+
+            var type = typeof(T);
+            var view = Get<T>();
+            if (_viewLayers[type] != UILayer.Screen)
+                throw new InvalidOperationException(
+                    $"View {type.Name} is on the {_viewLayers[type]} layer: only screens are navigated to.");
+
+            var viewModel = CreateViewModel(view, createViewModel);
+            await ShowView(view, viewModel, () =>
+            {
+                var existing = _history.FindIndex(entry => entry.ViewType == type);
+                if (existing >= 0) _history.RemoveRange(existing, _history.Count - existing);
+                _history.Add(new HistoryEntry(type, createViewModel));
+            });
+        }
+
+        public async UniTask<bool> NavigateBack()
+        {
+            if (!CanNavigateBack) return false;
+
+            var target = _history[^2];
+            var view = _views[target.ViewType];
+            var viewModel = CreateViewModel(view, target.CreateViewModel);
+            await ShowView(view, viewModel, () => _history.RemoveAt(_history.Count - 1));
+            return true;
+        }
+
+        /// <summary>The default <c>OnBack</c> of a screen: goes back when the screen is the history's current one.</summary>
+        internal bool NavigateBackFrom(View screen)
+        {
+            if (!CanNavigateBack || _activeScreen != screen) return false;
+
+            NavigateBack().Forget();
+            return true;
+        }
+
+        private static ViewModelBase CreateViewModel(View view, Func<ViewModelBase> createViewModel)
+        {
+            var viewModel = createViewModel()
+                ?? throw new InvalidOperationException($"The view model factory of {view.GetType().Name} returned null.");
+            try
+            {
+                EnsureViewModelType(view, viewModel);
+            }
+            catch
+            {
+                viewModel.Dispose();
+                throw;
+            }
+            return viewModel;
+        }
+
+        private readonly struct HistoryEntry
+        {
+            public readonly Type ViewType;
+            public readonly Func<ViewModelBase> CreateViewModel;
+
+            public HistoryEntry(Type viewType, Func<ViewModelBase> createViewModel)
+            {
+                ViewType = viewType;
+                CreateViewModel = createViewModel;
+            }
+        }
+
+        // ── Views as popup content ───────────────────────────────
+
+        /// <summary>
+        /// Creates a new instance of the registered view <paramref name="viewType"/> from its UXML, apart from its
+        /// layer and stacks, bound to <paramref name="viewModel"/> and shown. The caller adds its root and destroys it.
+        /// </summary>
+        internal View CreateDetached(Type viewType, ViewModelBase viewModel)
+        {
+            if (viewModel == null) throw new ArgumentNullException(nameof(viewModel));
+            if (!_views.TryGetValue(viewType, out var registered))
+                throw new InvalidOperationException(
+                    $"View {viewType.Name} is not registered in UIService: register it to load its UXML before " +
+                    "showing it as popup content.");
+            EnsureViewModelType(registered, viewModel);
+
+            var view = (View)Activator.CreateInstance(viewType);
+            view.InitializeFrom(registered.Uxml, $"view {viewType.Name} is being unregistered");
+            try
+            {
+                view.ShowAsChild(viewModel);
+            }
+            catch
+            {
+                view.Destroy();
+                throw;
+            }
+            return view;
         }
 
         public void Hide<T>() where T : View
@@ -295,7 +420,7 @@ namespace Rubickanov.UI
             return UniTask.WhenAll(tasks);
         }
 
-        /// <summary>Clears the popup stack (top first) and the active screen, returning what they held.</summary>
+        /// <summary>Clears the popup stack (top first), the active screen and the history, returning what they held.</summary>
         private List<View> TakeScreenAndPopups()
         {
             var views = new List<View>(_popupStack.Count + 1);
@@ -304,13 +429,18 @@ namespace Rubickanov.UI
 
             _popupStack.Clear();
             _activeScreen = null;
+            _history.Clear();
             foreach (var view in views) ReleaseInput(view);
             return views;
         }
 
         private void RemoveFromStacks(View view)
         {
-            if (_activeScreen == view) _activeScreen = null;
+            if (_activeScreen == view)
+            {
+                _activeScreen = null;
+                _history.Clear();
+            }
             _popupStack.Remove(view);
             ReleaseInput(view);
         }
@@ -418,6 +548,7 @@ namespace Rubickanov.UI
             _loading.Clear();
             _popupStack.Clear();
             _activeScreen = null;
+            _history.Clear();
             foreach (var view in _views.Values) ReleaseInput(view);
 
             List<Exception>? errors = null;

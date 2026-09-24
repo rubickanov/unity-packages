@@ -13,7 +13,8 @@
     "overrideReferences": true,
     "precompiledReferences": [
         "nunit.framework.dll",
-        "R3.dll"
+        "R3.dll",
+        "ObservableCollections.dll"
     ],
     "autoReferenced": false,
     "defineConstraints": [
