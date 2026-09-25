@@ -293,12 +293,10 @@ namespace Rubickanov.DevConsole
             bool hasSuggestions = _suggestions.Count > 0;
             switch (capturedKey)
             {
+                // Enter runs the line as typed; completing a suggestion is Tab's job
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
-                    if (hasSuggestions && _suggestionIndex >= 0)
-                        ApplySelectedSuggestion();
-                    else
-                        SubmitInput();
+                    SubmitInput();
                     break;
 
                 // Tab is handled via the Input System poll in Update() → _pendingComplete; here we

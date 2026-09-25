@@ -63,6 +63,9 @@ A frontend calls `CommandRegistry.Instance.Initialize()` on awake, which scans a
 2. Attach the **DevConsoleUIToolkit** component to the same GameObject.
 3. Press **`~`** (BackQuote) to toggle the console.
 
+In the input line, **Enter** runs the line as typed, **Tab** completes the highlighted suggestion, **Up** / **Down**
+move through the suggestions (or the history when there are none), and **Esc** hides the suggestions, then closes.
+
 Commands are auto-discovered at startup — no manual registration needed.
 
 ## Usage
