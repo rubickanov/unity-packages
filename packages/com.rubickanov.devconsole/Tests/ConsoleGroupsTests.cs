@@ -183,10 +183,7 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Usage_SetSubcommand_ShowsItsArguments()
         {
-            var bind = _registry.Commands["bind"];
-            var set = System.Array.Find(bind.Subcommands!, s => s.Name == "set");
-
-            Assert.AreEqual("bind set <key> <command...>", bind.GetSubcommandUsageString(set));
+            Assert.AreEqual("bind set <key> <command...>", _registry.Commands["bind set"].GetUsageString());
         }
     }
 }

@@ -36,10 +36,10 @@ namespace Rubickanov.DevConsole.Netcode
         public override void OnNetworkDespawn()
         {
             CommandRegistry.Instance.PreExecuteFilter = null;
-            // sv_cheats was registered in OnNetworkSpawn and closes over this bridge's
+            // sv cheats was registered in OnNetworkSpawn and closes over this bridge's
             // NetworkVariable; leaving it behind on despawn keeps a stale command alive and
             // makes a later respawn's re-Register collide. Mirror the spawn-time registration.
-            CommandRegistry.Instance.Unregister("sv_cheats");
+            CommandRegistry.Instance.Unregister("sv cheats");
         }
 
         void ScanCommandAttributes()
@@ -60,19 +60,19 @@ namespace Rubickanov.DevConsole.Netcode
 
         void RegisterBuiltInCommands()
         {
-            CommandRegistry.Instance.Register("sv_cheats", args =>
+            CommandRegistry.Instance.Register("sv cheats", args =>
             {
                 if (args.Length == 0)
-                    return $"sv_cheats = {(CheatsEnabled.Value ? "1" : "0")}";
+                    return $"sv cheats = {(CheatsEnabled.Value ? "1" : "0")}";
 
                 if (!NetworkManager.IsServer)
                     return null; // filter will intercept and send to server
 
                 CheatsEnabled.Value = args[0] == "1";
-                return $"sv_cheats set to {(CheatsEnabled.Value ? "1" : "0")}";
+                return $"sv cheats set to {(CheatsEnabled.Value ? "1" : "0")}";
             }, "Enable/disable cheat commands", "Server");
 
-            _domains["sv_cheats"] = CommandDomain.Server;
+            _domains["sv cheats"] = CommandDomain.Server;
         }
 
         static readonly char[] QuotedChars = { ' ', '\t', ';' };
@@ -82,7 +82,7 @@ namespace Rubickanov.DevConsole.Netcode
             // Check cheat protection
             if (_cheatProtected.Contains(cmd.Name) && !CheatsEnabled.Value)
                 return CommandRegistry.ExecutionResult.Error(
-                    $"'{cmd.Name}' requires sv_cheats 1.");
+                    $"'{cmd.Name}' requires sv cheats 1.");
 
             // Resolve domain (default = Shared)
             if (!_domains.TryGetValue(cmd.Name, out var domain))

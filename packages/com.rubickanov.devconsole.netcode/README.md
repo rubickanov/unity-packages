@@ -1,6 +1,6 @@
 # DevConsole Netcode
 
-Netcode extension for [DevConsole](../com.rubickanov.devconsole/). Adds CS:GO-style command domains (Client/Server/Shared) and `sv_cheats`-gated cheat protection for Netcode for GameObjects.
+Netcode extension for [DevConsole](../com.rubickanov.devconsole/). Adds CS:GO-style command domains (Client/Server/Shared) and `sv cheats`-gated cheat protection for Netcode for GameObjects.
 
 ## Dependencies
 
@@ -9,7 +9,7 @@ Netcode extension for [DevConsole](../com.rubickanov.devconsole/). Adds CS:GO-st
 
 ## Quick Start
 
-Add **NetworkCommandBridge** to a `NetworkObject` that lives for the whole session (e.g. your network manager). On `OnNetworkSpawn` it scans every registered command for domain/cheat attributes, registers the built-in `sv_cheats` command, and installs a pre-execute filter on the shared `CommandRegistry`. Without the bridge spawned, the console runs in plain local mode.
+Add **NetworkCommandBridge** to a `NetworkObject` that lives for the whole session (e.g. your network manager). On `OnNetworkSpawn` it scans every registered command for domain/cheat attributes, registers the built-in `sv cheats` command, and installs a pre-execute filter on the shared `CommandRegistry`. Without the bridge spawned, the console runs in plain local mode.
 
 ```csharp
 // No code needed beyond attaching the component — it wires itself in OnNetworkSpawn.
@@ -19,7 +19,7 @@ public class NetworkBootstrap : NetworkBehaviour
 }
 ```
 
-On `OnNetworkDespawn` the filter and `sv_cheats` are removed, reverting the console to local-only.
+On `OnNetworkDespawn` the filter and `sv cheats` are removed, reverting the console to local-only.
 
 ## Usage
 
@@ -56,14 +56,14 @@ Mark commands with `[CheatProtected]` so they only run while cheats are enabled.
 [ConsoleCommand("god", "Toggle invulnerability", "Cheats")]
 [CommandDomain(CommandDomain.Server)]
 [CheatProtected]
-public static void God() { /* requires sv_cheats 1 */ }
+public static void God() { /* requires sv cheats 1 */ }
 ```
 
-Cheats are a server-authoritative flag exposed as `NetworkCommandBridge.CheatsEnabled` (a `NetworkVariable<bool>`). Toggle it with the built-in `sv_cheats` command, which is itself `Server`-domain — a client typing it gets routed to the server:
+Cheats are a server-authoritative flag exposed as `NetworkCommandBridge.CheatsEnabled` (a `NetworkVariable<bool>`). Toggle it with the built-in `sv cheats` command, which is itself `Server`-domain — a client typing it gets routed to the server:
 
 ```text
-sv_cheats 1    # server sets CheatsEnabled = true
-sv_cheats      # prints the current value
+sv cheats 1    # server sets CheatsEnabled = true
+sv cheats      # prints the current value
 ```
 
 The filter blocks any `[CheatProtected]` command with an error while `CheatsEnabled.Value` is false.
@@ -84,4 +84,4 @@ public static void WhoAmI()
 
 ### Built-in Commands
 
-The package ships a set of network commands, registered automatically with the base console: `status`, `players`, `ping`, `net_stats`, `kick`, `disconnect`, plus `sv_cheats` from the bridge.
+The package ships a set of network commands, registered automatically with the base console: `status`, `players`, `ping`, `net stats`, `kick`, `disconnect`, plus `sv cheats` from the bridge.

@@ -78,6 +78,7 @@ namespace Rubickanov.DevConsole
 
         // Autocomplete state
         private readonly List<string> _suggestions = new();
+        private readonly List<string?> _suggestionDescriptions = new();
         private int _suggestionIndex = -1;
         private bool _applySuggestionRequested;
         private bool _pendingComplete;
@@ -723,7 +724,6 @@ namespace Rubickanov.DevConsole
             if (_suggestions.Count == 0) return;
 
             var e = Event.current;
-            var commands = CommandRegistry.Instance.Commands;
 
             GUI.DrawTexture(new Rect(0, y, Screen.width, totalHeight), _acBgTex!);
 
@@ -740,8 +740,9 @@ namespace Rubickanov.DevConsole
 
                 float nameWidth = _acNameStyle.CalcSize(new GUIContent(name)).x;
                 float descX = 10 + Mathf.Max(160f, nameWidth + 10f);
-                if (commands.TryGetValue(name, out var cmd) && !string.IsNullOrEmpty(cmd.Description))
-                    GUI.Label(new Rect(descX, rowY, Screen.width - descX - 10, rowHeight), cmd.Description,
+                var description = _suggestionDescriptions[i];
+                if (description != null)
+                    GUI.Label(new Rect(descX, rowY, Screen.width - descX - 10, rowHeight), description,
                         _acDescStyle);
 
                 if (e.type == EventType.MouseDown && rowRect.Contains(e.mousePosition))
@@ -770,6 +771,9 @@ namespace Rubickanov.DevConsole
             }
 
             CommandRegistry.Instance.GetSuggestions(input, _suggestions, MaxSuggestions);
+            _suggestionDescriptions.Clear();
+            foreach (var suggestion in _suggestions)
+                _suggestionDescriptions.Add(CommandRegistry.Instance.DescribeSuggestion(input, suggestion));
             if (_suggestions.Count == 0)
                 HideAutocomplete();
         }

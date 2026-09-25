@@ -6,7 +6,7 @@ namespace Rubickanov.DevConsole.Commands
 {
     internal static class LogCommands
     {
-        [ConsoleCommand("log_unity", "Show, or switch, copying of Unity Debug.Log messages into the console (on by default)", "Logging")]
+        [ConsoleCommand("log unity", "Show, or switch, copying of Unity Debug.Log messages into the console (on by default)", "Logging")]
         public static void LogUnity(bool? enabled = null)
         {
             if (enabled.HasValue && enabled.Value != UnityLogForwarder.Enabled)
@@ -20,7 +20,7 @@ namespace Rubickanov.DevConsole.Commands
             }
         }
 
-        [ConsoleCommand("log_save", "Save console log to a file", "Logging")]
+        [ConsoleCommand("log save", "Save console log to a file", "Logging")]
         public static void LogSave(string path = "")
         {
             if (string.IsNullOrEmpty(path))

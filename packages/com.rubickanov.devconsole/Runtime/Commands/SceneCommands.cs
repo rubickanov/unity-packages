@@ -23,7 +23,7 @@ namespace Rubickanov.DevConsole.Commands
 #endif
         }
 
-        [ConsoleCommand("scene_list", "List all loaded scenes", "Scene")]
+        [ConsoleCommand("scene list", "List all loaded scenes", "Scene")]
         public static void SceneList()
         {
             for (int i = 0; i < SceneManager.sceneCount; i++)
@@ -34,7 +34,7 @@ namespace Rubickanov.DevConsole.Commands
             }
         }
 
-        [ConsoleCommand("scene_load", "Load a scene from the build by name or build index, replacing the open ones or added to them", "Scene")]
+        [ConsoleCommand("scene load", "Load a scene from the build by name or build index, replacing the open ones or added to them", "Scene")]
         [AutoComplete(0, typeof(BuildSceneProvider))]
         public static void SceneLoad(string scene, bool additive = false)
         {
@@ -47,7 +47,7 @@ namespace Rubickanov.DevConsole.Commands
             ConsoleLog.Log($"Loading {BuildSceneProvider.NameAt(index)}{(additive ? " additively" : "")}.");
         }
 
-        [ConsoleCommand("scene_reload", "Load the active scene again", "Scene")]
+        [ConsoleCommand("scene reload", "Load the active scene again", "Scene")]
         public static void SceneReload()
         {
             var scene = SceneManager.GetActiveScene();

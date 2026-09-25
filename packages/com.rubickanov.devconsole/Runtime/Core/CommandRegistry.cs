@@ -8,7 +8,11 @@ using UnityEngine;
 
 namespace Rubickanov.DevConsole
 {
-    /// <summary>Central registry for all console commands. Discovers attributed methods and allows runtime registration.</summary>
+    /// <summary>
+    /// Central registry for all console commands. Discovers attributed methods and allows runtime registration.
+    /// A command name may be several words, <c>scene load</c>: the words before the last make a group, and every
+    /// command that starts with them is one of its subcommands, whichever assembly registered it.
+    /// </summary>
     public class CommandRegistry
     {
         private static CommandRegistry? _instance;
@@ -21,16 +25,19 @@ namespace Rubickanov.DevConsole
         public delegate bool ArgumentParserDelegate(string input, out object? result);
 
         private readonly Dictionary<string, RegisteredCommand> _commands = new();
+        private readonly Dictionary<string, string> _groupDescriptions = new();
         private readonly Dictionary<Type, IAutoCompleteProvider> _providerCache = new();
         private readonly Dictionary<Type, ArgumentParserDelegate> _customParsers = new();
         private readonly Dictionary<Type, IAutoCompleteProvider> _defaultProviders = new();
         private bool _initialized;
 
         private string[] _sortedKeys = Array.Empty<string>();
+        private string[] _firstWords = Array.Empty<string>();
+        private readonly HashSet<string> _groupPaths = new();
         private bool _sortedKeysDirty;
         private readonly List<string> _tokenBuffer = new();
 
-        /// <summary>All registered commands keyed by lowercase name.</summary>
+        /// <summary>All registered commands keyed by lowercase name, words separated by one space.</summary>
         public IReadOnlyDictionary<string, RegisteredCommand> Commands => _commands;
 
         /// <summary>Optional filter invoked before command execution. Return non-null to override.</summary>
@@ -88,7 +95,7 @@ namespace Rubickanov.DevConsole
             if (handler == null)
                 throw new ArgumentNullException(nameof(handler));
 
-            var key = name.ToLowerInvariant();
+            var key = NormalizeName(name);
             _commands[key] = new RegisteredCommand
             {
                 Name = key,
@@ -114,7 +121,10 @@ namespace Rubickanov.DevConsole
             }, description, category, argProviders);
         }
 
-        /// <summary>Registers a command group with subcommands. Each subcommand gets its own handler and autocomplete providers.</summary>
+        /// <summary>
+        /// Registers subcommands under <paramref name="name"/>: <c>inventory add</c>, <c>inventory clear</c>. The group
+        /// adds to one of the same name, so commands from attributes and from other callers can share it.
+        /// </summary>
         public void RegisterGroup(string name, string description, string category,
             Action<CommandGroupBuilder> configure)
         {
@@ -125,19 +135,23 @@ namespace Rubickanov.DevConsole
             var builder = new CommandGroupBuilder(this);
             configure(builder);
 
-            var subcommands = builder.Subcommands.ToArray();
-            var cmdName = name.ToLowerInvariant();
-
-            _commands[cmdName] = new RegisteredCommand
+            var path = NormalizeName(name);
+            _groupDescriptions[path] = description;
+            foreach (var sub in builder.Subcommands)
             {
-                Name = cmdName,
-                Description = description,
-                Category = category,
-                Method = null,
-                Parameters = Array.Empty<ParameterInfo>(),
-                ManualHandler = args => ExecuteGroup(cmdName, subcommands, args),
-                Subcommands = subcommands
-            };
+                var key = path + " " + sub.Name;
+                _commands[key] = new RegisteredCommand
+                {
+                    Name = key,
+                    Description = sub.Description,
+                    Category = category,
+                    ArgProviders = sub.ArgProviders,
+                    ManualHandler = sub.Handler,
+                    RestFrom = sub.RestFrom,
+                    Usage = sub.Usage
+                };
+            }
+
             _sortedKeysDirty = true;
         }
 
@@ -191,66 +205,117 @@ namespace Rubickanov.DevConsole
             return this;
         }
 
-        /// <summary>Removes a command by name. Returns true if it existed.</summary>
+        /// <summary>
+        /// Removes a command by name, or, when no command has that name, the group with every subcommand in it.
+        /// Returns true if something was removed.
+        /// </summary>
         public bool Unregister(string name)
         {
-            var key = name.ToLowerInvariant();
+            var key = NormalizeName(name);
             if (_commands.Remove(key))
             {
                 _sortedKeysDirty = true;
                 return true;
             }
-            return false;
+
+            var prefix = key + " ";
+            var removed = _commands.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+            foreach (var k in removed) _commands.Remove(k);
+            var removedGroups = _groupDescriptions.Keys
+                .Where(k => k == key || k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+            foreach (var k in removedGroups) _groupDescriptions.Remove(k);
+
+            if (removed.Count == 0) return removedGroups.Count > 0;
+            _sortedKeysDirty = true;
+            return true;
         }
 
-        private static string? ExecuteGroup(string groupName, SubcommandDefinition[] subcommands, string[] args)
+        /// <summary>Lowercase words separated by one space: the key a command is stored and looked up by.</summary>
+        internal static string NormalizeName(string name)
         {
-            if (args.Length == 0)
-            {
-                var sb = new StringBuilder();
-                sb.Append($"Usage: {groupName} <subcommand>\nSubcommands:");
-                for (int i = 0; i < subcommands.Length; i++)
-                {
-                    var desc = string.IsNullOrEmpty(subcommands[i].Description)
-                        ? ""
-                        : $" - {subcommands[i].Description}";
-                    sb.Append($"\n  {subcommands[i].Name}{desc}");
-                }
-                return sb.ToString();
-            }
-
-            var subName = args[0].ToLowerInvariant();
-            for (int i = 0; i < subcommands.Length; i++)
-            {
-                if (subcommands[i].Name == subName)
-                    return subcommands[i].Handler(args[1..]);
-            }
-
-            throw new CommandException($"Unknown subcommand '{args[0]}'. Type '{groupName}' for available subcommands.");
+            var words = name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length == 0)
+                throw new ArgumentException("Command name must be non-empty.", nameof(name));
+            return string.Join(" ", words).ToLowerInvariant();
         }
 
-        // A subcommand added with AddWithRest gets the rest of the line as its last argument, as typed
-        private static string[] MergeSubcommandRest(SubcommandDefinition[] subcommands, CommandLine line, string[] args)
+        /// <summary>Whether a line starting with <paramref name="word"/> names a command or a group, not an alias.</summary>
+        internal bool IsCommandOrGroup(string word)
         {
-            if (args.Length == 0) return args;
+            var key = word.ToLowerInvariant();
+            GetSortedKeys();
+            return _commands.ContainsKey(key) || _groupPaths.Contains(key);
+        }
 
-            var subName = args[0].ToLowerInvariant();
-            for (int i = 0; i < subcommands.Length; i++)
+        private static string Path(List<string> tokens, int count)
+        {
+            if (count == 1) return tokens[0].ToLowerInvariant();
+            return string.Join(" ", tokens.GetRange(0, count)).ToLowerInvariant();
+        }
+
+        // The command with the most words that the line starts with: `scene load x` is `scene load`, not `scene`
+        private RegisteredCommand? Resolve(List<string> tokens, int maxWords, out int words)
+        {
+            for (words = maxWords; words > 0; words--)
             {
-                var sub = subcommands[i];
-                if (sub.Name != subName) continue;
-
-                // args[0] is the subcommand, so its argument RestFrom is args[1 + RestFrom], token 2 + RestFrom
-                var restArg = 1 + sub.RestFrom;
-                if (sub.RestFrom < 0 || args.Length <= restArg + 1) return args;
-
-                var merged = new string[restArg + 1];
-                Array.Copy(args, merged, restArg);
-                merged[restArg] = line.Remainder(restArg + 1);
-                return merged;
+                if (_commands.TryGetValue(Path(tokens, words), out var cmd))
+                    return cmd;
             }
 
-            return args;
+            return null;
+        }
+
+        private string GroupUsage(string path)
+        {
+            var sb = new StringBuilder();
+            sb.Append($"Usage: {path} <subcommand>\nSubcommands:");
+            foreach (var child in Children(path))
+            {
+                var desc = Describe(path + " " + child);
+                sb.Append($"\n  {child}{(string.IsNullOrEmpty(desc) ? "" : $" - {desc}")}");
+            }
+
+            return sb.ToString();
+        }
+
+        // The next words after `path`, each once, in order: `scene` → list, load, reload
+        private IEnumerable<string> Children(string path)
+        {
+            var prefix = path + " ";
+            string? last = null;
+            foreach (var key in GetSortedKeys())
+            {
+                if (!key.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                var end = key.IndexOf(' ', prefix.Length);
+                var child = end < 0 ? key.Substring(prefix.Length) : key.Substring(prefix.Length, end - prefix.Length);
+                if (child == last) continue;
+                last = child;
+                yield return child;
+            }
+        }
+
+        private string? Describe(string path)
+        {
+            if (_commands.TryGetValue(path, out var cmd)) return cmd.Description;
+            if (_groupDescriptions.TryGetValue(path, out var group)) return group;
+            return null;
+        }
+
+        /// <summary>
+        /// The description of a suggestion <see cref="GetSuggestions(string, List{string}, int)"/> gave for
+        /// <paramref name="input"/>, when it completes a command or a group name, else null.
+        /// </summary>
+        public string? DescribeSuggestion(string input, string suggestion)
+        {
+            var statement = input.Substring(CommandLine.LastStatementStart(input)).TrimStart();
+            _tokenBuffer.Clear();
+            Tokenize(statement, _tokenBuffer);
+            var typed = statement.Length > 0 && statement[^1] != ' ' ? _tokenBuffer.Count - 1 : _tokenBuffer.Count;
+            if (typed < 0) typed = 0;
+
+            var path = typed == 0 ? suggestion.ToLowerInvariant() : Path(_tokenBuffer, typed) + " " + suggestion.ToLowerInvariant();
+            var desc = Describe(path);
+            return string.IsNullOrEmpty(desc) ? null : desc;
         }
 
         private string[] GetSortedKeys()
@@ -260,6 +325,18 @@ namespace Rubickanov.DevConsole
                 _sortedKeys = new string[_commands.Count];
                 _commands.Keys.CopyTo(_sortedKeys, 0);
                 Array.Sort(_sortedKeys, StringComparer.Ordinal);
+
+                _groupPaths.Clear();
+                var firstWords = new SortedSet<string>(StringComparer.Ordinal);
+                foreach (var key in _sortedKeys)
+                {
+                    var space = key.IndexOf(' ');
+                    firstWords.Add(space < 0 ? key : key.Substring(0, space));
+                    for (; space >= 0; space = key.IndexOf(' ', space + 1))
+                        _groupPaths.Add(key.Substring(0, space));
+                }
+
+                _firstWords = firstWords.ToArray();
                 _sortedKeysDirty = false;
             }
             return _sortedKeys;
@@ -460,10 +537,9 @@ namespace Rubickanov.DevConsole
             if (line.Count == 0) return ExecutionResult.Error("Empty command.");
 
             var cmdName = line.Tokens[0].ToLowerInvariant();
-            var args = line.Tokens.GetRange(1, line.Count - 1).ToArray();
 
             // Alias expansion
-            if (!_commands.ContainsKey(cmdName) && AliasRegistry.Instance.TryResolve(cmdName, out var aliasCommand))
+            if (!IsCommandOrGroup(cmdName) && AliasRegistry.Instance.TryResolve(cmdName, out var aliasCommand))
             {
                 if (aliasDepth >= 8)
                     return ExecutionResult.Error("Alias recursion limit reached (max 8).");
@@ -471,11 +547,30 @@ namespace Rubickanov.DevConsole
                 return Execute(AliasRegistry.Expand(aliasCommand, line), aliasDepth + 1);
             }
 
-            if (!_commands.TryGetValue(cmdName, out var cmd))
-                return ExecutionResult.Error($"Unknown command: '{cmdName}'. Type 'help' for available commands.");
+            var cmd = Resolve(line.Tokens, line.Count, out var nameWords);
+            if (cmd == null)
+            {
+                var groupWords = line.Count;
+                while (groupWords > 0 && !_groupPaths.Contains(Path(line.Tokens, groupWords))) groupWords--;
+                if (groupWords == 0)
+                    return ExecutionResult.Error($"Unknown command: '{cmdName}'. Type 'help' for available commands.");
 
-            if (cmd.Subcommands != null)
-                args = MergeSubcommandRest(cmd.Subcommands, line, args);
+                var group = Path(line.Tokens, groupWords);
+                if (groupWords == line.Count) return ExecutionResult.Ok(GroupUsage(group));
+                return ExecutionResult.Error(
+                    $"Unknown subcommand '{line.Tokens[groupWords]}'. Type '{group}' for available subcommands.");
+            }
+
+            var args = line.Tokens.GetRange(nameWords, line.Count - nameWords).ToArray();
+
+            // A command registered with a rest argument gets the rest of the line there, as typed
+            if (cmd.RestFrom >= 0 && args.Length > cmd.RestFrom + 1)
+            {
+                var merged = new string[cmd.RestFrom + 1];
+                Array.Copy(args, merged, cmd.RestFrom);
+                merged[cmd.RestFrom] = line.Remainder(nameWords + cmd.RestFrom);
+                args = merged;
+            }
 
             if (PreExecuteFilter != null)
             {
@@ -500,10 +595,10 @@ namespace Rubickanov.DevConsole
                 }
             }
 
-            return ExecuteReflection(cmd, line, args);
+            return ExecuteReflection(cmd, line, nameWords, args);
         }
 
-        private ExecutionResult ExecuteReflection(RegisteredCommand cmd, CommandLine line, string[] args)
+        private ExecutionResult ExecuteReflection(RegisteredCommand cmd, CommandLine line, int nameWords, string[] args)
         {
             var parameters = cmd.Parameters;
             var parsedArgs = new object?[parameters.Length];
@@ -516,7 +611,7 @@ namespace Rubickanov.DevConsole
             for (int i = 0; i < parameters.Length; i++)
             {
                 if (cmd.HasRemainder && i == parameters.Length - 1 && i < args.Length)
-                    parsedArgs[i] = line.Remainder(i + 1);
+                    parsedArgs[i] = line.Remainder(nameWords + i);
                 else if (i < args.Length)
                 {
                     if (!TryParseArg(args[i], parameters[i].ParameterType, out parsedArgs[i]))
@@ -634,7 +729,7 @@ namespace Rubickanov.DevConsole
 
         private void GetSuggestions(string input, List<string> results, int maxResults, int aliasDepth)
         {
-            var sortedKeys = GetSortedKeys();
+            GetSortedKeys();
 
             // Only the command being typed counts: `timescale 1; qu` completes `qu`
             var statementStart = CommandLine.LastStatementStart(input);
@@ -643,9 +738,9 @@ namespace Rubickanov.DevConsole
 
             if (string.IsNullOrEmpty(input))
             {
-                int count = Math.Min(sortedKeys.Length, maxResults);
+                int count = Math.Min(_firstWords.Length, maxResults);
                 for (int i = 0; i < count; i++)
-                    results.Add(sortedKeys[i]);
+                    results.Add(_firstWords[i]);
                 return;
             }
 
@@ -657,15 +752,19 @@ namespace Rubickanov.DevConsole
             if (_tokenBuffer.Count == 0) return;
             var endsWithSpace = input[input.Length - 1] == ' ';
 
-            if (_tokenBuffer.Count == 1 && !endsWithSpace)
+            // The word being typed, and the whole words before it
+            var typed = endsWithSpace ? _tokenBuffer.Count : _tokenBuffer.Count - 1;
+            var partial = endsWithSpace ? "" : _tokenBuffer[_tokenBuffer.Count - 1];
+            var countBefore = results.Count;
+
+            if (typed == 0)
             {
-                var partial = _tokenBuffer[0].ToLowerInvariant();
-                for (int i = 0; i < sortedKeys.Length; i++)
+                for (int i = 0; i < _firstWords.Length; i++)
                 {
-                    if (sortedKeys[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+                    if (_firstWords[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase))
                     {
-                        results.Add(sortedKeys[i]);
-                        if (results.Count >= maxResults) return;
+                        results.Add(_firstWords[i]);
+                        if (results.Count - countBefore >= maxResults) return;
                     }
                 }
 
@@ -673,10 +772,10 @@ namespace Rubickanov.DevConsole
                 for (int i = 0; i < aliasNames.Count; i++)
                 {
                     if (aliasNames[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase) &&
-                        !_commands.ContainsKey(aliasNames[i]))
+                        !IsCommandOrGroup(aliasNames[i]))
                     {
                         results.Add(aliasNames[i]);
-                        if (results.Count >= maxResults) return;
+                        if (results.Count - countBefore >= maxResults) return;
                     }
                 }
 
@@ -684,7 +783,7 @@ namespace Rubickanov.DevConsole
             }
 
             var cmdName = _tokenBuffer[0].ToLowerInvariant();
-            if (!_commands.TryGetValue(cmdName, out var cmd))
+            if (!IsCommandOrGroup(cmdName))
             {
                 // An alias that only prefixes one command completes as that command would: `tp ` after
                 // `alias tp teleport` suggests teleport's arguments. One with $ or ; has no such single place.
@@ -698,67 +797,33 @@ namespace Rubickanov.DevConsole
                 return;
             }
 
-            var argIndex = endsWithSpace ? _tokenBuffer.Count - 1 : _tokenBuffer.Count - 2;
-            var partial2 = endsWithSpace ? "" : _tokenBuffer[_tokenBuffer.Count - 1];
-
-            // Subcommand-aware autocomplete
-            if (cmd.Subcommands != null)
+            // After a group, the words that can follow it: `scene ` suggests list, load, reload
+            var path = Path(_tokenBuffer, typed);
+            if (_groupPaths.Contains(path))
             {
-                if (argIndex == 0)
+                foreach (var child in Children(path))
                 {
-                    // Suggest subcommand names
-                    for (int i = 0; i < cmd.Subcommands.Length; i++)
-                    {
-                        if (string.IsNullOrEmpty(partial2) ||
-                            cmd.Subcommands[i].Name.StartsWith(partial2, StringComparison.OrdinalIgnoreCase))
-                        {
-                            results.Add(cmd.Subcommands[i].Name);
-                            if (results.Count >= maxResults) return;
-                        }
-                    }
-                    return;
+                    if (!child.StartsWith(partial, StringComparison.OrdinalIgnoreCase)) continue;
+                    results.Add(child);
+                    if (results.Count - countBefore >= maxResults) return;
                 }
-
-                // Look up the subcommand's providers
-                var subToken = _tokenBuffer[1].ToLowerInvariant();
-                SubcommandDefinition? matchedSub = null;
-                for (int i = 0; i < cmd.Subcommands.Length; i++)
-                {
-                    if (cmd.Subcommands[i].Name == subToken)
-                    {
-                        matchedSub = cmd.Subcommands[i];
-                        break;
-                    }
-                }
-
-                if (matchedSub?.ArgProviders == null) return;
-
-                var subArgIndex = argIndex - 1;
-                if (TryNestedSuggestions(matchedSub.ArgProviders, subArgIndex, 2, input, results, maxResults, aliasDepth))
-                    return;
-                if (subArgIndex < 0 || subArgIndex >= matchedSub.ArgProviders.Length) return;
-
-                var subProvider = matchedSub.ArgProviders[subArgIndex];
-                if (subProvider == null) return;
-
-                int subCountBefore = results.Count;
-                subProvider.GetSuggestions(partial2, results);
-                if (results.Count - subCountBefore > maxResults)
-                    results.RemoveRange(subCountBefore + maxResults, results.Count - subCountBefore - maxResults);
-                return;
             }
 
-            if (TryNestedSuggestions(cmd.ArgProviders, argIndex, 1, input, results, maxResults, aliasDepth))
+            // And the arguments of the command typed so far
+            var cmd = Resolve(_tokenBuffer, typed, out var nameWords);
+            if (cmd == null) return;
+
+            var argIndex = typed - nameWords;
+            if (TryNestedSuggestions(cmd.ArgProviders, argIndex, nameWords, input, results, maxResults, aliasDepth))
                 return;
 
-            if (cmd.ArgProviders == null || argIndex >= cmd.ArgProviders.Length || argIndex < 0)
+            if (cmd.ArgProviders == null || argIndex >= cmd.ArgProviders.Length)
                 return;
 
             var provider = cmd.ArgProviders[argIndex];
             if (provider == null) return;
 
-            int countBefore = results.Count;
-            provider.GetSuggestions(partial2, results);
+            provider.GetSuggestions(partial, results);
 
             // Trim to maxResults
             if (results.Count - countBefore > maxResults)
@@ -823,22 +888,36 @@ namespace Rubickanov.DevConsole
             }
 
             var topic = string.Join(" ", args);
-            var key = topic.ToLowerInvariant();
+            var key = NormalizeName(topic);
+            GetSortedKeys();
 
-            if (_commands.TryGetValue(key, out var cmd))
+            var isCommand = _commands.TryGetValue(key, out var cmd);
+            var isGroup = _groupPaths.Contains(key);
+            if (isCommand || isGroup)
             {
-                ConsoleLog.Log($"<b>{cmd.GetUsageString()}</b>");
-                if (!string.IsNullOrEmpty(cmd.Description)) ConsoleLog.Log($"  {cmd.Description}");
-                ConsoleLog.Log($"  Category: {cmd.Category}");
+                if (cmd != null)
+                {
+                    ConsoleLog.Log($"<b>{cmd.GetUsageString()}</b>");
+                    if (!string.IsNullOrEmpty(cmd.Description)) ConsoleLog.Log($"  {cmd.Description}");
+                    ConsoleLog.Log($"  Category: {cmd.Category}");
+                }
+                else
+                {
+                    ConsoleLog.Log($"<b>{key} <subcommand></b>");
+                    if (_groupDescriptions.TryGetValue(key, out var group) && !string.IsNullOrEmpty(group))
+                        ConsoleLog.Log($"  {group}");
+                }
 
-                if (cmd.Subcommands != null)
+                if (isGroup)
                 {
                     ConsoleLog.Log("\n  Subcommands:");
-                    for (int i = 0; i < cmd.Subcommands.Length; i++)
+                    var prefix = key + " ";
+                    foreach (var name in GetSortedKeys())
                     {
-                        var sub = cmd.Subcommands[i];
+                        if (!name.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                        var sub = _commands[name];
                         var desc = string.IsNullOrEmpty(sub.Description) ? "" : $" - {sub.Description}";
-                        ConsoleLog.Log($"    {cmd.GetSubcommandUsageString(sub)}{desc}");
+                        ConsoleLog.Log($"    {sub.GetUsageString()}{desc}");
                     }
                 }
 
@@ -876,22 +955,9 @@ namespace Rubickanov.DevConsole
             return null;
         }
 
-        private static bool Mentions(RegisteredCommand cmd, string text)
-        {
-            if (cmd.Name.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                cmd.Description.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0)
-                return true;
-
-            if (cmd.Subcommands == null) return false;
-            foreach (var sub in cmd.Subcommands)
-            {
-                if (sub.Name.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    sub.Description.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0)
-                    return true;
-            }
-
-            return false;
-        }
+        private static bool Mentions(RegisteredCommand cmd, string text) =>
+            cmd.Name.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0 ||
+            cmd.Description.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0;
 
         private static void LogCommands(IEnumerable<RegisteredCommand> commands)
         {
@@ -917,7 +983,7 @@ namespace Rubickanov.DevConsole
                 ConsoleLog.Log($"  {names[i]} → {aliases.Aliases[names[i]]}");
         }
 
-        /// <summary>Suggests command names, alias names and categories after <c>help</c>.</summary>
+        /// <summary>Suggests command and group names, alias names and categories after <c>help</c>.</summary>
         private sealed class HelpTopicProvider : IAutoCompleteProvider
         {
             private readonly CommandRegistry _registry;
@@ -929,9 +995,10 @@ namespace Rubickanov.DevConsole
 
             public void GetSuggestions(string partial, List<string> results)
             {
-                var keys = _registry.GetSortedKeys();
-                for (int i = 0; i < keys.Length; i++)
-                    if (keys[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase)) results.Add(keys[i]);
+                _registry.GetSortedKeys();
+                var words = _registry._firstWords;
+                for (int i = 0; i < words.Length; i++)
+                    if (words[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase)) results.Add(words[i]);
 
                 var aliases = AliasRegistry.Instance.SortedNames;
                 for (int i = 0; i < aliases.Count; i++)

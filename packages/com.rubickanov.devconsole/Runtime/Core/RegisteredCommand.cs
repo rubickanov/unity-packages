@@ -24,8 +24,13 @@ namespace Rubickanov.DevConsole
         /// <summary>Raw handler for manually registered commands. Returns optional message (null = no message).</summary>
         public Func<string[], string?>? ManualHandler;
 
-        /// <summary>Subcommand definitions for group commands. Null for regular commands.</summary>
-        public SubcommandDefinition[]? Subcommands;
+        /// <summary>
+        /// Index of the argument of a <see cref="ManualHandler"/> command that takes the rest of the line as typed, or -1.
+        /// </summary>
+        public int RestFrom = -1;
+
+        /// <summary>Usage shown after the name, e.g. <c>&lt;key&gt; &lt;command...&gt;</c>. Built from the parameters when empty.</summary>
+        public string Usage = "";
 
         [ThreadStatic] private static StringBuilder? _usageSb;
 
@@ -36,15 +41,14 @@ namespace Rubickanov.DevConsole
             _usageSb.Clear();
             _usageSb.Append(Name);
 
-            if (Subcommands != null)
+            if (Usage.Length > 0)
+                return _usageSb.Append(' ').Append(Usage).ToString();
+
+            // A command registered with a handler has no parameters to name, only its providers' hints
+            if (Method == null && ArgProviders != null)
             {
-                _usageSb.Append(" <");
-                for (int i = 0; i < Subcommands.Length; i++)
-                {
-                    if (i > 0) _usageSb.Append('|');
-                    _usageSb.Append(Subcommands[i].Name);
-                }
-                _usageSb.Append('>');
+                for (int i = 0; i < ArgProviders.Length; i++)
+                    _usageSb.Append(' ').Append(ArgProviders[i]?.Hint ?? $"<arg{i}>");
                 return _usageSb.ToString();
             }
 
@@ -62,27 +66,6 @@ namespace Rubickanov.DevConsole
                     _usageSb.Append($" [{hint}={p.DefaultValue}]");
                 else
                     _usageSb.Append(' ').Append(hint);
-            }
-
-            return _usageSb.ToString();
-        }
-
-        /// <summary>Returns a formatted usage string for a specific subcommand.</summary>
-        public string GetSubcommandUsageString(SubcommandDefinition sub)
-        {
-            _usageSb ??= new StringBuilder();
-            _usageSb.Clear();
-            _usageSb.Append(Name).Append(' ').Append(sub.Name);
-
-            if (sub.Usage.Length > 0)
-                _usageSb.Append(' ').Append(sub.Usage);
-            else if (sub.ArgProviders != null)
-            {
-                for (int i = 0; i < sub.ArgProviders.Length; i++)
-                {
-                    var hint = sub.ArgProviders[i]?.Hint ?? $"<arg{i}>";
-                    _usageSb.Append(' ').Append(hint);
-                }
             }
 
             return _usageSb.ToString();

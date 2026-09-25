@@ -59,7 +59,7 @@ namespace Rubickanov.DevConsole.Netcode.Commands
             ConsoleLog.Log($"Estimated RTT: {rtt:F1} ms (local: {localTime:F3}, server: {serverTime:F3})");
         }
 
-        [ConsoleCommand("net_stats", "Show network statistics", "Network")]
+        [ConsoleCommand("net stats", "Show network statistics", "Network")]
         [CommandDomain(CommandDomain.Shared)]
         public static void NetStats()
         {

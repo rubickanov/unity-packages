@@ -1,12 +1,12 @@
 {
     "name": "com.rubickanov.devconsole.netcode",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "license": "MIT",
     "displayName": "Dev Console — Netcode Extension",
     "description": "CS:GO-style network command domains (Client/Server/Shared) and cheat protection for Dev Console.",
     "unity": "6000.0",
     "dependencies": {
-        "com.rubickanov.devconsole": "1.0.0",
+        "com.rubickanov.devconsole": "3.0.0",
         "com.unity.netcode.gameobjects": "2.0.0"
     },
     "keywords": ["console", "netcode", "multiplayer", "cheats", "server"],
