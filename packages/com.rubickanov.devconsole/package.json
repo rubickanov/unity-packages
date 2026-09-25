@@ -1,6 +1,6 @@
 {
     "name": "com.rubickanov.devconsole",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "license": "MIT",
     "displayName": "Dev Console",
     "description": "In-game developer console with attribute-based auto-discovery, autocomplete, subcommands, and persistent history.",

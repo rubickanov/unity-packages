@@ -173,10 +173,8 @@ namespace Rubickanov.DevConsole
                 case KeyCode.KeypadEnter:
                     evt.StopPropagation();
                     _commandInput.focusController.IgnoreEvent(evt);
-                    if (hasSuggestions && _selectedSuggestion >= 0)
-                        ApplySelectedSuggestion();
-                    else
-                        ExecuteInput();
+                    // Enter runs the line as typed; completing a suggestion is Tab's job
+                    ExecuteInput();
                     break;
 
                 case KeyCode.Tab:
