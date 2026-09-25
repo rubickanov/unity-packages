@@ -64,4 +64,17 @@ namespace Rubickanov.DevConsole
             }
         }
     }
+
+    /// <summary>
+    /// Marks an argument that is itself a command line, like the command of <c>bind</c> or <c>repeat</c>: the registry
+    /// completes it as a command, its arguments included. Must be the last argument's provider.
+    /// </summary>
+    public class CommandLineProvider : IAutoCompleteProvider
+    {
+        public static readonly CommandLineProvider Instance = new();
+        public string Hint => "<command...>";
+
+        public void GetSuggestions(string partial, List<string> results)
+            => CommandRegistry.Instance.GetSuggestions(partial, results);
+    }
 }

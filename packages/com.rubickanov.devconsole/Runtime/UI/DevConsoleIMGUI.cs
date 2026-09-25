@@ -791,24 +791,7 @@ namespace Rubickanov.DevConsole
                 : 0;
             if (idx >= _suggestions.Count) return;
 
-            var suggestion = _suggestions[idx];
-            var currentInput = _inputText;
-            var tokens = CommandRegistry.Tokenize(currentInput);
-            var endsWithSpace = currentInput.EndsWith(" ");
-
-            string newValue;
-            if (tokens.Length <= 1 && !endsWithSpace)
-                // Completing the command name.
-                newValue = suggestion + " ";
-            else if (endsWithSpace)
-                // Adding a new argument.
-                newValue = currentInput + suggestion + " ";
-            else
-            {
-                // Replacing the partially-typed argument.
-                tokens[^1] = suggestion;
-                newValue = string.Join(" ", tokens) + " ";
-            }
+            var newValue = CommandRegistry.ApplySuggestion(_inputText, _suggestions[idx]);
 
             _inputText = newValue;
             _prevInputText = newValue;
@@ -866,17 +849,7 @@ namespace Rubickanov.DevConsole
 
         private void ExecuteInput(string input)
         {
-            ConsoleLog.LogInput(input);
-
-            var result = CommandRegistry.Instance.Execute(input);
-
-            if (!string.IsNullOrEmpty(result.Message))
-            {
-                if (result.Success)
-                    ConsoleLog.Log(result.Message);
-                else
-                    ConsoleLog.LogError(result.Message);
-            }
+            CommandRegistry.Instance.ExecuteAndLog(input);
         }
 
         // ── History ─────────────────────────────────────────────────

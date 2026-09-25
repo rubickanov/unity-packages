@@ -6,29 +6,48 @@ namespace Rubickanov.DevConsole.Commands
     internal static class RenderingCommands
     {
         [ConsoleCommand("resolution", "Get or set screen resolution", "Rendering")]
-        public static void Resolution(int width = 0, int height = 0, FullScreenMode mode = (FullScreenMode)(-1))
+        public static void Resolution(int? width = null, int? height = null, FullScreenMode? mode = null)
         {
-            if (width == 0 || height == 0)
+            if (!width.HasValue)
             {
                 ConsoleLog.Log($"Resolution: {Screen.width}x{Screen.height} ({Screen.fullScreenMode})");
                 return;
             }
 
-            var actualMode = (int)mode == -1 ? Screen.fullScreenMode : mode;
-            Screen.SetResolution(width, height, actualMode);
+            if (!height.HasValue)
+                throw new CommandException("Usage: resolution <width> <height> [mode]");
+            if (width <= 0 || height <= 0)
+                throw new CommandException("Width and height must be positive.");
+
+            var actualMode = mode ?? Screen.fullScreenMode;
+            Screen.SetResolution(width.Value, height.Value, actualMode);
             ConsoleLog.Log($"Resolution set to {width}x{height} ({actualMode})");
         }
 
-        [ConsoleCommand("fullscreen", "Get or set fullscreen mode", "Rendering")]
-        public static void Fullscreen(FullScreenMode mode = (FullScreenMode)(-1))
+        [ConsoleCommand("resolution_list", "List the resolutions the display supports", "Rendering")]
+        public static void ResolutionList()
         {
-            if ((int)mode == -1)
+            var resolutions = Screen.resolutions;
+            if (resolutions.Length == 0)
+                throw new CommandException("The display reports no resolutions (windowed or editor).");
+
+            foreach (var r in resolutions)
+            {
+                var current = r.width == Screen.width && r.height == Screen.height ? " (current)" : "";
+                ConsoleLog.Log($"  {r.width}x{r.height} @ {r.refreshRateRatio.value:0.##} Hz{current}");
+            }
+        }
+
+        [ConsoleCommand("fullscreen", "Get or set fullscreen mode", "Rendering")]
+        public static void Fullscreen(FullScreenMode? mode = null)
+        {
+            if (!mode.HasValue)
             {
                 ConsoleLog.Log($"Fullscreen mode: {Screen.fullScreenMode}");
                 return;
             }
 
-            Screen.fullScreenMode = mode;
+            Screen.fullScreenMode = mode.Value;
             ConsoleLog.Log($"Fullscreen mode set to {mode}");
         }
 

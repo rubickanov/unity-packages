@@ -47,6 +47,8 @@ namespace Rubickanov.DevConsole
 
             Debug.Log($"[DevConsole] Registered {_commands.Count} commands.");
             ConsoleLog.LogSuccess($"Initialization complete. Registered {_commands.Count} commands.");
+
+            DevConsole.Commands.ConsoleCommands.RunAutoexec(this);
         }
 
         /// <summary>Registers a custom parser for type <typeparamref name="T"/>. Returns this for chaining.</summary>
@@ -224,7 +226,31 @@ namespace Rubickanov.DevConsole
                     return subcommands[i].Handler(args[1..]);
             }
 
-            return $"Unknown subcommand '{args[0]}'. Type '{groupName}' for available subcommands.";
+            throw new CommandException($"Unknown subcommand '{args[0]}'. Type '{groupName}' for available subcommands.");
+        }
+
+        // A subcommand added with AddWithRest gets the rest of the line as its last argument, as typed
+        private static string[] MergeSubcommandRest(SubcommandDefinition[] subcommands, CommandLine line, string[] args)
+        {
+            if (args.Length == 0) return args;
+
+            var subName = args[0].ToLowerInvariant();
+            for (int i = 0; i < subcommands.Length; i++)
+            {
+                var sub = subcommands[i];
+                if (sub.Name != subName) continue;
+
+                // args[0] is the subcommand, so its argument RestFrom is args[1 + RestFrom], token 2 + RestFrom
+                var restArg = 1 + sub.RestFrom;
+                if (sub.RestFrom < 0 || args.Length <= restArg + 1) return args;
+
+                var merged = new string[restArg + 1];
+                Array.Copy(args, merged, restArg);
+                merged[restArg] = line.Remainder(restArg + 1);
+                return merged;
+            }
+
+            return args;
         }
 
         private string[] GetSortedKeys()
@@ -281,19 +307,21 @@ namespace Rubickanov.DevConsole
                     providers[ac.ArgumentIndex] = GetOrCreateProvider(ac.ProviderType, ac.ProviderArgs);
 
             for (int i = 0; i < parameters.Length; i++)
-            {
-                if (providers[i] != null) continue;
-                var paramType = parameters[i].ParameterType;
-                if (_defaultProviders.TryGetValue(paramType, out var defaultProvider))
-                    providers[i] = defaultProvider;
-                else if (paramType.IsEnum)
-                    providers[i] = GetOrCreateProvider(typeof(EnumAutoCompleteProvider), paramType);
-                else if (paramType == typeof(bool))
-                    providers[i] = BoolAutoCompleteProvider.Instance;
-            }
+                providers[i] ??= ResolveProviderForType(parameters[i].ParameterType);
 
             if (_commands.TryGetValue(attr.Name, out _))
                 Debug.LogWarning($"[DevConsole] Duplicate command '{attr.Name}', overwriting.");
+
+            var hasRemainder = false;
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                if (parameters[i].GetCustomAttribute<RemainderAttribute>() == null) continue;
+                if (i == parameters.Length - 1 && parameters[i].ParameterType == typeof(string))
+                    hasRemainder = true;
+                else
+                    Debug.LogWarning(
+                        $"[DevConsole] [Remainder] on '{parameters[i].Name}' of '{attr.Name}' ignored: it must be the last parameter and a string.");
+            }
 
             _commands[attr.Name] = new RegisteredCommand
             {
@@ -303,13 +331,15 @@ namespace Rubickanov.DevConsole
                 Method = method,
                 Target = target,
                 Parameters = parameters,
-                ArgProviders = providers
+                ArgProviders = providers,
+                HasRemainder = hasRemainder
             };
             _sortedKeysDirty = true;
         }
 
         internal IAutoCompleteProvider? ResolveProviderForType(Type paramType)
         {
+            paramType = Nullable.GetUnderlyingType(paramType) ?? paramType;
             if (_defaultProviders.TryGetValue(paramType, out var defaultProvider))
                 return defaultProvider;
             if (paramType.IsEnum)
@@ -363,15 +393,74 @@ namespace Rubickanov.DevConsole
         /// <summary>Parses and executes a raw command string.</summary>
         public ExecutionResult Execute(string rawInput) => Execute(rawInput, 0);
 
+        /// <summary>
+        /// Echoes <paramref name="rawInput"/> to <see cref="ConsoleLog"/>, executes it and logs the result's message, as
+        /// typing it into the console would.
+        /// </summary>
+        public ExecutionResult ExecuteAndLog(string rawInput)
+        {
+            ConsoleLog.LogInput(rawInput);
+            var result = Execute(rawInput);
+            if (!string.IsNullOrEmpty(result.Message))
+            {
+                if (result.Success)
+                    ConsoleLog.Log(result.Message!);
+                else
+                    ConsoleLog.LogError(result.Message!);
+            }
+
+            return result;
+        }
+
         private ExecutionResult Execute(string rawInput, int aliasDepth)
         {
             if (string.IsNullOrWhiteSpace(rawInput)) return ExecutionResult.Error("Empty command.");
 
-            var tokens = Tokenize(rawInput);
-            if (tokens.Length == 0) return ExecutionResult.Error("Empty command.");
+            var statements = new List<string>();
+            CommandLine.SplitStatements(rawInput, statements);
+            if (statements.Count == 0) return ExecutionResult.Error("Empty command.");
+            if (statements.Count == 1) return ExecuteStatement(statements[0], aliasDepth);
 
-            var cmdName = tokens[0].ToLowerInvariant();
-            var args = tokens[1..];
+            // Every command of a chain runs, like a shell's `a; b`. The ones before the last log their own result,
+            // since only one result goes back to the caller.
+            for (int i = 0; i < statements.Count - 1; i++)
+            {
+                var result = ExecuteStatement(statements[i], aliasDepth);
+
+                // `wait` hands what is left of the chain to DeferredCommands
+                if (PendingWait is { } frames)
+                {
+                    PendingWait = null;
+                    DeferredCommands.Schedule(this, string.Join("; ", statements.GetRange(i + 1, statements.Count - i - 1)), frames);
+                    return result;
+                }
+
+                if (string.IsNullOrEmpty(result.Message)) continue;
+                if (result.Success)
+                    ConsoleLog.Log(result.Message!);
+                else
+                    ConsoleLog.LogError(result.Message!);
+            }
+
+            return ExecuteStatement(statements[^1], aliasDepth);
+        }
+
+        /// <summary>
+        /// Frames the last executed statement asked to wait, set by <c>wait</c> and cleared when the next statement
+        /// starts. A chain or file checks it after each statement and defers the rest; left set after the last
+        /// statement of an alias, it delays what follows the alias in the caller's chain.
+        /// </summary>
+        internal int? PendingWait;
+
+        private ExecutionResult ExecuteStatement(string rawInput, int aliasDepth)
+        {
+            PendingWait = null;
+
+            var line = new CommandLine(rawInput);
+            if (line.Count == 0) return ExecutionResult.Error("Empty command.");
+
+            var cmdName = line.Tokens[0].ToLowerInvariant();
+            var args = line.Tokens.GetRange(1, line.Count - 1).ToArray();
 
             // Alias expansion
             if (!_commands.ContainsKey(cmdName) && AliasRegistry.Instance.TryResolve(cmdName, out var aliasCommand))
@@ -379,15 +468,14 @@ namespace Rubickanov.DevConsole
                 if (aliasDepth >= 8)
                     return ExecutionResult.Error("Alias recursion limit reached (max 8).");
 
-                // Substitute: alias value + remaining args
-                var expanded = args.Length > 0
-                    ? aliasCommand + " " + string.Join(" ", args)
-                    : aliasCommand;
-                return Execute(expanded, aliasDepth + 1);
+                return Execute(AliasRegistry.Expand(aliasCommand, line), aliasDepth + 1);
             }
 
             if (!_commands.TryGetValue(cmdName, out var cmd))
                 return ExecutionResult.Error($"Unknown command: '{cmdName}'. Type 'help' for available commands.");
+
+            if (cmd.Subcommands != null)
+                args = MergeSubcommandRest(cmd.Subcommands, line, args);
 
             if (PreExecuteFilter != null)
             {
@@ -402,23 +490,34 @@ namespace Rubickanov.DevConsole
                     var msg = cmd.ManualHandler(args);
                     return ExecutionResult.Ok(msg);
                 }
+                catch (CommandException e)
+                {
+                    return ExecutionResult.Error(e.Message);
+                }
                 catch (Exception e)
                 {
                     return ExecutionResult.Error($"Error: {e.Message}");
                 }
             }
 
-            return ExecuteReflection(cmd, args);
+            return ExecuteReflection(cmd, line, args);
         }
 
-        private ExecutionResult ExecuteReflection(RegisteredCommand cmd, string[] args)
+        private ExecutionResult ExecuteReflection(RegisteredCommand cmd, CommandLine line, string[] args)
         {
             var parameters = cmd.Parameters;
             var parsedArgs = new object?[parameters.Length];
 
+            // Extra words used to be dropped without a word, so `echo hello world` printed only "hello"
+            if (!cmd.HasRemainder && args.Length > parameters.Length)
+                return ExecutionResult.Error(
+                    $"Too many arguments: expected at most {parameters.Length}, got {args.Length}.\nUsage: {cmd.GetUsageString()}");
+
             for (int i = 0; i < parameters.Length; i++)
             {
-                if (i < args.Length)
+                if (cmd.HasRemainder && i == parameters.Length - 1 && i < args.Length)
+                    parsedArgs[i] = line.Remainder(i + 1);
+                else if (i < args.Length)
                 {
                     if (!TryParseArg(args[i], parameters[i].ParameterType, out parsedArgs[i]))
                         return ExecutionResult.Error(
@@ -435,6 +534,10 @@ namespace Rubickanov.DevConsole
             {
                 var result = cmd.Method!.Invoke(cmd.Target, parsedArgs);
                 return result != null ? ExecutionResult.Ok(result.ToString()) : ExecutionResult.Ok();
+            }
+            catch (TargetInvocationException e) when (e.InnerException is CommandException)
+            {
+                return ExecutionResult.Error(e.InnerException.Message);
             }
             catch (TargetInvocationException e)
             {
@@ -453,6 +556,12 @@ namespace Rubickanov.DevConsole
 
             if (_customParsers.TryGetValue(targetType, out var custom))
                 return custom(input, out result);
+
+            // An optional argument is declared as `int? value = null`, so leaving it out reads as "show the current
+            // value" without a sentinel like -1 leaking into the usage string
+            var underlying = Nullable.GetUnderlyingType(targetType);
+            if (underlying != null)
+                return TryParseArg(input, underlying, out result);
 
             try
             {
@@ -521,8 +630,16 @@ namespace Rubickanov.DevConsole
 
         /// <summary>Fills <paramref name="results"/> with autocomplete suggestions for the current input. Zero-alloc.</summary>
         public void GetSuggestions(string input, List<string> results, int maxResults = 10)
+            => GetSuggestions(input, results, maxResults, 0);
+
+        private void GetSuggestions(string input, List<string> results, int maxResults, int aliasDepth)
         {
             var sortedKeys = GetSortedKeys();
+
+            // Only the command being typed counts: `timescale 1; qu` completes `qu`
+            var statementStart = CommandLine.LastStatementStart(input);
+            if (statementStart > 0)
+                input = input.Substring(statementStart).TrimStart();
 
             if (string.IsNullOrEmpty(input))
             {
@@ -552,11 +669,34 @@ namespace Rubickanov.DevConsole
                     }
                 }
 
+                var aliasNames = AliasRegistry.Instance.SortedNames;
+                for (int i = 0; i < aliasNames.Count; i++)
+                {
+                    if (aliasNames[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase) &&
+                        !_commands.ContainsKey(aliasNames[i]))
+                    {
+                        results.Add(aliasNames[i]);
+                        if (results.Count >= maxResults) return;
+                    }
+                }
+
                 return;
             }
 
             var cmdName = _tokenBuffer[0].ToLowerInvariant();
-            if (!_commands.TryGetValue(cmdName, out var cmd)) return;
+            if (!_commands.TryGetValue(cmdName, out var cmd))
+            {
+                // An alias that only prefixes one command completes as that command would: `tp ` after
+                // `alias tp teleport` suggests teleport's arguments. One with $ or ; has no such single place.
+                if (aliasDepth < 8 && AliasRegistry.Instance.TryResolve(cmdName, out var aliasCommand) &&
+                    aliasCommand.IndexOf('$') < 0 && aliasCommand.IndexOf(';') < 0)
+                {
+                    var call = new CommandLine(input);
+                    GetSuggestions(aliasCommand + input.Substring(call.End(0)), results, maxResults, aliasDepth + 1);
+                }
+
+                return;
+            }
 
             var argIndex = endsWithSpace ? _tokenBuffer.Count - 1 : _tokenBuffer.Count - 2;
             var partial2 = endsWithSpace ? "" : _tokenBuffer[_tokenBuffer.Count - 1];
@@ -594,6 +734,8 @@ namespace Rubickanov.DevConsole
                 if (matchedSub?.ArgProviders == null) return;
 
                 var subArgIndex = argIndex - 1;
+                if (TryNestedSuggestions(matchedSub.ArgProviders, subArgIndex, 2, input, results, maxResults, aliasDepth))
+                    return;
                 if (subArgIndex < 0 || subArgIndex >= matchedSub.ArgProviders.Length) return;
 
                 var subProvider = matchedSub.ArgProviders[subArgIndex];
@@ -605,6 +747,9 @@ namespace Rubickanov.DevConsole
                     results.RemoveRange(subCountBefore + maxResults, results.Count - subCountBefore - maxResults);
                 return;
             }
+
+            if (TryNestedSuggestions(cmd.ArgProviders, argIndex, 1, input, results, maxResults, aliasDepth))
+                return;
 
             if (cmd.ArgProviders == null || argIndex >= cmd.ArgProviders.Length || argIndex < 0)
                 return;
@@ -620,6 +765,43 @@ namespace Rubickanov.DevConsole
                 results.RemoveRange(countBefore + maxResults, results.Count - countBefore - maxResults);
         }
 
+        // An argument completed by CommandLineProvider is itself a command line: `bind set F5 time` completes `time`
+        // as a command, and its arguments after that as that command's. It is always the last argument.
+        private bool TryNestedSuggestions(IAutoCompleteProvider?[]? providers, int argIndex, int firstArgToken,
+            string input, List<string> results, int maxResults, int depth)
+        {
+            if (providers == null || providers.Length == 0) return false;
+            var last = providers.Length - 1;
+            if (providers[last] is not CommandLineProvider || argIndex < last) return false;
+            if (depth >= 8) return true;
+
+            var line = new CommandLine(input);
+            var tokenIndex = firstArgToken + last;
+            var nested = tokenIndex < line.Count ? input.Substring(line.Start(tokenIndex)) : "";
+            GetSuggestions(nested, results, maxResults, depth + 1);
+            return true;
+        }
+
+        /// <summary>
+        /// Returns <paramref name="input"/> with <paramref name="suggestion"/> accepted: it replaces the word being typed
+        /// in the last <c>;</c>-separated command, or is appended after a trailing space, followed by a space. The rest
+        /// of the line stays as typed, quotes included, and a suggestion containing a space is quoted.
+        /// </summary>
+        public static string ApplySuggestion(string input, string suggestion)
+        {
+            if (suggestion.IndexOf(' ') >= 0) suggestion = "\"" + suggestion + "\"";
+
+            if (input.Length == 0 || input[^1] == ' ' || input[^1] == ';')
+                return input + suggestion + " ";
+
+            var statementStart = CommandLine.LastStatementStart(input);
+            var line = new CommandLine(input.Substring(statementStart));
+            if (line.Count == 0)
+                return input + suggestion + " ";
+
+            return input.Substring(0, statementStart + line.Start(line.Count - 1)) + suggestion + " ";
+        }
+
         /// <summary>Splits input into tokens, respecting quoted strings. Returns a new array.</summary>
         public static string[] Tokenize(string input)
         {
@@ -629,79 +811,158 @@ namespace Rubickanov.DevConsole
         }
 
         /// <summary>Splits input into tokens, appending to <paramref name="tokens"/>. Zero-alloc (except token strings).</summary>
-        public static void Tokenize(string input, List<string> tokens)
+        public static void Tokenize(string input, List<string> tokens) => CommandLine.Tokenize(input, tokens);
+
+        private string? Help(string[] args)
         {
-            var current = new StringBuilder();
-            var inQuotes = false;
-
-            for (int i = 0; i < input.Length; i++)
+            if (args.Length == 0)
             {
-                var c = input[i];
-                if (c == '"')
-                {
-                    inQuotes = !inQuotes;
-                    continue;
-                }
-
-                if (c == ' ' && !inQuotes)
-                {
-                    if (current.Length > 0)
-                    {
-                        tokens.Add(current.ToString());
-                        current.Clear();
-                    }
-
-                    continue;
-                }
-
-                current.Append(c);
+                LogCommands(_commands.Values);
+                LogAliases();
+                return null;
             }
 
-            if (current.Length > 0) tokens.Add(current.ToString());
+            var topic = string.Join(" ", args);
+            var key = topic.ToLowerInvariant();
+
+            if (_commands.TryGetValue(key, out var cmd))
+            {
+                ConsoleLog.Log($"<b>{cmd.GetUsageString()}</b>");
+                if (!string.IsNullOrEmpty(cmd.Description)) ConsoleLog.Log($"  {cmd.Description}");
+                ConsoleLog.Log($"  Category: {cmd.Category}");
+
+                if (cmd.Subcommands != null)
+                {
+                    ConsoleLog.Log("\n  Subcommands:");
+                    for (int i = 0; i < cmd.Subcommands.Length; i++)
+                    {
+                        var sub = cmd.Subcommands[i];
+                        var desc = string.IsNullOrEmpty(sub.Description) ? "" : $" - {sub.Description}";
+                        ConsoleLog.Log($"    {cmd.GetSubcommandUsageString(sub)}{desc}");
+                    }
+                }
+
+                // `help scene` names both the command and the Scene category
+                var sameNamed = _commands.Values
+                    .Where(c => string.Equals(c.Category, topic, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(c => c.Name, StringComparer.Ordinal).ToList();
+                if (sameNamed.Count > 0)
+                    ConsoleLog.Log(
+                        $"\n  Commands in category {sameNamed[0].Category}: {string.Join(", ", sameNamed.Select(c => c.Name))}");
+
+                return null;
+            }
+
+            if (AliasRegistry.Instance.TryResolve(key, out var aliasCommand))
+            {
+                ConsoleLog.Log($"<b>{key}</b> is an alias for: {aliasCommand}");
+                return null;
+            }
+
+            var inCategory = _commands.Values
+                .Where(c => string.Equals(c.Category, topic, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (inCategory.Count > 0)
+            {
+                LogCommands(inCategory);
+                return null;
+            }
+
+            // Otherwise a search: `help time` finds timescale and whatever mentions time in its description
+            var matches = _commands.Values.Where(c => Mentions(c, topic)).ToList();
+            if (matches.Count == 0)
+                throw new CommandException($"No command, category or description matches '{topic}'.");
+
+            LogCommands(matches);
+            return null;
+        }
+
+        private static bool Mentions(RegisteredCommand cmd, string text)
+        {
+            if (cmd.Name.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                cmd.Description.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            if (cmd.Subcommands == null) return false;
+            foreach (var sub in cmd.Subcommands)
+            {
+                if (sub.Name.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    sub.Description.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static void LogCommands(IEnumerable<RegisteredCommand> commands)
+        {
+            foreach (var group in commands.GroupBy(c => c.Category).OrderBy(g => g.Key))
+            {
+                ConsoleLog.Log($"\n<b>=== {group.Key} ===</b>");
+                foreach (var c in group.OrderBy(c => c.Name))
+                {
+                    var desc = string.IsNullOrEmpty(c.Description) ? "" : $" - {c.Description}";
+                    ConsoleLog.Log($"  {c.Name}{desc}");
+                }
+            }
+        }
+
+        private static void LogAliases()
+        {
+            var aliases = AliasRegistry.Instance;
+            var names = aliases.SortedNames;
+            if (names.Count == 0) return;
+
+            ConsoleLog.Log("\n<b>=== Aliases ===</b>");
+            for (int i = 0; i < names.Count; i++)
+                ConsoleLog.Log($"  {names[i]} → {aliases.Aliases[names[i]]}");
+        }
+
+        /// <summary>Suggests command names, alias names and categories after <c>help</c>.</summary>
+        private sealed class HelpTopicProvider : IAutoCompleteProvider
+        {
+            private readonly CommandRegistry _registry;
+            private readonly List<string> _categories = new();
+
+            public HelpTopicProvider(CommandRegistry registry) => _registry = registry;
+
+            public string Hint => "<topic>";
+
+            public void GetSuggestions(string partial, List<string> results)
+            {
+                var keys = _registry.GetSortedKeys();
+                for (int i = 0; i < keys.Length; i++)
+                    if (keys[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase)) results.Add(keys[i]);
+
+                var aliases = AliasRegistry.Instance.SortedNames;
+                for (int i = 0; i < aliases.Count; i++)
+                    if (aliases[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase)) results.Add(aliases[i]);
+
+                _categories.Clear();
+                foreach (var cmd in _registry._commands.Values)
+                {
+                    if (!_categories.Contains(cmd.Category) &&
+                        cmd.Category.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+                        _categories.Add(cmd.Category);
+                }
+
+                _categories.Sort(StringComparer.OrdinalIgnoreCase);
+                results.AddRange(_categories);
+            }
         }
 
         private void RegisterBuiltInCommands()
         {
-            Register("help", args =>
-            {
-                if (args.Length > 0 && _commands.TryGetValue(args[0].ToLowerInvariant(), out var cmd))
-                {
-                    ConsoleLog.Log($"<b>{cmd.GetUsageString()}</b>");
-                    if (!string.IsNullOrEmpty(cmd.Description)) ConsoleLog.Log($"  {cmd.Description}");
-                    ConsoleLog.Log($"  Category: {cmd.Category}");
-
-                    if (cmd.Subcommands != null)
-                    {
-                        ConsoleLog.Log("\n  Subcommands:");
-                        for (int i = 0; i < cmd.Subcommands.Length; i++)
-                        {
-                            var sub = cmd.Subcommands[i];
-                            var desc = string.IsNullOrEmpty(sub.Description) ? "" : $" - {sub.Description}";
-                            ConsoleLog.Log($"    {cmd.GetSubcommandUsageString(sub)}{desc}");
-                        }
-                    }
-
-                    return null;
-                }
-
-                foreach (var group in _commands.Values.GroupBy(c => c.Category).OrderBy(g => g.Key))
-                {
-                    ConsoleLog.Log($"\n<b>=== {group.Key} ===</b>");
-                    foreach (var c in group.OrderBy(c => c.Name))
-                    {
-                        var desc = string.IsNullOrEmpty(c.Description) ? "" : $" - {c.Description}";
-                        ConsoleLog.Log($"  {c.Name}{desc}");
-                    }
-                }
-
-                return null;
-            }, "Show all commands or details for a specific command", "System");
+            Register("help", Help,
+                "List commands; help <command> for details, help <category> or help <text> to narrow the list",
+                "System", new IAutoCompleteProvider?[] { new HelpTopicProvider(this) });
 
             Register("clear", _ =>
             {
                 ConsoleLog.Clear();
                 return null;
             }, "Clear console output", "System");
+
+            DevConsole.Commands.ConsoleCommands.Register(this);
         }
     }
 }
