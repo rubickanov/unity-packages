@@ -38,7 +38,7 @@ namespace Rubickanov.DevConsole
         private static bool _subscribed;
         private static bool _forwarding;
 
-        /// <summary>Whether messages reach the console. On by default; <c>log_unity</c> switches it.</summary>
+        /// <summary>Whether messages reach the console. On by default; <c>log unity</c> switches it.</summary>
         public static bool Enabled { get; set; } = true;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

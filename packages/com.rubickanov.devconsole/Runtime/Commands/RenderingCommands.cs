@@ -24,7 +24,7 @@ namespace Rubickanov.DevConsole.Commands
             ConsoleLog.Log($"Resolution set to {width}x{height} ({actualMode})");
         }
 
-        [ConsoleCommand("resolution_list", "List the resolutions the display supports", "Rendering")]
+        [ConsoleCommand("resolution list", "List the resolutions the display supports", "Rendering")]
         public static void ResolutionList()
         {
             var resolutions = Screen.resolutions;

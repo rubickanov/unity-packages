@@ -31,6 +31,7 @@ namespace Rubickanov.DevConsole
 
         // Autocomplete state
         private readonly List<string> _suggestions = new();
+        private readonly List<string?> _suggestionDescriptions = new();
         private int _selectedSuggestion = -1;
         private bool _suppressAutocomplete;
 
@@ -268,6 +269,9 @@ namespace Rubickanov.DevConsole
             }
 
             CommandRegistry.Instance.GetSuggestions(input, _suggestions, MaxSuggestions);
+            _suggestionDescriptions.Clear();
+            foreach (var suggestion in _suggestions)
+                _suggestionDescriptions.Add(CommandRegistry.Instance.DescribeSuggestion(input, suggestion));
             if (_suggestions.Count == 0)
             {
                 HideAutocomplete();
@@ -332,7 +336,6 @@ namespace Rubickanov.DevConsole
 
         private void RebuildSuggestionUI()
         {
-            var commands = CommandRegistry.Instance.Commands;
 
             for (int i = 0; i < _suggestions.Count; i++)
             {
@@ -350,9 +353,10 @@ namespace Rubickanov.DevConsole
                 nameLabel.text = name;
 
                 var descLabel = (Label)row[1];
-                if (commands.TryGetValue(name, out var cmd) && !string.IsNullOrEmpty(cmd.Description))
+                var description = _suggestionDescriptions[i];
+                if (description != null)
                 {
-                    descLabel.text = cmd.Description;
+                    descLabel.text = description;
                     descLabel.style.display = DisplayStyle.Flex;
                 }
                 else

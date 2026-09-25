@@ -82,7 +82,7 @@ public static class GameCommands
         ConsoleLog.LogSuccess($"Healed for {amount}");
     }
 
-    [ConsoleCommand("set_timescale", "Set time scale", "Debug")]
+    [ConsoleCommand("time scale", "Set time scale", "Debug")]
     public static string SetTimeScale(float scale)
     {
         Time.timeScale = scale;
@@ -219,7 +219,29 @@ Remove a command with `Unregister(name)`.
 
 ### Command Groups (Subcommands)
 
-Register a command with subcommands via `RegisterGroup` (or its alias `Group`). Each subcommand has its own handler and autocomplete providers:
+A command name may be several words. The words before the last make a group, and every command whose name starts
+with them is one of its subcommands, whichever assembly declared it:
+
+```csharp
+[ConsoleCommand("scene load", "Load a scene", "Scene")]
+public static void Load(string name) { … }
+
+// In the game's own assembly: `log` also holds the package's `log unity` and `log save`
+[ConsoleCommand("log level", "Set a channel's level", "Logging")]
+public static void SetLevel(string channel, LogLevel level) { … }
+```
+
+- `scene load Arena` runs `scene load` with `Arena`: the command with the most words the line starts with wins, so
+  `scene` and `scene load` can both exist.
+- A group typed alone, `log`, prints its subcommands; `log nope` is an unknown subcommand error.
+- Autocomplete goes word by word: the first word lists commands and groups once each, `scene ` lists `list`, `load`,
+  `reload` and whatever `scene` itself takes as an argument.
+- `help log` lists the group; `help scene load` shows one subcommand.
+
+Names use spaces, not underscores. Groups can nest: `net host lan` is fine.
+
+`RegisterGroup` (or its alias `Group`) registers several subcommands with handlers at once, under a description for
+the group. It adds to the group rather than replacing it. Each subcommand has its own handler and autocomplete providers:
 
 ```csharp
 var fruitProvider = new FruitIdProvider(database);
@@ -238,7 +260,7 @@ Autocomplete is context-aware per subcommand:
 - `inventory add ` → suggests fruit IDs (from `fruitProvider`)
 - `inventory list ` → no suggestions
 
-Subcommand handlers receive args **after** the subcommand name: `inventory add apple 5` calls the handler with `["apple", "5"]`. Running the group with no args prints its usage; `help inventory` lists every subcommand.
+Subcommand handlers receive args **after** the subcommand name: `inventory add apple 5` calls the handler with `["apple", "5"]`. Running the group with no args prints its usage; `help inventory` lists every subcommand. `Unregister("inventory")` removes the whole group.
 
 ### Type-Safe Subcommands
 
@@ -266,8 +288,9 @@ g.AddWithRest("say", 1, args => Chat.Send(args[0], args[1]), "Message a player",
 
 A UI of its own runs input through `CommandRegistry.Instance.ExecuteAndLog(line)`, which echoes the line, runs it
 and prints the result exactly as the bundled frontends do. For completion, `GetSuggestions(input, list)` suggests for
-the last token of the last `;` statement, and `CommandRegistry.ApplySuggestion(input, suggestion)` puts the chosen one
-in its place, quoting it when it contains spaces.
+the last token of the last `;` statement, `DescribeSuggestion(input, suggestion)` gives the description of one that
+names a command or a group, and `CommandRegistry.ApplySuggestion(input, suggestion)` puts the chosen one in its place,
+quoting it when it contains spaces.
 
 ### Console Frontends
 
@@ -314,7 +337,7 @@ long number = ConsoleLog.FirstNumber;   // number of Entries[0]; entry i is Firs
 int capacity = ConsoleLog.Capacity;     // the oldest entry is dropped past this
 ```
 
-Every Unity log message (`Debug.Log*`, exceptions, engine messages) is copied into `ConsoleLog` as is, from any thread and from the first moment scripts run, before any frontend exists. Errors, exceptions and asserts carry their stack trace. Messages from other threads appear at the start of the next frame. `log_unity false` stops the copying, `log_unity true` resumes it.
+Every Unity log message (`Debug.Log*`, exceptions, engine messages) is copied into `ConsoleLog` as is, from any thread and from the first moment scripts run, before any frontend exists. Errors, exceptions and asserts carry their stack trace. Messages from other threads appear at the start of the next frame. `log unity false` stops the copying, `log unity true` resumes it.
 
 Logs written to the console by a `ConsoleLog.OnLogAdded` subscriber through `Debug.Log` are not copied back, so a subscriber like the one above cannot loop.
 
@@ -347,12 +370,12 @@ CommandRegistry.Instance.PreExecuteFilter = (cmd, args) =>
 
 The rest, by category:
 
-- **Performance** — `fps` (average, slowest and fastest frame over the last second), `target_fps [n]`, `vsync [n]`, `memory`, `gc`.
+- **Performance** — `fps` (average, slowest and fastest frame over the last second), `fps target [n]`, `vsync [n]`, `memory`, `gc`.
 - **Time** — `timescale [scale]`, `pause` (stops time; again gives back the previous scale).
-- **Rendering** — `resolution [w h [mode]]`, `resolution_list`, `fullscreen [mode]`, `quality [name|index]`.
-- **Scene** — `scene`, `scene_list`, `scene_load <name|index> [additive]`, `scene_reload`, `inspect <name|path>` (every match, inactive ones too), `count [component] [includeInactive]`.
+- **Rendering** — `resolution [w h [mode]]`, `resolution list`, `fullscreen [mode]`, `quality [name|index]`.
+- **Scene** — `scene`, `scene list`, `scene load <name|index> [additive]`, `scene reload`, `inspect <name|path>` (every match, inactive ones too), `count [component] [includeInactive]`.
 - **System** — `quit`, `echo <text...>`, `sysinfo` (application and Unity version, platform, hardware).
-- **Logging** — `log_unity [on]`, `log_save`.
+- **Logging** — `log unity [on]`, `log save`.
 
 Commands that get or set a value show it when called without an argument.
 
@@ -362,7 +385,7 @@ Commands that get or set a value show it when called without an argument.
 inside quotes is text.
 
 `wait <frames>` stops a chain and runs what follows it that many frames later (counted at the start of `Update`):
-`scene_reload; wait 2; teleport spawn`. In an `exec` file it defers the rest of the file the same way. A
+`scene reload; wait 2; teleport spawn`. In an `exec` file it defers the rest of the file the same way. A
 `PreExecuteFilter` that refuses `wait` makes the rest run at once instead, which is what the netcode bridge does for a
 client's command.
 
@@ -373,13 +396,13 @@ alias:
 ```
 alias set slow timescale 0.2
 alias set tp teleport $1 $2
-alias set reset "scene_reload; wait 2; god true"
+alias set reset "scene reload; wait 2; god true"
 ```
 
 Aliases complete like commands, and an alias without `$` or `;` completes its arguments like its target.
 
 `bind set <key> <command...>` runs a command line when a key is pressed. The key is an Input System `Key` name,
-optionally with modifiers that must match exactly: `bind set ctrl+shift+R scene_reload`. Bindings do not fire while a
+optionally with modifiers that must match exactly: `bind set ctrl+shift+R scene reload`. Bindings do not fire while a
 console is open. To keep them quiet during text entry of your own, set `CommandBindings.Suppress = () => chatOpen;`.
 
 `toggle` cycles values on each call, which suits a binding: `bind set F1 toggle timescale 0 1`. Each distinct
@@ -456,9 +479,13 @@ so argument handling can be tested without starting a process.
 - **Static ConsoleLog** — decoupled from UI. Commands log via `ConsoleLog`; any frontend subscribes to `OnLogAdded`. Custom UIs can consume the same buffer.
 - **Unity logs forwarded by default** — subscribed on `SubsystemRegistration` through `logMessageReceivedThreaded`, not by a frontend, so startup logs are not lost. `ConsoleLog` stays main-thread only: other threads' messages wait in a queue drained in `PreUpdate`.
 - **Reflection-based discovery** — scans non-system assemblies for `[ConsoleCommand]` at startup, skipping `System.*`, `Unity.*`, `Mono.*`, `Microsoft.*`, `mscorlib`, `netstandard` prefixes for speed. Instance methods are not auto-discovered; bind them with `RegisterTarget(this)`.
-- **Per-execution allocation in the reflection path** — `Execute` allocates a small `object?[]` for boxed arguments per call. Fine for a dev tool; not a per-frame hot path. Autocomplete (`GetSuggestions`) is allocation-free by contrast.
+- **Per-execution allocation in the reflection path** — `Execute` allocates a small `object?[]` for boxed arguments per call. Fine for a dev tool; not a per-frame hot path. Autocomplete (`GetSuggestions`) allocates only the typed words and the group path.
 - **Config file for aliases and bindings** — they are commands a person writes and wants to read, back up or share, so they live in `config.cfg` as console lines rather than JSON in PlayerPrefs. History stays in PlayerPrefs, capped at 100 entries.
 - **Bindings restored without the `bind` command** — an `AfterSceneLoad` hook creates the polling object when saved bindings exist. Before 2.0 they loaded only once `bind` had been typed in that session.
+- **Groups are name prefixes, not commands** — `scene load` is stored under its full name, and a group is only the
+  words its commands share. So a package and a game can both add to `log`, and `PreExecuteFilter` sees the subcommand
+  that runs, not the group. Before 3.0 a group was one command, registered only in code, and a second `Group` call
+  with the same name replaced the first.
 - **`wait` is a command, not syntax** — so the same `PreExecuteFilter` that guards everything else decides whether a deferred rest may run.
 - **Singleton frontends** — both frontends are singleton MonoBehaviours. Statics reset on `SubsystemRegistration` so domain-reload-disabled play sessions start clean.
 

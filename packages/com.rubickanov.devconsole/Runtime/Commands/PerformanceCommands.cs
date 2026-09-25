@@ -20,7 +20,7 @@ namespace Rubickanov.DevConsole.Commands
                 ConsoleLog.Log($"FPS: {1f / Time.unscaledDeltaTime:F1}");
         }
 
-        [ConsoleCommand("target_fps", "Get or set target frame rate (-1 = unlimited)", "Performance")]
+        [ConsoleCommand("fps target", "Get or set target frame rate (-1 = unlimited)", "Performance")]
         public static void TargetFps(int? value = null)
         {
             if (value.HasValue)
@@ -43,7 +43,7 @@ namespace Rubickanov.DevConsole.Commands
 
             ConsoleLog.Log($"VSync: {QualitySettings.vSyncCount}");
             if (QualitySettings.vSyncCount > 0)
-                ConsoleLog.Log("  While VSync is on, target_fps is ignored.");
+                ConsoleLog.Log("  While VSync is on, fps target is ignored.");
         }
 
         [ConsoleCommand("memory", "Show memory usage", "Performance")]

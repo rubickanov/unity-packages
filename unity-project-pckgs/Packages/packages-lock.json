@@ -126,7 +126,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.rubickanov.devconsole": "1.0.0",
+        "com.rubickanov.devconsole": "3.0.0",
         "com.unity.netcode.gameobjects": "2.0.0"
       }
     },
@@ -167,6 +167,12 @@
         "com.rubickanov.codegen": "1.0.0",
         "com.unity.addressables": "2.9.1"
       }
+    },
+    "com.rubickanov.log": {
+      "version": "file:../../packages/com.rubickanov.log",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
     },
     "com.rubickanov.logging": {
       "version": "file:../../packages/com.rubickanov.logging",
