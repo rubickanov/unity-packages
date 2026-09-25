@@ -29,6 +29,7 @@ All at version `1.0.0`, except `devconsole` at `2.0.0` and `ui`, `ui.animations`
 | `gas` | Gameplay Ability / Effects System — attribute modifiers with duration, periodicity, tags. |
 | `loading` | Generic loading pipeline: sequential ops, progress, presenters. |
 | `localization` | Localization service, reactive, strongly-typed keys. |
+| `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release. No dependencies. |
 | `logging` | ZLogger-based factory with file rotation and platform outputs. |
 | `statemachine` | Generic FSM, hierarchical, deferred transitions, zero-alloc. |
 | `steam-transport` | NGO transport over Steam Networking Sockets P2P. |
