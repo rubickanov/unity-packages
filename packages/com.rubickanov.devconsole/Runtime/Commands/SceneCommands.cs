@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -6,6 +7,8 @@ namespace Rubickanov.DevConsole.Commands
 {
     internal static class SceneCommands
     {
+        private const int MaxInspected = 10;
+
         [ConsoleCommand("scene", "Show active scene info", "Scene")]
         public static void Scene()
         {
@@ -14,7 +17,10 @@ namespace Rubickanov.DevConsole.Commands
             ConsoleLog.Log($"Path: {scene.path}");
             ConsoleLog.Log($"Build Index: {scene.buildIndex}");
             ConsoleLog.Log($"Loaded: {scene.isLoaded}");
+#if UNITY_EDITOR
+            // Unsaved changes exist only in the editor
             ConsoleLog.Log($"Dirty: {scene.isDirty}");
+#endif
         }
 
         [ConsoleCommand("scene_list", "List all loaded scenes", "Scene")]
@@ -28,36 +34,67 @@ namespace Rubickanov.DevConsole.Commands
             }
         }
 
-        [ConsoleCommand("find", "Find a GameObject by name", "Scene")]
-        public static void Find(string name)
+        [ConsoleCommand("scene_load", "Load a scene from the build by name or build index, replacing the open ones or added to them", "Scene")]
+        [AutoComplete(0, typeof(BuildSceneProvider))]
+        public static void SceneLoad(string scene, bool additive = false)
         {
-            var go = GameObject.Find(name);
-            if (go == null)
-            {
-                ConsoleLog.LogError($"GameObject '{name}' not found.");
-                return;
-            }
+            var index = FindBuildIndex(scene);
+            if (index < 0)
+                throw new CommandException(
+                    $"No scene '{scene}' in the build. Available: {string.Join(", ", BuildSceneProvider.Names())}");
 
-            ConsoleLog.Log($"Name: {go.name}");
-            ConsoleLog.Log($"Path: {GetPath(go.transform)}");
-            ConsoleLog.Log($"Active: {go.activeInHierarchy}");
-            ConsoleLog.Log($"Position: {go.transform.position}");
+            SceneManager.LoadScene(index, additive ? LoadSceneMode.Additive : LoadSceneMode.Single);
+            ConsoleLog.Log($"Loading {BuildSceneProvider.NameAt(index)}{(additive ? " additively" : "")}.");
         }
 
-        [ConsoleCommand("inspect", "Inspect a GameObject's components", "Scene")]
+        [ConsoleCommand("scene_reload", "Load the active scene again", "Scene")]
+        public static void SceneReload()
+        {
+            var scene = SceneManager.GetActiveScene();
+            if (scene.buildIndex < 0)
+                throw new CommandException($"'{scene.name}' is not in the build, so it cannot be loaded again.");
+
+            SceneManager.LoadScene(scene.buildIndex);
+            ConsoleLog.Log($"Reloading {scene.name}.");
+        }
+
+        [ConsoleCommand("inspect", "Show every GameObject with this name or path, inactive ones too: path, state, position, components", "Scene")]
         public static void Inspect(string name)
         {
-            var go = GameObject.Find(name);
-            if (go == null)
+            var matches = new List<Transform>();
+            foreach (var t in UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include))
             {
-                ConsoleLog.LogError($"GameObject '{name}' not found.");
-                return;
+                if (Matches(t, name)) matches.Add(t);
             }
 
-            var components = go.GetComponents<Component>();
-            ConsoleLog.Log($"<b>{go.name}</b> — {components.Length} component(s):");
+            if (matches.Count == 0)
+                throw new CommandException($"No GameObject named '{name}'.");
 
-            foreach (var comp in components)
+            matches.Sort((a, b) => string.CompareOrdinal(GetPath(a), GetPath(b)));
+            for (int i = 0; i < matches.Count && i < MaxInspected; i++)
+                LogObject(matches[i].gameObject);
+
+            if (matches.Count > MaxInspected)
+                ConsoleLog.Log($"…and {matches.Count - MaxInspected} more. Give more of the path to narrow it down.");
+        }
+
+        // A name is compared with the object's own name, a path (with /) with the end of its hierarchy path
+        internal static bool Matches(Transform t, string name)
+        {
+            if (name.IndexOf('/') < 0)
+                return string.Equals(t.name, name, StringComparison.OrdinalIgnoreCase);
+
+            var path = GetPath(t);
+            return path.EndsWith(name, StringComparison.OrdinalIgnoreCase) &&
+                   (path.Length == name.Length || path[path.Length - name.Length - 1] == '/');
+        }
+
+        private static void LogObject(GameObject go)
+        {
+            var state = go.activeInHierarchy ? "active" : go.activeSelf ? "parent inactive" : "inactive";
+            ConsoleLog.Log($"<b>{GetPath(go.transform)}</b> ({state}, scene {go.scene.name}) at {go.transform.position}");
+
+            foreach (var comp in go.GetComponents<Component>())
             {
                 if (comp == null)
                 {
@@ -70,12 +107,13 @@ namespace Rubickanov.DevConsole.Commands
             }
         }
 
-        [ConsoleCommand("count", "Count GameObjects (all or by component type name)", "Scene")]
-        public static void Count(string type = "")
+        [ConsoleCommand("count", "Count GameObjects, or those with a component type; inactive ones only when asked", "Scene")]
+        public static void Count(string type = "", bool includeInactive = false)
         {
+            var inactive = includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude;
             if (string.IsNullOrEmpty(type))
             {
-                var total = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude).Length;
+                var total = UnityEngine.Object.FindObjectsByType<GameObject>(inactive).Length;
                 ConsoleLog.Log($"Total GameObjects: {total}");
                 return;
             }
@@ -102,13 +140,25 @@ namespace Rubickanov.DevConsole.Commands
             }
 
             if (foundType == null)
+                throw new CommandException($"Component type '{type}' not found.");
+
+            var count = UnityEngine.Object.FindObjectsByType(foundType, inactive).Length;
+            ConsoleLog.Log($"{foundType.Name}: {count}");
+        }
+
+        private static int FindBuildIndex(string scene)
+        {
+            var total = SceneManager.sceneCountInBuildSettings;
+            if (int.TryParse(scene, out var index))
+                return index >= 0 && index < total ? index : -1;
+
+            for (int i = 0; i < total; i++)
             {
-                ConsoleLog.LogError($"Component type '{type}' not found.");
-                return;
+                if (string.Equals(BuildSceneProvider.NameAt(i), scene, StringComparison.OrdinalIgnoreCase))
+                    return i;
             }
 
-            var count = UnityEngine.Object.FindObjectsByType(foundType, FindObjectsInactive.Exclude).Length;
-            ConsoleLog.Log($"{foundType.Name}: {count}");
+            return -1;
         }
 
         private static string GetPath(Transform t)

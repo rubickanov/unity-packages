@@ -3,6 +3,7 @@
     "rootNamespace": "Rubickanov.DevConsole.Tests",
     "references": [
         "Rubickanov.DevConsole.Runtime",
+        "Unity.InputSystem",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

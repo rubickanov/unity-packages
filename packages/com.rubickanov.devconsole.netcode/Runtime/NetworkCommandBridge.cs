@@ -75,6 +75,8 @@ namespace Rubickanov.DevConsole.Netcode
             _domains["sv_cheats"] = CommandDomain.Server;
         }
 
+        static readonly char[] QuotedChars = { ' ', '\t', ';' };
+
         CommandRegistry.ExecutionResult? FilterCommand(RegisteredCommand cmd, string[] args)
         {
             // Check cheat protection
@@ -108,10 +110,11 @@ namespace Rubickanov.DevConsole.Netcode
                 if (NetworkManager.IsServer)
                     return null;
 
-                // Reconstruct raw input for RPC
+                // Reconstruct raw input for RPC. An argument typed in quotes is quoted again, or the server would
+                // split it into several, or read its ';' as the start of another command.
                 var rawInput = cmd.Name;
-                if (args.Length > 0)
-                    rawInput += " " + string.Join(" ", args);
+                foreach (var arg in args)
+                    rawInput += arg.IndexOfAny(QuotedChars) >= 0 ? $" \"{arg}\"" : " " + arg;
 
                 ExecuteOnServerRpc(rawInput);
                 return CommandRegistry.ExecutionResult.Ok("Sent to server.");

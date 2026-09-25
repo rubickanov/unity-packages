@@ -1,5 +1,4 @@
 using NUnit.Framework;
-using UnityEngine;
 
 namespace Rubickanov.DevConsole.Tests
 {
@@ -7,21 +6,17 @@ namespace Rubickanov.DevConsole.Tests
     public class AliasRegistryTests
     {
         private AliasRegistry _aliases = null!;
+        private string _config = null!;
 
         [SetUp]
         public void SetUp()
         {
-            PlayerPrefs.DeleteKey("DevConsole_Aliases");
+            _config = TestConfig.Use();
             _aliases = AliasRegistry.Instance;
-            _aliases.Clear();
         }
 
         [TearDown]
-        public void TearDown()
-        {
-            _aliases.Clear();
-            PlayerPrefs.DeleteKey("DevConsole_Aliases");
-        }
+        public void TearDown() => TestConfig.Release(_config);
 
         [Test]
         public void TryResolve_KnownAlias_ReturnsCommand()
@@ -53,7 +48,7 @@ namespace Rubickanov.DevConsole.Tests
         }
 
         [Test]
-        public void Clear_RemovesAllAliasesAndPersistedKey()
+        public void Clear_RemovesAllAliasesFromMemoryAndConfig()
         {
             _aliases.Set("a", "alpha");
             _aliases.Set("b", "beta");
@@ -62,7 +57,7 @@ namespace Rubickanov.DevConsole.Tests
 
             Assert.IsFalse(_aliases.TryResolve("a", out _));
             Assert.IsFalse(_aliases.TryResolve("b", out _));
-            Assert.IsFalse(PlayerPrefs.HasKey("DevConsole_Aliases"));
+            StringAssert.DoesNotContain("alias set a ", System.IO.File.ReadAllText(ConsoleConfig.ConfigPath));
         }
 
         [Test]

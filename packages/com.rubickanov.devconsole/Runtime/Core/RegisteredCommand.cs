@@ -18,6 +18,9 @@ namespace Rubickanov.DevConsole
         public ParameterInfo[] Parameters = Array.Empty<ParameterInfo>();
         public IAutoCompleteProvider?[]? ArgProviders;
 
+        /// <summary>Whether the last parameter takes the rest of the line (<see cref="RemainderAttribute"/>).</summary>
+        public bool HasRemainder;
+
         /// <summary>Raw handler for manually registered commands. Returns optional message (null = no message).</summary>
         public Func<string[], string?>? ManualHandler;
 
@@ -50,8 +53,12 @@ namespace Rubickanov.DevConsole
                 var p = Parameters[i];
                 var provider = ArgProviders != null && i < ArgProviders.Length ? ArgProviders[i] : null;
                 var hint = provider?.Hint ?? $"<{p.Name}>";
+                if (HasRemainder && i == Parameters.Length - 1)
+                    hint = $"<{p.Name}...>";
 
-                if (p.HasDefaultValue)
+                if (p.HasDefaultValue && (p.DefaultValue == null || p.DefaultValue is string { Length: 0 }))
+                    _usageSb.Append($" [{hint}]");
+                else if (p.HasDefaultValue)
                     _usageSb.Append($" [{hint}={p.DefaultValue}]");
                 else
                     _usageSb.Append(' ').Append(hint);
@@ -67,7 +74,9 @@ namespace Rubickanov.DevConsole
             _usageSb.Clear();
             _usageSb.Append(Name).Append(' ').Append(sub.Name);
 
-            if (sub.ArgProviders != null)
+            if (sub.Usage.Length > 0)
+                _usageSb.Append(' ').Append(sub.Usage);
+            else if (sub.ArgProviders != null)
             {
                 for (int i = 0; i < sub.ArgProviders.Length; i++)
                 {

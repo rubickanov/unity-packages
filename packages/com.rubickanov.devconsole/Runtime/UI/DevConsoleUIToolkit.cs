@@ -221,16 +221,7 @@ namespace Rubickanov.DevConsole
 
             _history.Add(text);
             _history.ResetCursor();
-            ConsoleLog.LogInput(text);
-
-            var result = CommandRegistry.Instance.Execute(text);
-            if (!string.IsNullOrEmpty(result.Message))
-            {
-                if (result.Success)
-                    ConsoleLog.Log(result.Message);
-                else
-                    ConsoleLog.LogError(result.Message);
-            }
+            CommandRegistry.Instance.ExecuteAndLog(text);
 
             _suppressAutocomplete = true;
             _commandInput.value = "";
@@ -305,28 +296,7 @@ namespace Rubickanov.DevConsole
                 : 0;
             if (idx >= _suggestions.Count) return;
 
-            var suggestion = _suggestions[idx];
-            var currentInput = _commandInput.value;
-            var tokens = CommandRegistry.Tokenize(currentInput);
-            var endsWithSpace = currentInput.EndsWith(" ");
-
-            string newValue;
-            if (tokens.Length <= 1 && !endsWithSpace)
-            {
-                // Completing command name
-                newValue = suggestion + " ";
-            }
-            else if (endsWithSpace)
-            {
-                // Adding new argument
-                newValue = currentInput + suggestion + " ";
-            }
-            else
-            {
-                // Replacing partial argument
-                tokens[^1] = suggestion;
-                newValue = string.Join(" ", tokens) + " ";
-            }
+            var newValue = CommandRegistry.ApplySuggestion(_commandInput.value, _suggestions[idx]);
 
             _suppressAutocomplete = true;
             _commandInput.SetValueWithoutNotify(newValue);

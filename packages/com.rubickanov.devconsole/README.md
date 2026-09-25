@@ -120,12 +120,22 @@ public class InventoryCommands
 
 Built-in: `string`, `int`, `long`, `ulong`, `float`, `bool`, any `enum`, and `Vector3` (parsed from `x,y,z`, spaces optional). Numbers parse with invariant culture. Parameters with default values are optional.
 
+A nullable parameter (`int? width = null`) parses like its underlying type, with its parser and autocomplete, and stays `null` when left out. That is the usual shape of a get-or-set command: no argument shows the value, an argument sets it.
+
+More arguments than parameters is an error, not silently dropped. A command that takes free text marks its last `string` parameter `[Remainder]`: it receives the rest of the line as it was typed, quotes included.
+
+```csharp
+[ConsoleCommand("say", "Broadcast a message", "Chat")]
+public static void Say([Remainder] string message) { }   // say "hi" there → "hi" there
+```
+
 For custom types, register a parser — see [Custom Type Parsers](#custom-type-parsers).
 
-### Return Values
+### Return Values and Errors
 
 - `void` — no output.
 - `string` (or any non-null return) — printed to the console as an info message via `ToString()`.
+- `throw new CommandException("…")` — fails the command with that message as the error and `Success = false`, so a chain or an `exec` file sees the failure. Works the same from attribute commands, `Register` handlers and group handlers. Any other exception is also reported as an error, with its message behind a short prefix.
 
 ### Autocomplete Providers
 
@@ -146,6 +156,7 @@ Built-in providers:
 | **BoolAutoCompleteProvider** | Auto-applied to `bool` params (shared `Instance`) |
 | **EnumAutoCompleteProvider** | Auto-applied to `enum` params |
 | **StaticListProvider** | Fixed list of string options |
+| **CommandLineProvider** | A whole nested command line (`repeat 3 <command...>`): completes command names, then that command's own arguments. Only as the last provider |
 
 ### Custom Autocomplete Provider
 
@@ -242,7 +253,21 @@ CommandRegistry.Instance.Group("inv", "Inventory", "Cheats", g =>
 });
 ```
 
-The raw `Func<string[], string?>` overload remains available for arbitrary-arity handlers.
+The raw `Func<string[], string?>` overload remains available for arbitrary-arity handlers. A typed handler given the wrong number of arguments, or one that does not parse, fails with a usage error.
+
+A subcommand whose tail is free text uses `AddWithRest`: arguments from `restFrom` on reach the handler as one string, as typed. `usage` replaces the generated hint in `help`:
+
+```csharp
+g.AddWithRest("say", 1, args => Chat.Send(args[0], args[1]), "Message a player",
+    "<player> <message...>", playerProvider);
+```
+
+### Custom Frontends
+
+A UI of its own runs input through `CommandRegistry.Instance.ExecuteAndLog(line)`, which echoes the line, runs it
+and prints the result exactly as the bundled frontends do. For completion, `GetSuggestions(input, list)` suggests for
+the last token of the last `;` statement, and `CommandRegistry.ApplySuggestion(input, suggestion)` puts the chosen one
+in its place, quoting it when it contains spaces.
 
 ### Console Frontends
 
@@ -310,15 +335,66 @@ CommandRegistry.Instance.PreExecuteFilter = (cmd, args) =>
 
 | Command | Description |
 |---------|-------------|
-| `help` | List all commands, or `help <command>` for details |
+| `help [topic]` | Everything, or one command, alias or category; any other word searches names and descriptions |
 | `clear` | Clear console output |
-| `alias` / `unalias` / `alias_clear` | Manage and clear command aliases |
-| `bind` / `unbind` / `binding_clear` | Manage and clear key bindings |
-| `history` / `history_clear` | Inspect and clear persisted history (capped at 100 entries) |
-| `exec <file>` | Run commands line-by-line from a file in `StreamingAssets/console/` or `persistentDataPath/console/` |
-| `repeat <n> <cmd>` | Run a command N times |
+| `alias list` / `set <name> <command...>` / `remove <name>` / `clear` | Short names for commands |
+| `bind list` / `set <key> <command...>` / `remove <key>` / `clear` | Commands on key presses |
+| `history list [N]` / `history clear` | Persisted input history (capped at 100 entries) |
+| `exec <file>` | Run a file of commands, one per line; `#` starts a comment |
+| `repeat <n> <command...>` | Run a command N times (at most 1000) |
+| `toggle <command...> <a> <b> [c…]` | Run the command with the next of its values each call |
+| `wait <frames>` | Delay the rest of a `;` chain or `exec` file |
 
-Additional built-ins ship across categories: `fps`, `target_fps`, `vsync`, `memory`, `gc`, `timescale` (Performance); `resolution`, `fullscreen`, `quality` (Rendering); `scene`, `scene_list`, `find`, `inspect`, `count` (Scene); `quit`, `echo`, `version`, `sysinfo` (System); `log_unity`, `log_save` (Logging).
+The rest, by category:
+
+- **Performance** — `fps` (average, slowest and fastest frame over the last second), `target_fps [n]`, `vsync [n]`, `memory`, `gc`.
+- **Time** — `timescale [scale]`, `pause` (stops time; again gives back the previous scale).
+- **Rendering** — `resolution [w h [mode]]`, `resolution_list`, `fullscreen [mode]`, `quality [name|index]`.
+- **Scene** — `scene`, `scene_list`, `scene_load <name|index> [additive]`, `scene_reload`, `inspect <name|path>` (every match, inactive ones too), `count [component] [includeInactive]`.
+- **System** — `quit`, `echo <text...>`, `sysinfo` (application and Unity version, platform, hardware).
+- **Logging** — `log_unity [on]`, `log_save`.
+
+Commands that get or set a value show it when called without an argument.
+
+### Chains, Aliases and Bindings
+
+`;` separates commands on one line: `timescale 0.2; god true`. Each runs in turn, including after one that fails. A `;`
+inside quotes is text.
+
+`wait <frames>` stops a chain and runs what follows it that many frames later (counted at the start of `Update`):
+`scene_reload; wait 2; teleport spawn`. In an `exec` file it defers the rest of the file the same way. A
+`PreExecuteFilter` that refuses `wait` makes the rest run at once instead, which is what the netcode bridge does for a
+client's command.
+
+An alias is a short name for a command line. Arguments given to the alias are appended, or placed with `$1`…`$9` (one
+argument each, as typed) and `$*` (all of them). Quote the command when it contains `;`, so the whole chain becomes the
+alias:
+
+```
+alias set slow timescale 0.2
+alias set tp teleport $1 $2
+alias set reset "scene_reload; wait 2; god true"
+```
+
+Aliases complete like commands, and an alias without `$` or `;` completes its arguments like its target.
+
+`bind set <key> <command...>` runs a command line when a key is pressed. The key is an Input System `Key` name,
+optionally with modifiers that must match exactly: `bind set ctrl+shift+R scene_reload`. Bindings do not fire while a
+console is open. To keep them quiet during text entry of your own, set `CommandBindings.Suppress = () => chatOpen;`.
+
+`toggle` cycles values on each call, which suits a binding: `bind set F1 toggle timescale 0 1`. Each distinct
+argument list keeps its own position, starting with the first value.
+
+### Config Files
+
+Aliases and bindings are saved to `persistentDataPath/console/config.cfg` on every change and read back at startup.
+The file is plain console commands (`alias set …`, `bind set …`), so it can be edited or copied between machines. The
+console rewrites it, so lines of your own belong in `autoexec.cfg` beside it, which runs once when the console
+initializes. Saves from before 2.0, kept in PlayerPrefs, move into `config.cfg` on the first change.
+
+`exec <file>` looks in `persistentDataPath/console/` first, then `StreamingAssets/console/`; the `.cfg` extension may be
+left out. Files may `exec` other files up to 8 levels deep. On WebGL, StreamingAssets cannot be read synchronously, so
+only `persistentDataPath` files work there.
 
 ### Settings
 
@@ -381,7 +457,9 @@ so argument handling can be tested without starting a process.
 - **Unity logs forwarded by default** — subscribed on `SubsystemRegistration` through `logMessageReceivedThreaded`, not by a frontend, so startup logs are not lost. `ConsoleLog` stays main-thread only: other threads' messages wait in a queue drained in `PreUpdate`.
 - **Reflection-based discovery** — scans non-system assemblies for `[ConsoleCommand]` at startup, skipping `System.*`, `Unity.*`, `Mono.*`, `Microsoft.*`, `mscorlib`, `netstandard` prefixes for speed. Instance methods are not auto-discovered; bind them with `RegisterTarget(this)`.
 - **Per-execution allocation in the reflection path** — `Execute` allocates a small `object?[]` for boxed arguments per call. Fine for a dev tool; not a per-frame hot path. Autocomplete (`GetSuggestions`) is allocation-free by contrast.
-- **PlayerPrefs persistence** — aliases, history, and key bindings persist via PlayerPrefs. Simple and sufficient; history is capped at 100 entries.
+- **Config file for aliases and bindings** — they are commands a person writes and wants to read, back up or share, so they live in `config.cfg` as console lines rather than JSON in PlayerPrefs. History stays in PlayerPrefs, capped at 100 entries.
+- **Bindings restored without the `bind` command** — an `AfterSceneLoad` hook creates the polling object when saved bindings exist. Before 2.0 they loaded only once `bind` had been typed in that session.
+- **`wait` is a command, not syntax** — so the same `PreExecuteFilter` that guards everything else decides whether a deferred rest may run.
 - **Singleton frontends** — both frontends are singleton MonoBehaviours. Statics reset on `SubsystemRegistration` so domain-reload-disabled play sessions start clean.
 
 ## Related Packages

@@ -5,17 +5,18 @@ using UnityEngine.InputSystem;
 
 namespace Rubickanov.DevConsole
 {
-    /// <summary>Binds keyboard keys to console commands. Executes bound commands on key press.</summary>
+    /// <summary>Runs the commands of <see cref="BindingRegistry"/> when their key chords are pressed.</summary>
     public class CommandBindings : MonoBehaviour
     {
         private static CommandBindings? _instance;
 
-        private readonly Dictionary<Key, string> _bindings = new();
         private readonly List<string> _pendingExecute = new();
-        private const string PrefsKey = "DevConsole_Bindings";
 
-        /// <summary>All registered bindings.</summary>
-        public IReadOnlyDictionary<Key, string> Bindings => _bindings;
+        /// <summary>
+        /// Return true to keep bindings from firing, e.g. while the game's own chat or text field has focus. The console
+        /// window blocks them by itself.
+        /// </summary>
+        public static Func<bool>? Suppress;
 
         /// <summary>Ensures the singleton MonoBehaviour exists. Creates one if needed.</summary>
         public static CommandBindings EnsureExists()
@@ -27,11 +28,21 @@ namespace Rubickanov.DevConsole
             return _instance;
         }
 
-        /// <summary>Returns the instance if it exists, null otherwise.</summary>
-        public static CommandBindings? GetInstance() => _instance;
-
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStatics() => _instance = null;
+        private static void ResetStatics()
+        {
+            _instance = null;
+            Suppress = null;
+        }
+
+        // Otherwise only the bind command creates the object, so saved bindings did nothing in a new session until
+        // something else was bound
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void RestoreSaved()
+        {
+            if (BindingRegistry.Instance.Bindings.Count > 0)
+                EnsureExists();
+        }
 
         private void Awake()
         {
@@ -42,7 +53,6 @@ namespace Rubickanov.DevConsole
             }
 
             _instance = this;
-            Load();
         }
 
         private void OnDestroy()
@@ -53,90 +63,28 @@ namespace Rubickanov.DevConsole
 
         private void Update()
         {
-            if (_bindings.Count == 0) return;
-            if (Keyboard.current == null) return;
+            var bindings = BindingRegistry.Instance.Bindings;
+            if (bindings.Count == 0) return;
+            var keyboard = Keyboard.current;
+            if (keyboard == null) return;
 
             // Don't execute binds while console is open
             if (DevConsoleIMGUI.IsOpen) return;
             if (DevConsoleUIToolkit.Instance != null && DevConsoleUIToolkit.Instance.IsVisible) return;
+            if (Suppress != null && Suppress()) return;
 
-            // Collect first, then execute. A bound command may be `bind`/`unbind`, which mutates
-            // _bindings — executing inside the foreach would throw "Collection was modified".
+            // Collect first, then execute. A bound command may be `bind`/`unbind`, which mutates the
+            // bindings — executing inside the foreach would throw "Collection was modified".
             _pendingExecute.Clear();
-            foreach (var kvp in _bindings)
+            foreach (var kvp in bindings)
             {
-                if (Keyboard.current[kvp.Key].wasPressedThisFrame)
+                if (kvp.Key.WasPressedThisFrame(keyboard))
                     _pendingExecute.Add(kvp.Value);
             }
 
+            // Logged like typed input: a bound command that fails would otherwise do nothing, visibly or otherwise
             for (int i = 0; i < _pendingExecute.Count; i++)
-                CommandRegistry.Instance.Execute(_pendingExecute[i]);
-        }
-
-        /// <summary>Binds a key to a command string.</summary>
-        public void Bind(Key key, string command)
-        {
-            _bindings[key] = command;
-            Save();
-        }
-
-        /// <summary>Removes a key binding. Returns true if it existed.</summary>
-        public bool Unbind(Key key)
-        {
-            var removed = _bindings.Remove(key);
-            if (removed) Save();
-            return removed;
-        }
-
-        /// <summary>Removes all bindings and clears persisted storage.</summary>
-        public void Clear()
-        {
-            _bindings.Clear();
-            PlayerPrefs.DeleteKey(PrefsKey);
-            PlayerPrefs.Save();
-        }
-
-        /// <summary>Parses a key name string to a Key enum value.</summary>
-        public static bool TryParseKey(string keyName, out Key key)
-        {
-            return Enum.TryParse(keyName, true, out key) && key != Key.None;
-        }
-
-        private void Save()
-        {
-            var data = new BindingsData();
-            foreach (var kvp in _bindings)
-            {
-                data.keys.Add(kvp.Key.ToString());
-                data.values.Add(kvp.Value);
-            }
-            PlayerPrefs.SetString(PrefsKey, JsonUtility.ToJson(data));
-        }
-
-        private void Load()
-        {
-            if (!PlayerPrefs.HasKey(PrefsKey)) return;
-            try
-            {
-                var data = JsonUtility.FromJson<BindingsData>(PlayerPrefs.GetString(PrefsKey));
-                if (data?.keys == null || data.values == null) return;
-                for (int i = 0; i < data.keys.Count && i < data.values.Count; i++)
-                {
-                    if (Enum.TryParse<Key>(data.keys[i], true, out var key))
-                        _bindings[key] = data.values[i];
-                }
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"[DevConsole] Failed to load bindings: {e.Message}");
-            }
-        }
-
-        [Serializable]
-        private class BindingsData
-        {
-            public List<string> keys = new();
-            public List<string> values = new();
+                CommandRegistry.Instance.ExecuteAndLog(_pendingExecute[i]);
         }
     }
 }

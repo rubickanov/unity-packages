@@ -6,17 +6,17 @@ namespace Rubickanov.DevConsole.Commands
 {
     internal static class LogCommands
     {
-        [ConsoleCommand("log_unity", "Toggle forwarding Unity Debug.Log messages to the console (on by default)", "Logging")]
-        public static void LogUnity(bool enabled = true)
+        [ConsoleCommand("log_unity", "Show, or switch, copying of Unity Debug.Log messages into the console (on by default)", "Logging")]
+        public static void LogUnity(bool? enabled = null)
         {
-            if (enabled != UnityLogForwarder.Enabled)
+            if (enabled.HasValue && enabled.Value != UnityLogForwarder.Enabled)
             {
-                UnityLogForwarder.Enabled = enabled;
-                ConsoleLog.LogSuccess($"Unity log forwarding {(enabled ? "enabled" : "disabled")}.");
+                UnityLogForwarder.Enabled = enabled.Value;
+                ConsoleLog.LogSuccess($"Unity log forwarding {(enabled.Value ? "enabled" : "disabled")}.");
             }
             else
             {
-                ConsoleLog.Log($"Unity log forwarding: {(enabled ? "ON" : "OFF")}");
+                ConsoleLog.Log($"Unity log forwarding: {(UnityLogForwarder.Enabled ? "ON" : "OFF")}");
             }
         }
 
