@@ -25,6 +25,8 @@ namespace Rubickanov.Audio
         [field: SerializeField, Min(0f)] public float MinDistance { get; private set; } = 1f;
         [field: SerializeField, Min(0f)] public float MaxDistance { get; private set; } = 500f;
         [field: SerializeField, Range(0f, 5f)] public float DopplerLevel { get; private set; } = 1f;
+        [field: SerializeField, Min(0f), Tooltip("Seconds an attached loop fades out for when the object it follows is destroyed.")]
+        public float LostTargetFadeOut { get; private set; } = 0.25f;
 
         [Header("Time")]
         [field: SerializeField, Tooltip("Fades, crossfades and ramps run on real time, so slow motion and a paused time scale don't stretch or freeze them.")]

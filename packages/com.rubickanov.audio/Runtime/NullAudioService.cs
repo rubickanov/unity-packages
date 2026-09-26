@@ -12,11 +12,13 @@ namespace Rubickanov.Audio
 
         public SoundHandle PlaySFX(in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f) => SoundHandle.Invalid;
         public SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f) => SoundHandle.Invalid;
-        public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform parent, float volumeScale = 1f, float fadeIn = 0f) => SoundHandle.Invalid;
+        public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f) => SoundHandle.Invalid;
         public void StopSound(SoundHandle handle, float fadeOut = 0f) { }
         public void StopAllSFX(float fadeOut = 0f) { }
 
         public void PlayLoop(string slot, in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f) { }
+        public void PlayLoopAtPoint(string slot, in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f) { }
+        public void PlayLoopAttached(string slot, in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f) { }
         public void SetLoopVolume(string slot, float volumeScale, float duration = 0f) { }
         public void SetLoopPitch(string slot, float pitch, float duration = 0f) { }
         public void StopLoop(string slot, float fadeOut = 0f) { }

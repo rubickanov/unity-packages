@@ -47,6 +47,22 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
+        public void PlayLoopAtPoint_AnySlot_DoesNotPlay()
+        {
+            _service.PlayLoopAtPoint("spinner", default, Vector3.zero);
+
+            Assert.IsFalse(_service.IsLoopPlaying("spinner"));
+        }
+
+        [Test]
+        public void PlayLoopAttached_NullTarget_DoesNotPlay()
+        {
+            _service.PlayLoopAttached("motor", default, null!);
+
+            Assert.IsFalse(_service.IsLoopPlaying("motor"));
+        }
+
+        [Test]
         public void SetVolume_ThenGet_ReturnsSetValue()
         {
             _service.SetVolume("CommentatorVolume", 0.4f);
