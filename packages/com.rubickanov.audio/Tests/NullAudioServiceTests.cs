@@ -47,30 +47,6 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
-        public void SetMasterVolume_ThenGet_ReturnsSetValue()
-        {
-            _service.SetMasterVolume(0.25f);
-
-            Assert.AreEqual(0.25f, _service.MasterVolume);
-        }
-
-        [Test]
-        public void SetMusicVolume_ThenGet_ReturnsSetValue()
-        {
-            _service.SetMusicVolume(0.5f);
-
-            Assert.AreEqual(0.5f, _service.MusicVolume);
-        }
-
-        [Test]
-        public void SetSFXVolume_ThenGet_ReturnsSetValue()
-        {
-            _service.SetSFXVolume(0.75f);
-
-            Assert.AreEqual(0.75f, _service.SFXVolume);
-        }
-
-        [Test]
         public void SetVolume_ThenGet_ReturnsSetValue()
         {
             _service.SetVolume("CommentatorVolume", 0.4f);
@@ -79,11 +55,9 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
-        public void Volumes_InitialValues_AreOne()
+        public void GetVolume_NeverSet_ReturnsOne()
         {
-            Assert.AreEqual(1f, _service.MasterVolume);
-            Assert.AreEqual(1f, _service.MusicVolume);
-            Assert.AreEqual(1f, _service.SFXVolume);
+            Assert.AreEqual(1f, _service.GetVolume("MasterVolume"));
         }
     }
 }
