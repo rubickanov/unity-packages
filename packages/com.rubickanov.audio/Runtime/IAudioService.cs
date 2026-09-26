@@ -25,6 +25,9 @@ namespace Rubickanov.Audio
         void SetMasterVolume(float volume01);
         void SetMusicVolume(float volume01);
         void SetSFXVolume(float volume01);
+        /// <summary>Sets the volume behind any exposed mixer parameter; the master, music and SFX names route to their own setters.</summary>
+        void SetVolume(string mixerParam, float volume01);
+        float GetVolume(string mixerParam);
         float MasterVolume { get; }
         float MusicVolume { get; }
         float SFXVolume { get; }

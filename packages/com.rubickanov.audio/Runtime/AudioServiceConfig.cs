@@ -29,5 +29,9 @@ namespace Rubickanov.Audio
         [Header("Pool & Music")]
         [field: SerializeField] public int MaxSfxSources { get; private set; } = 16;
         [field: SerializeField] public float MusicCrossfadeDuration { get; private set; } = 1f;
+
+        [Header("Time")]
+        [field: SerializeField, Tooltip("Fades, crossfades and ducking run on real time, so slow motion and a paused time scale don't stretch or freeze them.")]
+        public bool UnscaledTime { get; private set; } = true;
     }
 }

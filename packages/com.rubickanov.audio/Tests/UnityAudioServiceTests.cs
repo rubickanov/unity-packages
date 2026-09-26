@@ -154,6 +154,36 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
+        public void SetVolume_CustomParam_StoredClamped()
+        {
+            _service.SetVolume("CommentatorVolume", 1.5f);
+
+            Assert.AreEqual(1f, _service.GetVolume("CommentatorVolume"));
+        }
+
+        [Test]
+        public void SetVolume_SfxParam_RoutesToSfxVolume()
+        {
+            _service.SetVolume(_config.SfxVolumeParam, 0.25f);
+
+            Assert.AreEqual(0.25f, _service.SFXVolume);
+        }
+
+        [Test]
+        public void GetVolume_UnknownParam_ReturnsFullVolume()
+        {
+            Assert.AreEqual(1f, _service.GetVolume("Unknown"));
+        }
+
+        [Test]
+        public void GetVolume_MasterParam_ReturnsMasterVolume()
+        {
+            _service.SetMasterVolume(0.6f);
+
+            Assert.AreEqual(0.6f, _service.GetVolume(_config.MasterVolumeParam));
+        }
+
+        [Test]
         public void StopMusic_NoMusicPlaying_NoOp()
         {
             Assert.DoesNotThrow(() => _service.StopMusic());

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Rubickanov.Audio
@@ -10,6 +11,7 @@ namespace Rubickanov.Audio
         private float _masterVolume = 1f;
         private float _musicVolume = 1f;
         private float _sfxVolume = 1f;
+        private readonly Dictionary<string, float> _volumes = new();
 
         public SoundHandle PlaySFX(in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f) => SoundHandle.Invalid;
         public SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f) => SoundHandle.Invalid;
@@ -29,6 +31,13 @@ namespace Rubickanov.Audio
         public void SetMasterVolume(float volume01) => _masterVolume = volume01;
         public void SetMusicVolume(float volume01) => _musicVolume = volume01;
         public void SetSFXVolume(float volume01) => _sfxVolume = volume01;
+        public void SetVolume(string mixerParam, float volume01)
+        {
+            if (!string.IsNullOrEmpty(mixerParam)) _volumes[mixerParam] = volume01;
+        }
+
+        public float GetVolume(string mixerParam) =>
+            !string.IsNullOrEmpty(mixerParam) && _volumes.TryGetValue(mixerParam, out var volume) ? volume : 1f;
         public float MasterVolume => _masterVolume;
         public float MusicVolume => _musicVolume;
         public float SFXVolume => _sfxVolume;
