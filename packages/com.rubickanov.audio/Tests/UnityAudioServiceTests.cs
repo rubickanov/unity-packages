@@ -3,6 +3,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Audio;
 
 namespace Rubickanov.Audio.Tests
 {
@@ -261,6 +262,222 @@ namespace Rubickanov.Audio.Tests
             Assert.AreEqual(30f, source.maxDistance);
             Assert.AreEqual(0f, source.dopplerLevel);
         }
+
+        [Test]
+        public void PlaySFX_PoolFullIncomingHigherPriority_EvictsLowestPriority()
+        {
+            using var service = ServiceWithPool(2);
+            var low = MakeSound(NewClip(), priority: 0);
+            var high = MakeSound(NewClip(), priority: 10);
+            var higher = MakeSound(NewClip(), priority: 20);
+            service.PlaySFX(high);
+            service.PlaySFX(low);
+
+            var handle = service.PlaySFX(higher);
+
+            Assert.IsTrue(handle.IsValid);
+            CollectionAssert.AreEquivalent(new[] { high.Resource, higher.Resource }, PlayingResources(service));
+        }
+
+        [Test]
+        public void PlaySFX_PoolFullIncomingLowerPriority_ReturnsInvalidAndKeepsPlaying()
+        {
+            using var service = ServiceWithPool(2);
+            var bumper = MakeSound(NewClip(), priority: 10);
+            var line = MakeSound(NewClip(), priority: 5);
+            service.PlaySFX(bumper);
+            service.PlaySFX(line);
+
+            var handle = service.PlaySFX(MakeSound(NewClip(), priority: 0));
+
+            Assert.IsFalse(handle.IsValid);
+            CollectionAssert.AreEquivalent(new[] { bumper.Resource, line.Resource }, PlayingResources(service));
+        }
+
+        [Test]
+        public void PlaySFX_PoolFullEqualPriority_EvictsOldest()
+        {
+            using var service = ServiceWithPool(2);
+            var first = MakeSound(NewClip());
+            var second = MakeSound(NewClip());
+            var third = MakeSound(NewClip());
+            service.PlaySFX(first);
+            service.PlaySFX(second);
+
+            var handle = service.PlaySFX(third);
+
+            Assert.IsTrue(handle.IsValid);
+            CollectionAssert.AreEqual(new[] { second.Resource, third.Resource }, PlayingResources(service));
+        }
+
+        [Test]
+        public void PlaySFX_SeveralLowestPriority_EvictsOldestOfThem()
+        {
+            using var service = ServiceWithPool(3);
+            var olderHit = MakeSound(NewClip(), priority: 0);
+            var bumper = MakeSound(NewClip(), priority: 10);
+            var newerHit = MakeSound(NewClip(), priority: 0);
+            service.PlaySFX(bumper);
+            service.PlaySFX(olderHit);
+            service.PlaySFX(newerHit);
+
+            service.PlaySFX(MakeSound(NewClip(), priority: 0));
+
+            CollectionAssert.DoesNotContain(PlayingResources(service), olderHit.Resource);
+            CollectionAssert.Contains(PlayingResources(service), bumper.Resource);
+            CollectionAssert.Contains(PlayingResources(service), newerHit.Resource);
+        }
+
+        [Test]
+        public void PlaySFX_EvictedSound_FreesInstanceSlotAndHandle()
+        {
+            using var service = ServiceWithPool(1);
+            var hit = MakeSound(NewClip(), maxInstances: 1);
+            var bumper = MakeSound(NewClip(), priority: 5);
+            var evicted = service.PlaySFX(hit);
+            service.PlaySFX(bumper);
+
+            service.StopSound(evicted);
+
+            var counts = GetField<System.Collections.Generic.Dictionary<AudioResource, int>>(service, "_instanceCounts");
+            Assert.IsFalse(counts.ContainsKey(hit.Resource), "an evicted copy must not hold its sound's instance slot");
+            CollectionAssert.AreEqual(new[] { bumper.Resource }, PlayingResources(service));
+        }
+
+        [Test]
+        public void PlaySFX_MaxInstancesReached_ReturnsInvalid()
+        {
+            var hit = MakeSound(NewClip(), maxInstances: 2);
+            _service.PlaySFX(hit);
+            _service.PlaySFX(hit);
+
+            var third = _service.PlaySFX(hit);
+
+            Assert.IsFalse(third.IsValid);
+            Assert.AreEqual(2, PlayingResources(_service).Length);
+        }
+
+        [Test]
+        public void PlaySFX_MaxInstancesAfterStopSound_PlaysAgain()
+        {
+            var hit = MakeSound(NewClip(), maxInstances: 1);
+            var first = _service.PlaySFX(hit);
+            _service.StopSound(first);
+
+            var second = _service.PlaySFX(hit);
+
+            Assert.IsTrue(second.IsValid);
+        }
+
+        [Test]
+        public void PlaySFX_MaxInstances_CountsAtPointAndAttached()
+        {
+            var hit = MakeSound(NewClip(), maxInstances: 2);
+            var follow = new GameObject("follow");
+            try
+            {
+                _service.PlaySFXAtPoint(hit, Vector3.zero);
+                _service.PlaySFXAttached(hit, follow.transform);
+
+                var third = _service.PlaySFX(hit);
+
+                Assert.IsFalse(third.IsValid);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(follow);
+            }
+        }
+
+        [Test]
+        public void PlaySFX_FadingOutCopy_NotCountedAsInstance()
+        {
+            var hit = MakeSound(NewClip(), maxInstances: 1);
+            var first = _service.PlaySFX(hit);
+            _service.StopSound(first, fadeOut: 10f);
+
+            var second = _service.PlaySFX(hit);
+
+            Assert.IsTrue(second.IsValid);
+        }
+
+        [Test]
+        public void PlaySFX_DifferentResources_LimitedIndependently()
+        {
+            var hit = MakeSound(NewClip(), maxInstances: 1);
+            var splash = MakeSound(NewClip(), maxInstances: 1);
+            _service.PlaySFX(hit);
+
+            var handle = _service.PlaySFX(splash);
+
+            Assert.IsTrue(handle.IsValid);
+        }
+
+        [Test]
+        public void PlaySFX_WithinMinInterval_ReturnsInvalid()
+        {
+            var clock = UseClock(_service);
+            var hit = MakeSound(NewClip(), minInterval: 0.05f);
+            _service.PlaySFX(hit);
+            clock.Now += 0.04;
+
+            var second = _service.PlaySFX(hit);
+
+            Assert.IsFalse(second.IsValid);
+        }
+
+        [Test]
+        public void PlaySFX_AfterMinInterval_Plays()
+        {
+            var clock = UseClock(_service);
+            var hit = MakeSound(NewClip(), minInterval: 0.05f);
+            _service.PlaySFX(hit);
+            clock.Now += 0.04;
+            _service.PlaySFX(hit);
+            clock.Now += 0.02;
+
+            var third = _service.PlaySFX(hit);
+
+            Assert.IsTrue(third.IsValid, "a dropped start must not restart the interval");
+        }
+
+        private UnityAudioService ServiceWithPool(int size)
+        {
+            SetMaxSfxSources(_config, size);
+            return new UnityAudioService(_config);
+        }
+
+        private static AudioResource[] PlayingResources(UnityAudioService service) =>
+            GetField<System.Collections.IEnumerable>(service, "_activeSources")
+                .Cast<AudioSource>().Select(source => source.resource).ToArray();
+
+        private static FakeClock UseClock(UnityAudioService service)
+        {
+            var clock = new FakeClock();
+            typeof(UnityAudioService).GetField("_now", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(service, new Func<double>(() => clock.Now));
+            return clock;
+        }
+
+        private sealed class FakeClock
+        {
+            public double Now = 100;
+        }
+
+        private static AudioClip NewClip() => AudioClip.Create("test", 1, 1, 44100, false);
+
+        private static SoundConfig MakeSound(AudioClip clip, int priority = 0, int maxInstances = 0, float minInterval = 0f)
+        {
+            object boxed = default(SoundConfig);
+            SetSoundField(boxed, "_resource", clip);
+            SetSoundField(boxed, "_priority", priority);
+            SetSoundField(boxed, "_maxInstances", maxInstances);
+            SetSoundField(boxed, "_minInterval", minInterval);
+            return (SoundConfig)boxed;
+        }
+
+        private static void SetSoundField(object boxed, string name, object value) =>
+            typeof(SoundConfig).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(boxed, value);
 
         private AudioSource LoopSource(string slot) =>
             GetField<System.Collections.Generic.Dictionary<string, AudioSource>>(_service, "_loopSources")[slot];

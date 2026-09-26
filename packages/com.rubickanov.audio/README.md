@@ -1,6 +1,6 @@
 # Audio
 
-Audio service with SFX source pooling, loop slots with live volume and pitch, music crossfade, fade in/out, mixer snapshots, and mixer volume control.
+Audio service with SFX source pooling (priority eviction, per-sound repeat limits), loop slots with live volume and pitch, music crossfade, fade in/out, mixer snapshots, and mixer volume control.
 
 ## Dependencies
 
@@ -22,7 +22,7 @@ IAudioService
 
 ## Core Concepts
 
-**SoundConfig** — Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`) and an optional output `AudioMixerGroup`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
+**SoundConfig** — Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`), an optional output `AudioMixerGroup`, and pool rules for one-shots: `Priority`, `MaxInstances`, `MinInterval`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
 
 **MusicConfig** — Serializable struct with only an `AudioResource`. No pitch variation. Used by `PlayMusic`.
 
@@ -75,6 +75,25 @@ audio.StopSound(handle, fadeOut: 0.3f);  // fade out, then release to the pool
 audio.StopAllSFX();                      // every pooled one-shot; loops and music keep playing
 audio.StopAllSFX(fadeOut: 0.2f);
 ```
+
+### Priority and Repeat Limits
+
+Set in the Inspector on each `SoundConfig`; zeros mean no rule, so a new sound behaves like a plain pooled one-shot.
+
+| Field | Effect |
+|---|---|
+| `Priority` | When the pool is full, the playing one-shot with the lowest priority is evicted, oldest first. A sound whose priority is below every playing one is dropped. |
+| `MaxInstances` | At most this many copies of the sound play at once; one more is dropped. |
+| `MinInterval` | Seconds between two starts of the sound (`0.05` = at most once per 50 ms); a start inside the window is dropped. |
+
+```csharp
+// bumper: Priority 100; body hit: Priority 0, MaxInstances 4, MinInterval 0.05
+audio.PlaySFX(_bumper);                              // never evicted by hits
+SoundHandle hit = audio.PlaySFXAtPoint(_bodyHit, contact.point, volumeScale: force01);
+if (!hit.IsValid) { /* dropped by a limit — nothing to do */ }
+```
+
+A dropped sound returns `SoundHandle.Invalid`. A sound is identified by its `AudioResource`, so two configs with the same resource share limits. Copies fading out after `StopSound` don't count. `MinInterval` runs on the same clock as the fades (real time by default). Loops and music are not pooled and ignore these fields.
 
 ### Loops via Named Slots
 
@@ -148,7 +167,8 @@ foreach (var (param, volume) in settings.Volumes)
 
 - **Separate SoundConfig and MusicConfig** — music must not receive random pitch variation; the type system enforces this rather than documentation.
 - **Named loop slots, not handles** — a loop is a semantic slot (`"steps"`, `"ambient"`), not an anonymous instance. Slots are dedicated sources that survive scene loads and are never evicted by the SFX pool, so callers don't manage handles across scenes.
-- **SFX pool evicts oldest at capacity** — when every source is busy, the oldest playing source is stopped, its handle invalidated, and it is reused. No allocation spikes at peak concurrency.
+- **SFX pool evicts by priority at capacity** — when every source is busy, the lowest priority playing source (oldest among equals) is stopped, its handle invalidated, and it is reused; a sound below every playing one is dropped instead. `AudioSource.priority` is not enough: it only decides which voices Unity mutes, not which one-shot the pool gives up. No allocation spikes at peak concurrency.
+- **Repeat limits drop the newcomer** — over `MaxInstances` or inside `MinInterval` the new start is dropped rather than cutting a copy already playing, so a burst of contacts can't turn into a stutter of restarts.
 - **Volumes by parameter name** — the mixer's layout belongs to the game, so the service takes the exposed parameter name instead of a fixed set of groups.
 - **Routing lives in the sound** — `SoundConfig.Output` names the mixer group, so the caller doesn't pick a group per call.
 - **No ducking API** — a mixer Duck Volume effect ducks by signal level without code and without writing the same parameter as the player's volume setting.

@@ -10,7 +10,9 @@ namespace Rubickanov.Audio
 {
     /// <summary>
     /// AudioMixer-based audio service with pooled SFX sources, loop slots and music crossfade. The service writes
-    /// no volume until asked; saving and restoring volumes is the caller's job.
+    /// no volume until asked; saving and restoring volumes is the caller's job. A full pool evicts the lowest
+    /// priority one-shot, oldest first; <see cref="SoundConfig.MaxInstances"/> and
+    /// <see cref="SoundConfig.MinInterval"/> drop repeats of one sound before they reach the pool.
     /// </summary>
     public class UnityAudioService : IAudioService, IDisposable
     {
@@ -29,6 +31,9 @@ namespace Rubickanov.Audio
         private readonly Queue<AudioSource> _sfxPool = new();
         private readonly LinkedList<AudioSource> _activeSources = new();
         private readonly Dictionary<AudioSource, LinkedListNode<AudioSource>> _activeNodes = new();
+        private readonly Dictionary<AudioSource, Voice> _voices = new();
+        private readonly Dictionary<AudioResource, int> _instanceCounts = new();
+        private readonly Dictionary<AudioResource, double> _lastStarts = new();
         private readonly Dictionary<long, AudioSource> _handleSources = new();
         private readonly Dictionary<AudioSource, long> _sourceHandles = new();
         private readonly Dictionary<AudioSource, CancellationTokenSource> _sourceWatchers = new();
@@ -39,6 +44,9 @@ namespace Rubickanov.Audio
         private readonly List<AudioSource> _stopBuffer = new();
         private readonly Dictionary<string, float> _volumes = new();
         private readonly CancellationTokenSource _cts = new();
+
+        // Clock for MinInterval, the same time the fades run on.
+        private readonly Func<double> _now;
 
         private long _nextHandleId = 1;
         private bool _musicSourceAActive = true;
@@ -57,6 +65,7 @@ namespace Rubickanov.Audio
             _minDistance = config.MinDistance;
             _maxDistance = Mathf.Max(config.MinDistance, config.MaxDistance);
             _dopplerLevel = config.DopplerLevel;
+            _now = _unscaledTime ? () => Time.realtimeSinceStartupAsDouble : () => Time.timeAsDouble;
 
             _root = new GameObject("[AudioService]");
             if (Application.isPlaying)
@@ -108,8 +117,11 @@ namespace Rubickanov.Audio
             source.dopplerLevel = _dopplerLevel;
         }
 
-        private AudioSource RentSource()
+        // Null when the sound may not play: invalid, over its repeat limit, or below every sound in a full pool.
+        private AudioSource? RentSource(in SoundConfig sound)
         {
+            if (!sound.IsValid || !PassesRepeatLimit(in sound)) return null;
+
             AudioSource source;
 
             if (_sfxPool.Count > 0)
@@ -118,13 +130,15 @@ namespace Rubickanov.Audio
             }
             else if (_activeSources.Count > 0)
             {
-                var oldest = _activeSources.First!;
-                source = oldest.Value;
+                // AudioSource.priority only decides which voices Unity mutes; who leaves the pool is decided here.
+                var victim = LowestPriorityVoice();
+                if (_voices[victim].Priority > sound.Priority) return null;
+
+                source = victim;
+                Unlink(source);
                 EndWatch(source);
                 UntrackHandle(source);
                 source.Stop();
-                _activeSources.RemoveFirst();
-                _activeNodes.Remove(source);
             }
             else
             {
@@ -139,14 +153,58 @@ namespace Rubickanov.Audio
 
             var node = _activeSources.AddLast(source);
             _activeNodes[source] = node;
+            _voices[source] = new Voice(sound.Priority, sound.Resource);
+            _instanceCounts[sound.Resource] = InstanceCount(sound.Resource) + 1;
+            _lastStarts[sound.Resource] = _now();
             return source;
+        }
+
+        private bool PassesRepeatLimit(in SoundConfig sound)
+        {
+            if (sound.MaxInstances > 0 && InstanceCount(sound.Resource) >= sound.MaxInstances) return false;
+            if (sound.MinInterval > 0f && _lastStarts.TryGetValue(sound.Resource, out var last) &&
+                _now() - last < sound.MinInterval) return false;
+            return true;
+        }
+
+        private int InstanceCount(AudioResource resource) =>
+            _instanceCounts.TryGetValue(resource, out var count) ? count : 0;
+
+        // The active list runs oldest to newest, so the first lowest found is the oldest of them.
+        private AudioSource LowestPriorityVoice()
+        {
+            var node = _activeSources.First!;
+            var lowest = node.Value;
+            int lowestPriority = _voices[lowest].Priority;
+            for (node = node.Next; node != null; node = node.Next)
+            {
+                int priority = _voices[node.Value].Priority;
+                if (priority < lowestPriority)
+                {
+                    lowest = node.Value;
+                    lowestPriority = priority;
+                }
+            }
+            return lowest;
+        }
+
+        // Takes the source out of the active list and its sound's copy count; a fading-out source is no longer a copy.
+        private void Unlink(AudioSource source)
+        {
+            if (_activeNodes.Remove(source, out var node))
+                _activeSources.Remove(node);
+
+            if (_voices.Remove(source, out var voice))
+            {
+                int left = InstanceCount(voice.Resource) - 1;
+                if (left > 0) _instanceCounts[voice.Resource] = left;
+                else _instanceCounts.Remove(voice.Resource);
+            }
         }
 
         private void ReturnSource(AudioSource source)
         {
-            bool wasActive = _activeNodes.Remove(source, out var node);
-            if (wasActive) _activeSources.Remove(node);
-
+            Unlink(source);
             EndWatch(source);
             UntrackHandle(source);
 
@@ -225,47 +283,36 @@ namespace Rubickanov.Audio
 
         public SoundHandle PlaySFX(in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f)
         {
-            if (!sound.IsValid) return SoundHandle.Invalid;
+            var source = RentSource(in sound);
+            if (source == null) return SoundHandle.Invalid;
 
-            var source = RentSource();
             source.spatialBlend = 0f;
-            source.resource = sound.Resource;
-            ApplyOutput(source, in sound);
-            ApplyPitch(source, in sound);
-            var watch = BeginWatch(source);
-            StartPlayWithFade(source, volumeScale, fadeIn, watch);
-
-            var handle = TrackHandle(source);
-            ReturnAfterPlayAsync(source, watch).Forget();
-            return handle;
+            return Start(source, in sound, volumeScale, fadeIn, follow: null);
         }
 
         public SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f)
         {
-            if (!sound.IsValid) return SoundHandle.Invalid;
+            var source = RentSource(in sound);
+            if (source == null) return SoundHandle.Invalid;
 
-            var source = RentSource();
             source.transform.position = position;
             source.spatialBlend = 1f;
-            source.resource = sound.Resource;
-            ApplyOutput(source, in sound);
-            ApplyPitch(source, in sound);
-            var watch = BeginWatch(source);
-            StartPlayWithFade(source, volumeScale, fadeIn, watch);
-
-            var handle = TrackHandle(source);
-            ReturnAfterPlayAsync(source, watch).Forget();
-            return handle;
+            return Start(source, in sound, volumeScale, fadeIn, follow: null);
         }
 
         public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f)
         {
-            if (!sound.IsValid) return SoundHandle.Invalid;
             if (follow == null) return SoundHandle.Invalid;
+            var source = RentSource(in sound);
+            if (source == null) return SoundHandle.Invalid;
 
-            var source = RentSource();
             source.transform.position = follow.position;
             source.spatialBlend = 1f;
+            return Start(source, in sound, volumeScale, fadeIn, follow);
+        }
+
+        private SoundHandle Start(AudioSource source, in SoundConfig sound, float volumeScale, float fadeIn, Transform? follow)
+        {
             source.resource = sound.Resource;
             ApplyOutput(source, in sound);
             ApplyPitch(source, in sound);
@@ -273,7 +320,8 @@ namespace Rubickanov.Audio
             StartPlayWithFade(source, volumeScale, fadeIn, watch);
 
             var handle = TrackHandle(source);
-            FollowAndReturnAsync(source, follow, watch).Forget();
+            if (follow != null) FollowAndReturnAsync(source, follow, watch).Forget();
+            else ReturnAfterPlayAsync(source, watch).Forget();
             return handle;
         }
 
@@ -530,8 +578,7 @@ namespace Rubickanov.Audio
 
             if (fadeOut > 0f)
             {
-                if (_activeNodes.Remove(source, out var node))
-                    _activeSources.Remove(node);
+                Unlink(source);
                 EndWatch(source);
                 UntrackHandle(source);
                 FadeOutAndReclaimAsync(source, fadeOut, _cts.Token).Forget();
@@ -728,6 +775,18 @@ namespace Rubickanov.Audio
             {
                 if (Application.isPlaying) Object.Destroy(_root);
                 else Object.DestroyImmediate(_root);
+            }
+        }
+
+        private readonly struct Voice
+        {
+            public readonly int Priority;
+            public readonly AudioResource Resource;
+
+            public Voice(int priority, AudioResource resource)
+            {
+                Priority = priority;
+                Resource = resource;
             }
         }
     }
