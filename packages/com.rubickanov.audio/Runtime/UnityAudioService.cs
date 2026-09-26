@@ -225,6 +225,7 @@ namespace Rubickanov.Audio
             source.loop = false;
             source.pitch = 1f;
             source.volume = 1f;
+            source.ignoreListenerPause = false;
             _sfxPool.Enqueue(source);
         }
 
@@ -258,11 +259,16 @@ namespace Rubickanov.Audio
                 _handleSources.Remove(id);
         }
 
+        // AudioListener.pause makes isPlaying false without stopping the sound, which resumes where it was:
+        // a paused source is still busy. A free or stopped source has no resource.
+        private static bool IsSounding(AudioSource source) =>
+            source.isPlaying || (AudioListener.pause && !source.ignoreListenerPause && source.resource != null);
+
         private async UniTaskVoid ReturnAfterPlayAsync(AudioSource source, CancellationToken ct)
         {
             try
             {
-                await UniTask.WaitWhile(() => source != null && source.isPlaying,
+                await UniTask.WaitWhile(() => source != null && IsSounding(source),
                     cancellationToken: ct);
             }
             catch (OperationCanceledException) { return; }
@@ -276,9 +282,11 @@ namespace Rubickanov.Audio
                 ReturnSource(source);
         }
 
-        private void ApplyOutput(AudioSource source, in SoundConfig sound)
+        // Where the sound goes and whether it goes on through AudioListener.pause.
+        private void ApplyRouting(AudioSource source, in SoundConfig sound)
         {
             source.outputAudioMixerGroup = sound.Output != null ? sound.Output : _sfxGroup;
+            source.ignoreListenerPause = sound.PlaysOnPause;
         }
 
         private static void ApplyPitch(AudioSource source, in SoundConfig sound)
@@ -320,7 +328,7 @@ namespace Rubickanov.Audio
         private SoundHandle Start(AudioSource source, in SoundConfig sound, float volumeScale, float fadeIn, Transform? follow)
         {
             source.resource = sound.Resource;
-            ApplyOutput(source, in sound);
+            ApplyRouting(source, in sound);
             ApplyPitch(source, in sound);
             var watch = BeginWatch(source);
             StartPlayWithFade(source, volumeScale, fadeIn, watch);
@@ -373,7 +381,7 @@ namespace Rubickanov.Audio
         {
             try
             {
-                while (source != null && source.isPlaying)
+                while (source != null && IsSounding(source))
                 {
                     if (follow != null)
                         source.transform.position = follow.position;
@@ -433,7 +441,7 @@ namespace Rubickanov.Audio
             source.spatialBlend = spatialBlend;
             source.resource = sound.Resource;
             source.loop = true;
-            ApplyOutput(source, in sound);
+            ApplyRouting(source, in sound);
             ApplyPitch(source, in sound);
 
             if (fadeIn > 0f)
@@ -514,7 +522,7 @@ namespace Rubickanov.Audio
         public bool IsLoopPlaying(string slot)
         {
             if (string.IsNullOrEmpty(slot)) return false;
-            return _loopSources.TryGetValue(slot, out var source) && source != null && source.isPlaying;
+            return _loopSources.TryGetValue(slot, out var source) && source != null && IsSounding(source);
         }
 
         private void CancelLoopWatcher(string slot) => CancelWatcher(_loopWatchers, slot);
@@ -706,11 +714,12 @@ namespace Rubickanov.Audio
             var outgoing = _musicSourceAActive ? _musicSourceA : _musicSourceB;
             _musicSourceAActive = !_musicSourceAActive;
 
-            float outgoingStartVolume = outgoing.isPlaying ? outgoing.volume : 0f;
+            float outgoingStartVolume = IsSounding(outgoing) ? outgoing.volume : 0f;
             float duration = crossfadeDuration ?? _crossfadeDuration;
 
             incoming.resource = music.Resource;
             incoming.pitch = 1f;
+            incoming.ignoreListenerPause = music.PlaysOnPause;
             incoming.volume = 0f;
             incoming.Play();
 

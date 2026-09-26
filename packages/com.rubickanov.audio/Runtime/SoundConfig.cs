@@ -17,6 +17,8 @@ namespace Rubickanov.Audio
         private int _maxInstances;
         [SerializeField, Min(0f), Tooltip("Seconds that must pass between two starts of this sound (0.05 = at most once per 50 ms). 0: no limit.")]
         private float _minInterval;
+        [SerializeField, Tooltip("Keeps playing while AudioListener.pause is set: menu and on-air sounds.")]
+        private bool _playsOnPause;
 
         public AudioResource Resource => _resource;
         public float PitchVariation => _pitchVariation;
@@ -27,6 +29,8 @@ namespace Rubickanov.Audio
         public int MaxInstances => _maxInstances;
         /// <summary>Minimum seconds between two starts; 0 means no limit.</summary>
         public float MinInterval => _minInterval;
+        /// <summary>Plays through <see cref="AudioListener.pause"/> (<see cref="AudioSource.ignoreListenerPause"/>).</summary>
+        public bool PlaysOnPause => _playsOnPause;
         public bool IsValid => _resource != null;
     }
 }

@@ -585,6 +585,57 @@ namespace Rubickanov.Audio.Tests
             Assert.AreEqual(0, LoopFollows(_service).Count);
         }
 
+        [Test]
+        public void PlaySFX_PlaysOnPause_SetsIgnoreListenerPause()
+        {
+            _service.PlaySFX(MakeSound(NewClip(), playsOnPause: true));
+
+            Assert.IsTrue(ActiveSource(_service).ignoreListenerPause);
+        }
+
+        [Test]
+        public void PlaySFX_AfterPlaysOnPauseSound_ClearsIgnoreListenerPause()
+        {
+            using var service = ServiceWithPool(1);
+            service.StopSound(service.PlaySFX(MakeSound(NewClip(), playsOnPause: true)));
+
+            service.PlaySFX(MakeSound(NewClip()));
+
+            Assert.IsFalse(ActiveSource(service).ignoreListenerPause, "a reused source must not keep playing on pause");
+        }
+
+        [Test]
+        public void PlayLoop_PlaysOnPause_SetsIgnoreListenerPause()
+        {
+            _service.PlayLoop("jingle", MakeSound(NewClip(), playsOnPause: true));
+
+            Assert.IsTrue(LoopSource("jingle").ignoreListenerPause);
+        }
+
+        [Test]
+        public void PlayLoop_OrdinarySoundAfterPlaysOnPause_ClearsIgnoreListenerPause()
+        {
+            _service.PlayLoop("jingle", MakeSound(NewClip(), playsOnPause: true));
+
+            _service.PlayLoop("jingle", MakeSound(NewClip()));
+
+            Assert.IsFalse(LoopSource("jingle").ignoreListenerPause);
+        }
+
+        [Test]
+        public void PlayMusic_PlaysOnPause_SetsIgnoreListenerPause()
+        {
+            _service.PlayMusic(MakeMusic(playsOnPause: true), crossfadeDuration: 0f);
+
+            Assert.IsTrue(MusicSources(_service).Any(source => source.resource != null && source.ignoreListenerPause));
+        }
+
+        private static AudioSource ActiveSource(UnityAudioService service) =>
+            GetField<System.Collections.IEnumerable>(service, "_activeSources").Cast<AudioSource>().Single();
+
+        private static AudioSource[] MusicSources(UnityAudioService service) =>
+            new[] { GetField<AudioSource>(service, "_musicSourceA"), GetField<AudioSource>(service, "_musicSourceB") };
+
         private Transform NewTarget(Vector3 position)
         {
             var target = new GameObject("Target");
@@ -629,14 +680,25 @@ namespace Rubickanov.Audio.Tests
 
         private static AudioClip NewClip() => AudioClip.Create("test", 1, 1, 44100, false);
 
-        private static SoundConfig MakeSound(AudioClip clip, int priority = 0, int maxInstances = 0, float minInterval = 0f)
+        private static SoundConfig MakeSound(AudioClip clip, int priority = 0, int maxInstances = 0, float minInterval = 0f,
+            bool playsOnPause = false)
         {
             object boxed = default(SoundConfig);
             SetSoundField(boxed, "_resource", clip);
             SetSoundField(boxed, "_priority", priority);
             SetSoundField(boxed, "_maxInstances", maxInstances);
             SetSoundField(boxed, "_minInterval", minInterval);
+            SetSoundField(boxed, "_playsOnPause", playsOnPause);
             return (SoundConfig)boxed;
+        }
+
+        private static MusicConfig MakeMusic(bool playsOnPause)
+        {
+            object boxed = default(MusicConfig);
+            typeof(MusicConfig).GetField("_resource", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(boxed, NewClip());
+            typeof(MusicConfig).GetField("_playsOnPause", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(boxed, playsOnPause);
+            return (MusicConfig)boxed;
         }
 
         private static void SetSoundField(object boxed, string name, object value) =>

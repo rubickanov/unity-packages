@@ -1,6 +1,6 @@
 # Audio
 
-Audio service with SFX source pooling (priority eviction, per-sound repeat limits), loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, mixer snapshots, and mixer volume control.
+Audio service with SFX source pooling (priority eviction, per-sound repeat limits), loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, sounds that play through a paused listener, mixer snapshots, and mixer volume control.
 
 ## Dependencies
 
@@ -22,9 +22,9 @@ IAudioService
 
 ## Core Concepts
 
-**SoundConfig** — Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`), an optional output `AudioMixerGroup`, and pool rules for one-shots: `Priority`, `MaxInstances`, `MinInterval`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
+**SoundConfig** — Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`), an optional output `AudioMixerGroup`, and pool rules for one-shots: `Priority`, `MaxInstances`, `MinInterval`, and `PlaysOnPause`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
 
-**MusicConfig** — Serializable struct with only an `AudioResource`. No pitch variation. Used by `PlayMusic`.
+**MusicConfig** — Serializable struct with an `AudioResource` and `PlaysOnPause`. No pitch variation. Used by `PlayMusic`.
 
 **SoundHandle** — Opaque readonly struct returned by `PlaySFX*`. Pass it to `StopSound` to stop a one-shot early. Ignore it if you don't need to.
 
@@ -150,9 +150,29 @@ audio.StopMusic();
 
 Music uses two alternating sources. Switching tracks mid-crossfade cancels the in-flight transition and starts a new one from the current outgoing volume, so volumes never snap.
 
+### Pause
+
+`AudioListener.pause = true` pauses every sound; unpausing resumes them where they were. While paused, Unity reports `AudioSource.isPlaying` as `false`, so the service treats a paused source as still busy: a one-shot keeps its source and handle until it really ends after the pause, an attached one-shot keeps following, and `IsLoopPlaying` stays `true` for a paused loop.
+
+Menu clicks, pause-menu music and on-air graphics that must keep playing on the pause screen set `PlaysOnPause` on their `SoundConfig` or `MusicConfig` (it sets `AudioSource.ignoreListenerPause`):
+
+```csharp
+[SerializeField] private SoundConfig _menuClick;    // PlaysOnPause ticked in the Inspector
+[SerializeField] private MusicConfig _pauseTheme;   // PlaysOnPause ticked
+
+AudioListener.pause = true;
+audio.PlaySFX(_menuClick);       // heard
+audio.PlayMusic(_pauseTheme);    // heard; the game track it replaces fades out silently
+audio.PlaySFX(_bodyHit);         // starts paused, plays after unpause
+```
+
+The service doesn't pause anything itself: setting `AudioListener.pause` is the game's call. Fades keep running while paused, so a sound faded out on the pause screen is gone when the game resumes.
+
 ### Time
 
 Fades, crossfades and loop ramps run on real time by default (`AudioServiceConfig.UnscaledTime`), so slow motion doesn't stretch them and `Time.timeScale = 0` doesn't freeze them. Turn it off to have them follow the game's time scale.
+
+`Time.timeScale` doesn't touch playback: at `0` sounds play to the end and return to the pool as usual. With `UnscaledTime` off, a zero time scale stops fades mid-way and freezes the `MinInterval` clock, so a repeat inside the window stays dropped until time runs again.
 
 ### Mixer Snapshots
 
@@ -193,5 +213,7 @@ foreach (var (param, volume) in settings.Volumes)
 - **Routing lives in the sound** — `SoundConfig.Output` names the mixer group, so the caller doesn't pick a group per call.
 - **No ducking API** — a mixer Duck Volume effect ducks by signal level without code and without writing the same parameter as the player's volume setting.
 - **No persistence** — the service plays sound and sets mixer volumes, nothing else. Where settings are saved (PlayerPrefs, a file, a cloud save) belongs to the game, so the package has no dependency on a storage package.
+- **Pause lives in the sound** — `PlaysOnPause` sits on `SoundConfig` and `MusicConfig`, like `Output`: a menu sound is a menu sound at every call, and one-shots need it as much as loops, so a flag on the loop slot or a call argument would not do. Mixer groups have no such switch; `ignoreListenerPause` exists only on the source.
+- **A paused source is busy** — the pool waits for a sound to end, and `isPlaying` is false under `AudioListener.pause`, so a paused source with a resource still counts as playing; otherwise pausing the game would cut every sound and hand its source to the next one.
 - **Real time by default** — a game with slow motion or a paused time scale expects its audio fades to keep their length; following the time scale is the opt-in.
 - **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.unscaledDeltaTime` (or `Time.deltaTime`), and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.
