@@ -12,7 +12,8 @@ namespace Rubickanov.Audio
     /// AudioMixer-based audio service with pooled SFX sources, loop slots and music crossfade. The service writes
     /// no volume until asked; saving and restoring volumes is the caller's job. A full pool evicts the lowest
     /// priority one-shot, oldest first; <see cref="SoundConfig.MaxInstances"/> and
-    /// <see cref="SoundConfig.MinInterval"/> drop repeats of one sound before they reach the pool.
+    /// <see cref="SoundConfig.MinInterval"/> drop repeats of one sound before they reach the pool. A loop slot plays
+    /// in 2D, at a point or following a transform; a destroyed transform fades its loop out.
     /// </summary>
     public class UnityAudioService : IAudioService, IDisposable
     {
@@ -28,6 +29,7 @@ namespace Rubickanov.Audio
         private readonly float _minDistance;
         private readonly float _maxDistance;
         private readonly float _dopplerLevel;
+        private readonly float _lostTargetFadeOut;
         private readonly Queue<AudioSource> _sfxPool = new();
         private readonly LinkedList<AudioSource> _activeSources = new();
         private readonly Dictionary<AudioSource, LinkedListNode<AudioSource>> _activeNodes = new();
@@ -41,6 +43,8 @@ namespace Rubickanov.Audio
         private readonly Dictionary<string, CancellationTokenSource> _loopWatchers = new();
         private readonly Dictionary<string, CancellationTokenSource> _loopPitchWatchers = new();
         private readonly HashSet<string> _stoppingLoops = new();
+        private readonly Dictionary<string, Transform> _loopFollows = new();
+        private readonly List<string> _lostFollows = new();
         private readonly List<AudioSource> _stopBuffer = new();
         private readonly Dictionary<string, float> _volumes = new();
         private readonly CancellationTokenSource _cts = new();
@@ -50,6 +54,7 @@ namespace Rubickanov.Audio
 
         private long _nextHandleId = 1;
         private bool _musicSourceAActive = true;
+        private bool _followingLoops;
         private CancellationTokenSource? _crossfadeCts;
 
         public UnityAudioService(AudioServiceConfig config)
@@ -65,6 +70,7 @@ namespace Rubickanov.Audio
             _minDistance = config.MinDistance;
             _maxDistance = Mathf.Max(config.MinDistance, config.MaxDistance);
             _dopplerLevel = config.DopplerLevel;
+            _lostTargetFadeOut = config.LostTargetFadeOut;
             _now = _unscaledTime ? () => Time.realtimeSinceStartupAsDouble : () => Time.timeAsDouble;
 
             _root = new GameObject("[AudioService]");
@@ -388,9 +394,31 @@ namespace Rubickanov.Audio
 
         public void PlayLoop(string slot, in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f)
         {
-            if (string.IsNullOrEmpty(slot)) return;
-            if (!sound.IsValid) return;
+            if (string.IsNullOrEmpty(slot) || !sound.IsValid) return;
 
+            _loopFollows.Remove(slot);
+            StartLoop(slot, in sound, volumeScale, fadeIn, spatialBlend: 0f);
+        }
+
+        public void PlayLoopAtPoint(string slot, in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f)
+        {
+            if (string.IsNullOrEmpty(slot) || !sound.IsValid) return;
+
+            _loopFollows.Remove(slot);
+            StartLoop(slot, in sound, volumeScale, fadeIn, spatialBlend: 1f).transform.position = position;
+        }
+
+        public void PlayLoopAttached(string slot, in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f)
+        {
+            if (string.IsNullOrEmpty(slot) || !sound.IsValid || follow == null) return;
+
+            StartLoop(slot, in sound, volumeScale, fadeIn, spatialBlend: 1f).transform.position = follow.position;
+            _loopFollows[slot] = follow;
+            if (!_followingLoops) FollowLoopsAsync(_cts.Token).Forget();
+        }
+
+        private AudioSource StartLoop(string slot, in SoundConfig sound, float volumeScale, float fadeIn, float spatialBlend)
+        {
             CancelLoopWatcher(slot);
             CancelWatcher(_loopPitchWatchers, slot);
             _stoppingLoops.Remove(slot);
@@ -402,7 +430,7 @@ namespace Rubickanov.Audio
             }
 
             source.Stop();
-            source.spatialBlend = 0f;
+            source.spatialBlend = spatialBlend;
             source.resource = sound.Resource;
             source.loop = true;
             ApplyOutput(source, in sound);
@@ -421,6 +449,43 @@ namespace Rubickanov.Audio
                 source.volume = volumeScale;
                 source.Play();
             }
+            return source;
+        }
+
+        // One runner for all attached slots; it ends when the last one is gone.
+        private async UniTaskVoid FollowLoopsAsync(CancellationToken ct)
+        {
+            _followingLoops = true;
+            try
+            {
+                while (_loopFollows.Count > 0)
+                {
+                    await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, ct);
+                    StepLoopFollows();
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { Debug.LogException(ex); }
+            finally { _followingLoops = false; }
+        }
+
+        private void StepLoopFollows()
+        {
+            _lostFollows.Clear();
+            foreach (var (slot, follow) in _loopFollows)
+            {
+                if (follow == null) _lostFollows.Add(slot);
+                else if (_loopSources.TryGetValue(slot, out var source) && source != null)
+                    source.transform.position = follow.position;
+            }
+
+            foreach (var slot in _lostFollows)
+            {
+                _loopFollows.Remove(slot);
+                // The loop fades where the object was last seen; a loop already fading out keeps its own fade.
+                if (!_stoppingLoops.Contains(slot)) StopLoop(slot, _lostTargetFadeOut);
+            }
+            _lostFollows.Clear();
         }
 
         public void StopLoop(string slot, float fadeOut = 0f)
@@ -440,6 +505,7 @@ namespace Rubickanov.Audio
             }
             else
             {
+                _loopFollows.Remove(slot);
                 source.Stop();
                 source.resource = null;
             }
@@ -552,6 +618,7 @@ namespace Rubickanov.Audio
                 source.resource = null;
             }
             _stoppingLoops.Remove(slot);
+            _loopFollows.Remove(slot);
             if (_loopWatchers.TryGetValue(slot, out var stored) && !stored.Token.IsCancellationRequested)
             {
                 _loopWatchers.Remove(slot);
@@ -768,6 +835,7 @@ namespace Rubickanov.Audio
                 kvp.Value.Dispose();
             }
             _loopPitchWatchers.Clear();
+            _loopFollows.Clear();
 
             _cts.Cancel();
             _cts.Dispose();

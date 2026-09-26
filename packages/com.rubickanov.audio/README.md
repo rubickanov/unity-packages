@@ -1,6 +1,6 @@
 # Audio
 
-Audio service with SFX source pooling (priority eviction, per-sound repeat limits), loop slots with live volume and pitch, music crossfade, fade in/out, mixer snapshots, and mixer volume control.
+Audio service with SFX source pooling (priority eviction, per-sound repeat limits), loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, mixer snapshots, and mixer volume control.
 
 ## Dependencies
 
@@ -18,7 +18,7 @@ IAudioService
 └── NullAudioService     — no-op for server/headless builds
 ```
 
-**UnityAudioService** is constructed from an **AudioServiceConfig** (ScriptableObject) that supplies the mixer, the music and default SFX groups, pool size, default crossfade duration, 3D distance settings, and whether fades run on real time. The service creates a `[AudioService]` GameObject (marked `DontDestroyOnLoad` in play mode) that hosts the music sources, the SFX pool, and loop sources.
+**UnityAudioService** is constructed from an **AudioServiceConfig** (ScriptableObject) that supplies the mixer, the music and default SFX groups, pool size, default crossfade duration, 3D distance settings, the fade-out of a loop whose target is destroyed, and whether fades run on real time. The service creates a `[AudioService]` GameObject (marked `DontDestroyOnLoad` in play mode) that hosts the music sources, the SFX pool, and loop sources.
 
 ## Core Concepts
 
@@ -28,7 +28,7 @@ IAudioService
 
 **SoundHandle** — Opaque readonly struct returned by `PlaySFX*`. Pass it to `StopSound` to stop a one-shot early. Ignore it if you don't need to.
 
-**Loop slot** — A string key identifying a dedicated, non-pooled `AudioSource`. `PlayLoop("steps", cfg)` reuses the same slot across calls and is never evicted by the SFX pool.
+**Loop slot** — A string key identifying a dedicated, non-pooled `AudioSource`. `PlayLoop("steps", cfg)` reuses the same slot across calls and is never evicted by the SFX pool. A slot plays in 2D, at a point or following a transform.
 
 ## Quick Start
 
@@ -119,6 +119,25 @@ audio.SetLoopPitch("wind", 1.3f, duration: 0.2f);     // absolute pitch, not a m
 
 Both are no-ops on a slot that is stopped or fading out, so a late update can't bring back a loop you stopped.
 
+### Loops in 3D
+
+```csharp
+[SerializeField] private SoundConfig _spinnerHum;
+[SerializeField] private SoundConfig _pistonMotor;
+
+audio.PlayLoopAtPoint("spinner-1", _spinnerHum, spinner.position);          // fixed point
+audio.PlayLoopAttached("piston-1", _pistonMotor, piston.transform);        // follows the transform
+
+audio.SetLoopPitch("piston-1", 1.2f, duration: 0.2f);   // live changes work the same as in 2D
+audio.StopLoop("piston-1", fadeOut: 0.5f);              // keeps following while it fades
+```
+
+`PlayLoop`, `PlayLoopAtPoint` and `PlayLoopAttached` all drive the same slot; the last call decides where it plays, so `PlayLoop` on an attached slot makes it 2D and stops following. Positioned loops use the same 3D settings from `AudioServiceConfig` as positioned one-shots. `PlayLoopAttached` with a `null` transform does nothing and leaves the slot as it was.
+
+When the followed transform is destroyed, the loop fades out where it was last seen over `AudioServiceConfig.LostTargetFadeOut` (default `0.25` s; `0` stops at once). A loop already fading out after `StopLoop` keeps its own fade. A disabled but living transform is still followed and keeps playing: stop the loop in `OnDisable` if the sound belongs to the object's active state.
+
+Slots outlive scenes. An attached loop goes quiet on a scene load by itself, because its transform is destroyed; a loop at a point keeps playing until you stop it.
+
 ### Music
 
 ```csharp
@@ -167,6 +186,7 @@ foreach (var (param, volume) in settings.Volumes)
 
 - **Separate SoundConfig and MusicConfig** — music must not receive random pitch variation; the type system enforces this rather than documentation.
 - **Named loop slots, not handles** — a loop is a semantic slot (`"steps"`, `"ambient"`), not an anonymous instance. Slots are dedicated sources that survive scene loads and are never evicted by the SFX pool, so callers don't manage handles across scenes.
+- **A lost target fades its loop out** — a destroyed transform is almost always an object that left the scene, so its loop should end with it; a short fade avoids a click, and a slot the caller stopped is left to its own fade.
 - **SFX pool evicts by priority at capacity** — when every source is busy, the lowest priority playing source (oldest among equals) is stopped, its handle invalidated, and it is reused; a sound below every playing one is dropped instead. `AudioSource.priority` is not enough: it only decides which voices Unity mutes, not which one-shot the pool gives up. No allocation spikes at peak concurrency.
 - **Repeat limits drop the newcomer** — over `MaxInstances` or inside `MinInterval` the new start is dropped rather than cutting a copy already playing, so a burst of contacts can't turn into a stutter of restarts.
 - **Volumes by parameter name** — the mixer's layout belongs to the game, so the service takes the exposed parameter name instead of a fixed set of groups.

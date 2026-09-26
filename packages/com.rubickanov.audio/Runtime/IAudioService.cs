@@ -9,12 +9,20 @@ namespace Rubickanov.Audio
     {
         SoundHandle PlaySFX(in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f);
         SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f);
-        SoundHandle PlaySFXAttached(in SoundConfig sound, Transform parent, float volumeScale = 1f, float fadeIn = 0f);
+        SoundHandle PlaySFXAttached(in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f);
         void StopSound(SoundHandle handle, float fadeOut = 0f);
         /// <summary>Stops every pooled one-shot. Loop slots and music keep playing.</summary>
         void StopAllSFX(float fadeOut = 0f);
 
+        /// <summary>Plays a 2D loop in the slot, replacing whatever the slot played.</summary>
         void PlayLoop(string slot, in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f);
+        /// <summary>Plays a 3D loop at <paramref name="position"/> in the slot.</summary>
+        void PlayLoopAtPoint(string slot, in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f);
+        /// <summary>
+        /// Plays a 3D loop in the slot that follows <paramref name="follow"/>. When the transform is destroyed the loop
+        /// fades out over <see cref="AudioServiceConfig.LostTargetFadeOut"/> where it was last seen.
+        /// </summary>
+        void PlayLoopAttached(string slot, in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f);
         /// <summary>Moves a live loop's volume to <paramref name="volumeScale"/> over <paramref name="duration"/> seconds.</summary>
         void SetLoopVolume(string slot, float volumeScale, float duration = 0f);
         /// <summary>Moves a live loop's pitch to <paramref name="pitch"/> (absolute, not a multiplier) over <paramref name="duration"/> seconds.</summary>

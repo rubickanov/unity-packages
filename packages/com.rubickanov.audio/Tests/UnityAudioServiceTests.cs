@@ -12,6 +12,7 @@ namespace Rubickanov.Audio.Tests
     {
         private AudioServiceConfig _config = null!;
         private UnityAudioService _service = null!;
+        private readonly System.Collections.Generic.List<GameObject> _targets = new();
 
         [SetUp]
         public void SetUp()
@@ -24,6 +25,9 @@ namespace Rubickanov.Audio.Tests
         public void TearDown()
         {
             _service?.Dispose();
+            foreach (var target in _targets)
+                if (target != null) UnityEngine.Object.DestroyImmediate(target);
+            _targets.Clear();
             if (_config != null) UnityEngine.Object.DestroyImmediate(_config);
         }
 
@@ -441,6 +445,165 @@ namespace Rubickanov.Audio.Tests
             Assert.IsTrue(third.IsValid, "a dropped start must not restart the interval");
         }
 
+        [Test]
+        public void PlayLoopAtPoint_ValidSound_PlaysIn3DAtPosition()
+        {
+            SetBackingField(_config, "Rolloff", AudioRolloffMode.Linear);
+            SetBackingField(_config, "MinDistance", 5f);
+            SetBackingField(_config, "MaxDistance", 40f);
+            using var service = new UnityAudioService(_config);
+            var position = new Vector3(3f, 1f, -7f);
+
+            service.PlayLoopAtPoint("spinner", MakeValidSound(), position);
+
+            var source = LoopSource(service, "spinner");
+            Assert.AreEqual(1f, source.spatialBlend);
+            Assert.AreEqual(position, source.transform.position);
+            Assert.AreEqual(AudioRolloffMode.Linear, source.rolloffMode);
+            Assert.AreEqual(5f, source.minDistance);
+            Assert.AreEqual(40f, source.maxDistance);
+            Assert.IsTrue(source.loop);
+        }
+
+        [Test]
+        public void PlayLoopAttached_ValidSound_StartsAtTargetIn3D()
+        {
+            var piston = NewTarget(new Vector3(10f, 2f, 0f));
+
+            _service.PlayLoopAttached("motor", MakeValidSound(), piston);
+
+            var source = LoopSource("motor");
+            Assert.AreEqual(1f, source.spatialBlend);
+            Assert.AreEqual(piston.position, source.transform.position);
+        }
+
+        [Test]
+        public void PlayLoopAttached_TargetMoves_SourceFollows()
+        {
+            var piston = NewTarget(Vector3.zero);
+            _service.PlayLoopAttached("motor", MakeValidSound(), piston);
+            piston.position = new Vector3(0f, 0f, 4f);
+
+            StepLoopFollows(_service);
+
+            Assert.AreEqual(piston.position, LoopSource("motor").transform.position);
+        }
+
+        [Test]
+        public void PlayLoopAttached_TargetDestroyed_SlotFadesOut()
+        {
+            var piston = NewTarget(new Vector3(0f, 0f, 6f));
+            _service.PlayLoopAttached("motor", MakeValidSound(), piston, volumeScale: 0.5f);
+            UnityEngine.Object.DestroyImmediate(piston.gameObject);
+
+            StepLoopFollows(_service);
+            _service.SetLoopVolume("motor", 1f);
+
+            var source = LoopSource("motor");
+            Assert.IsNotNull(source.resource, "the loop fades out instead of cutting off");
+            Assert.LessOrEqual(source.volume, 0.5f, "a fading loop must not be revived");
+            Assert.AreEqual(new Vector3(0f, 0f, 6f), source.transform.position);
+            Assert.AreEqual(0, LoopFollows(_service).Count);
+        }
+
+        [Test]
+        public void PlayLoopAttached_TargetDestroyedNoFade_StopsAtOnce()
+        {
+            SetBackingField(_config, "LostTargetFadeOut", 0f);
+            using var service = new UnityAudioService(_config);
+            var piston = NewTarget(Vector3.zero);
+            service.PlayLoopAttached("motor", MakeValidSound(), piston);
+            UnityEngine.Object.DestroyImmediate(piston.gameObject);
+
+            StepLoopFollows(service);
+
+            Assert.IsNull(LoopSource(service, "motor").resource);
+        }
+
+        [Test]
+        public void PlayLoopAttached_NullTarget_LeavesSlotUntouched()
+        {
+            var wind = MakeValidSound();
+            _service.PlayLoop("wind", wind, volumeScale: 0.3f);
+
+            _service.PlayLoopAttached("wind", MakeValidSound(), null!);
+
+            var source = LoopSource("wind");
+            Assert.AreSame(wind.Resource, source.resource);
+            Assert.AreEqual(0f, source.spatialBlend);
+            Assert.AreEqual(0.3f, source.volume, 1e-5f);
+        }
+
+        [Test]
+        public void PlayLoop_OnAttachedSlot_Becomes2DAndStopsFollowing()
+        {
+            var piston = NewTarget(Vector3.zero);
+            _service.PlayLoopAttached("motor", MakeValidSound(), piston);
+
+            _service.PlayLoop("motor", MakeValidSound());
+
+            Assert.AreEqual(0f, LoopSource("motor").spatialBlend);
+            Assert.AreEqual(0, LoopFollows(_service).Count);
+        }
+
+        [Test]
+        public void PlayLoopAttached_LiveLoop_SetLoopVolumeAndPitchApply()
+        {
+            _service.PlayLoopAttached("motor", MakeValidSound(), NewTarget(Vector3.zero), volumeScale: 0.5f);
+
+            _service.SetLoopVolume("motor", 0.8f);
+            _service.SetLoopPitch("motor", 1.4f);
+
+            var source = LoopSource("motor");
+            Assert.AreEqual(0.8f, source.volume, 1e-5f);
+            Assert.AreEqual(1.4f, source.pitch, 1e-5f);
+        }
+
+        [Test]
+        public void StopLoop_AttachedFadingOutTargetDestroyed_KeepsItsFade()
+        {
+            var piston = NewTarget(Vector3.zero);
+            _service.PlayLoopAttached("motor", MakeValidSound(), piston);
+            _service.StopLoop("motor", fadeOut: 1f);
+            var fade = LoopWatchers(_service)["motor"];
+            UnityEngine.Object.DestroyImmediate(piston.gameObject);
+
+            StepLoopFollows(_service);
+
+            Assert.AreSame(fade, LoopWatchers(_service)["motor"], "the fade must not restart");
+            Assert.IsNotNull(LoopSource("motor").resource);
+            Assert.AreEqual(0, LoopFollows(_service).Count);
+        }
+
+        [Test]
+        public void StopLoop_AttachedNoFade_StopsFollowing()
+        {
+            _service.PlayLoopAttached("motor", MakeValidSound(), NewTarget(Vector3.zero));
+
+            _service.StopLoop("motor");
+
+            Assert.AreEqual(0, LoopFollows(_service).Count);
+        }
+
+        private Transform NewTarget(Vector3 position)
+        {
+            var target = new GameObject("Target");
+            target.transform.position = position;
+            _targets.Add(target);
+            return target.transform;
+        }
+
+        private static void StepLoopFollows(UnityAudioService service) =>
+            typeof(UnityAudioService).GetMethod("StepLoopFollows", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(service, null);
+
+        private static System.Collections.ICollection LoopFollows(UnityAudioService service) =>
+            GetField<System.Collections.ICollection>(service, "_loopFollows");
+
+        private static System.Collections.Generic.Dictionary<string, System.Threading.CancellationTokenSource> LoopWatchers(
+            UnityAudioService service) =>
+            GetField<System.Collections.Generic.Dictionary<string, System.Threading.CancellationTokenSource>>(service, "_loopWatchers");
+
         private UnityAudioService ServiceWithPool(int size)
         {
             SetMaxSfxSources(_config, size);
@@ -479,8 +642,10 @@ namespace Rubickanov.Audio.Tests
         private static void SetSoundField(object boxed, string name, object value) =>
             typeof(SoundConfig).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(boxed, value);
 
-        private AudioSource LoopSource(string slot) =>
-            GetField<System.Collections.Generic.Dictionary<string, AudioSource>>(_service, "_loopSources")[slot];
+        private AudioSource LoopSource(string slot) => LoopSource(_service, slot);
+
+        private static AudioSource LoopSource(UnityAudioService service, string slot) =>
+            GetField<System.Collections.Generic.Dictionary<string, AudioSource>>(service, "_loopSources")[slot];
 
         private static T GetField<T>(object target, string name) =>
             (T)target.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(target);
