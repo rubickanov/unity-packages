@@ -71,6 +71,14 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
+        public void SetVolume_ThenGet_ReturnsSetValue()
+        {
+            _service.SetVolume("CommentatorVolume", 0.4f);
+
+            Assert.AreEqual(0.4f, _service.GetVolume("CommentatorVolume"));
+        }
+
+        [Test]
         public void Volumes_InitialValues_AreOne()
         {
             Assert.AreEqual(1f, _service.MasterVolume);

@@ -22,7 +22,7 @@ IAudioService
 
 ## Core Concepts
 
-**SoundConfig** — Serializable struct with an `AudioResource` and a pitch variation range (`0`–`0.5`). Used for SFX and loops. Assigned in the Inspector.
+**SoundConfig** — Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`) and an optional output `AudioMixerGroup`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
 
 **MusicConfig** — Serializable struct with only an `AudioResource`. No pitch variation. Used by `PlayMusic`.
 
@@ -109,6 +109,10 @@ audio.DuckSFX(amount01: 0.3f, duration: 2f, attack: 0.05f, release: 0.3f);
 
 A new `DuckSFX` call supersedes any duck in progress. Ducking is applied through the SFX mixer parameter, so it costs one parameter write rather than touching every active source.
 
+### Time
+
+Fades, crossfades and ducking run on real time by default (`AudioServiceConfig.UnscaledTime`), so slow motion doesn't stretch them and `Time.timeScale = 0` doesn't freeze them. Turn it off to have them follow the game's time scale.
+
 ### Mixer Snapshots
 
 ```csharp
@@ -126,9 +130,13 @@ audio.SetMusicVolume(0.5f);
 audio.SetSFXVolume(1f);
 
 float master = audio.MasterVolume;   // also MusicVolume, SFXVolume
+
+// Any other exposed parameter, e.g. a voice group:
+audio.SetVolume("VoiceVolume", 0.7f);
+float voice = audio.GetVolume("VoiceVolume");   // 1 until set
 ```
 
-Volumes are clamped to `[0, 1]` and converted to dB (`20·log10(v)`, or `-80 dB` at zero) before being written to the exposed mixer parameters named in `AudioServiceConfig`. If a parameter is not exposed on the mixer, a warning is logged.
+Volumes are clamped to `[0, 1]` and converted to dB (`20·log10(v)`, or `-80 dB` at zero) before being written to the exposed mixer parameters named in `AudioServiceConfig`. `SetVolume` with the master, music or SFX parameter name goes through the matching setter, so ducking keeps the right baseline. If a parameter is not exposed on the mixer, a warning is logged.
 
 ### Saving Volumes
 
@@ -147,4 +155,5 @@ audio.SetSFXVolume(settings.SfxVolume);
 - **SFX pool evicts oldest at capacity** — when every source is busy, the oldest playing source is stopped, its handle invalidated, and it is reused. No allocation spikes at peak concurrency.
 - **Mixer parameter names live in config** — `MasterVolumeParam`, `MusicVolumeParam`, `SfxVolumeParam` (plus optional UI/Dialog/Ambient) are fields on `AudioServiceConfig`. No hardcoded names.
 - **No persistence** — the service plays sound and sets mixer volumes, nothing else. Where settings are saved (PlayerPrefs, a file, a cloud save) belongs to the game, so the package has no dependency on a storage package.
-- **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.deltaTime`, and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.
+- **Real time by default** — a game with slow motion or a paused time scale expects its audio fades to keep their length; following the time scale is the opt-in.
+- **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.unscaledDeltaTime` (or `Time.deltaTime`), and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.

@@ -24,6 +24,7 @@ namespace Rubickanov.Audio
         private readonly AudioSource _musicSourceA;
         private readonly AudioSource _musicSourceB;
         private readonly float _crossfadeDuration;
+        private readonly bool _unscaledTime;
         private readonly Queue<AudioSource> _sfxPool = new();
         private readonly LinkedList<AudioSource> _activeSources = new();
         private readonly Dictionary<AudioSource, LinkedListNode<AudioSource>> _activeNodes = new();
@@ -32,6 +33,7 @@ namespace Rubickanov.Audio
         private readonly Dictionary<AudioSource, CancellationTokenSource> _sourceWatchers = new();
         private readonly Dictionary<string, AudioSource> _loopSources = new();
         private readonly Dictionary<string, CancellationTokenSource> _loopWatchers = new();
+        private readonly Dictionary<string, float> _volumes = new();
         private readonly CancellationTokenSource _cts = new();
 
         private long _nextHandleId = 1;
@@ -58,6 +60,7 @@ namespace Rubickanov.Audio
             _musicVolumeParam = config.MusicVolumeParam;
             _sfxVolumeParam = config.SfxVolumeParam;
             _crossfadeDuration = config.MusicCrossfadeDuration;
+            _unscaledTime = config.UnscaledTime;
 
             _root = new GameObject("[AudioService]");
             if (Application.isPlaying)
@@ -76,6 +79,9 @@ namespace Rubickanov.Audio
             SetMusicVolume(1f);
             SetSFXVolume(1f);
         }
+
+        // Slow motion must not stretch fades, and a zero time scale must not freeze them.
+        private float DeltaTime => _unscaledTime ? Time.unscaledDeltaTime : Time.deltaTime;
 
         private AudioSource CreateMusicSource(string name)
         {
@@ -204,6 +210,11 @@ namespace Rubickanov.Audio
                 ReturnSource(source);
         }
 
+        private void ApplyOutput(AudioSource source, in SoundConfig sound)
+        {
+            source.outputAudioMixerGroup = sound.Output != null ? sound.Output : _sfxGroup;
+        }
+
         private static void ApplyPitch(AudioSource source, in SoundConfig sound)
         {
             float variation = sound.PitchVariation;
@@ -217,6 +228,7 @@ namespace Rubickanov.Audio
             var source = RentSource();
             source.spatialBlend = 0f;
             source.resource = sound.Resource;
+            ApplyOutput(source, in sound);
             ApplyPitch(source, in sound);
             var watch = BeginWatch(source);
             StartPlayWithFade(source, volumeScale, fadeIn, watch);
@@ -234,6 +246,7 @@ namespace Rubickanov.Audio
             source.transform.position = position;
             source.spatialBlend = 1f;
             source.resource = sound.Resource;
+            ApplyOutput(source, in sound);
             ApplyPitch(source, in sound);
             var watch = BeginWatch(source);
             StartPlayWithFade(source, volumeScale, fadeIn, watch);
@@ -252,6 +265,7 @@ namespace Rubickanov.Audio
             source.transform.position = follow.position;
             source.spatialBlend = 1f;
             source.resource = sound.Resource;
+            ApplyOutput(source, in sound);
             ApplyPitch(source, in sound);
             var watch = BeginWatch(source);
             StartPlayWithFade(source, volumeScale, fadeIn, watch);
@@ -280,14 +294,14 @@ namespace Rubickanov.Audio
             }
         }
 
-        private static async UniTaskVoid FadeInAsync(AudioSource source, float targetVolume, float duration, CancellationToken ct)
+        private async UniTaskVoid FadeInAsync(AudioSource source, float targetVolume, float duration, CancellationToken ct)
         {
             try
             {
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
-                    elapsed += Time.deltaTime;
+                    elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
                     if (source != null) source.volume = targetVolume * t;
                     await UniTask.Yield(ct);
@@ -339,6 +353,7 @@ namespace Rubickanov.Audio
             source.spatialBlend = 0f;
             source.resource = sound.Resource;
             source.loop = true;
+            ApplyOutput(source, in sound);
             ApplyPitch(source, in sound);
 
             if (fadeIn > 0f)
@@ -399,7 +414,7 @@ namespace Rubickanov.Audio
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
-                    elapsed += Time.deltaTime;
+                    elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
                     if (source != null) source.volume = startVolume * (1f - t);
                     await UniTask.Yield(ct);
@@ -458,7 +473,7 @@ namespace Rubickanov.Audio
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
-                    elapsed += Time.deltaTime;
+                    elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
                     if (source != null) source.volume = startVolume * (1f - t);
                     await UniTask.Yield(ct);
@@ -518,7 +533,7 @@ namespace Rubickanov.Audio
             snapshot.TransitionTo(Mathf.Max(0f, duration));
         }
 
-        private static async UniTaskVoid CrossfadeAsync(
+        private async UniTaskVoid CrossfadeAsync(
             AudioSource outgoing, AudioSource incoming,
             float outgoingStartVolume, float duration, CancellationToken ct)
         {
@@ -527,7 +542,7 @@ namespace Rubickanov.Audio
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
-                    elapsed += Time.deltaTime;
+                    elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
                     if (outgoing != null) outgoing.volume = outgoingStartVolume * (1f - t);
                     if (incoming != null) incoming.volume = t;
@@ -585,6 +600,27 @@ namespace Rubickanov.Audio
             ApplyVolume(_sfxVolumeParam, _sfxVolume);
         }
 
+        public void SetVolume(string mixerParam, float volume01)
+        {
+            if (string.IsNullOrEmpty(mixerParam)) return;
+            if (mixerParam == _masterVolumeParam) { SetMasterVolume(volume01); return; }
+            if (mixerParam == _musicVolumeParam) { SetMusicVolume(volume01); return; }
+            if (mixerParam == _sfxVolumeParam) { SetSFXVolume(volume01); return; }
+
+            float volume = Mathf.Clamp01(volume01);
+            _volumes[mixerParam] = volume;
+            ApplyVolume(mixerParam, volume);
+        }
+
+        public float GetVolume(string mixerParam)
+        {
+            if (string.IsNullOrEmpty(mixerParam)) return 1f;
+            if (mixerParam == _masterVolumeParam) return _masterVolume;
+            if (mixerParam == _musicVolumeParam) return _musicVolume;
+            if (mixerParam == _sfxVolumeParam) return _sfxVolume;
+            return _volumes.TryGetValue(mixerParam, out var volume) ? volume : 1f;
+        }
+
         private void ApplyVolume(string param, float volume01)
         {
             if (_mixer == null || string.IsNullOrEmpty(param)) return;
@@ -614,19 +650,20 @@ namespace Rubickanov.Audio
                 float elapsed = 0f;
                 while (elapsed < attack)
                 {
-                    elapsed += Time.deltaTime;
+                    elapsed += DeltaTime;
                     float t = attack > 0f ? Mathf.Clamp01(elapsed / attack) : 1f;
                     ApplyVolume(_sfxVolumeParam, Mathf.Lerp(startVolume, targetVolume, t));
                     await UniTask.Yield(ct);
                 }
                 ApplyVolume(_sfxVolumeParam, targetVolume);
 
-                await UniTask.Delay(TimeSpan.FromSeconds(hold), cancellationToken: ct);
+                var delayType = _unscaledTime ? DelayType.UnscaledDeltaTime : DelayType.DeltaTime;
+                await UniTask.Delay(TimeSpan.FromSeconds(hold), delayType, cancellationToken: ct);
 
                 elapsed = 0f;
                 while (elapsed < release)
                 {
-                    elapsed += Time.deltaTime;
+                    elapsed += DeltaTime;
                     float t = release > 0f ? Mathf.Clamp01(elapsed / release) : 1f;
                     ApplyVolume(_sfxVolumeParam, Mathf.Lerp(targetVolume, _sfxVolume, t));
                     await UniTask.Yield(ct);
