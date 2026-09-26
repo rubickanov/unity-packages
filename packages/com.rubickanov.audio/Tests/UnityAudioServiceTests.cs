@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -122,51 +123,11 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
-        public void SetMasterVolume_BelowZero_ClampedToZero()
-        {
-            _service.SetMasterVolume(-0.5f);
-
-            Assert.AreEqual(0f, _service.MasterVolume);
-        }
-
-        [Test]
-        public void SetMasterVolume_AboveOne_ClampedToOne()
-        {
-            _service.SetMasterVolume(2f);
-
-            Assert.AreEqual(1f, _service.MasterVolume);
-        }
-
-        [Test]
-        public void SetMusicVolume_MidRange_StoredExactly()
-        {
-            _service.SetMusicVolume(0.42f);
-
-            Assert.AreEqual(0.42f, _service.MusicVolume);
-        }
-
-        [Test]
-        public void SetSFXVolume_MidRange_StoredExactly()
-        {
-            _service.SetSFXVolume(0.37f);
-
-            Assert.AreEqual(0.37f, _service.SFXVolume);
-        }
-
-        [Test]
         public void SetVolume_CustomParam_StoredClamped()
         {
             _service.SetVolume("CommentatorVolume", 1.5f);
 
             Assert.AreEqual(1f, _service.GetVolume("CommentatorVolume"));
-        }
-
-        [Test]
-        public void SetVolume_SfxParam_RoutesToSfxVolume()
-        {
-            _service.SetVolume(_config.SfxVolumeParam, 0.25f);
-
-            Assert.AreEqual(0.25f, _service.SFXVolume);
         }
 
         [Test]
@@ -176,23 +137,9 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
-        public void GetVolume_MasterParam_ReturnsMasterVolume()
-        {
-            _service.SetMasterVolume(0.6f);
-
-            Assert.AreEqual(0.6f, _service.GetVolume(_config.MasterVolumeParam));
-        }
-
-        [Test]
         public void StopMusic_NoMusicPlaying_NoOp()
         {
             Assert.DoesNotThrow(() => _service.StopMusic());
-        }
-
-        [Test]
-        public void DuckSFX_NoMixer_NoOp()
-        {
-            Assert.DoesNotThrow(() => _service.DuckSFX(0.3f, 1f));
         }
 
         [Test]
@@ -209,12 +156,122 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
-        public void Constructor_StartsAtFullVolume()
+        public void SetVolume_BelowZero_ClampedToZero()
         {
-            Assert.AreEqual(1f, _service.MasterVolume);
-            Assert.AreEqual(1f, _service.MusicVolume);
-            Assert.AreEqual(1f, _service.SFXVolume);
+            _service.SetVolume("MasterVolume", -0.5f);
+
+            Assert.AreEqual(0f, _service.GetVolume("MasterVolume"));
         }
+
+        [Test]
+        public void SetVolume_MidRange_StoredExactly()
+        {
+            _service.SetVolume("MusicVolume", 0.42f);
+
+            Assert.AreEqual(0.42f, _service.GetVolume("MusicVolume"));
+        }
+
+        [Test]
+        public void StopAllSFX_TwoSoundsPlaying_ReleasesBoth()
+        {
+            var sound = MakeValidSound();
+            _service.PlaySFX(sound);
+            _service.PlaySFXAtPoint(sound, Vector3.one);
+
+            _service.StopAllSFX();
+
+            Assert.AreEqual(0, GetField<System.Collections.ICollection>(_service, "_activeSources").Count);
+            Assert.AreEqual(0, GetField<System.Collections.ICollection>(_service, "_handleSources").Count);
+        }
+
+        [Test]
+        public void StopAllSFX_WithFadeOut_ReleasesHandlesAtOnce()
+        {
+            var sound = MakeValidSound();
+            _service.PlaySFX(sound);
+
+            _service.StopAllSFX(fadeOut: 1f);
+
+            Assert.AreEqual(0, GetField<System.Collections.ICollection>(_service, "_handleSources").Count);
+        }
+
+        [Test]
+        public void SetLoopVolume_LiveLoop_AppliesImmediately()
+        {
+            _service.PlayLoop("crowd", MakeValidSound(), volumeScale: 0.5f);
+
+            _service.SetLoopVolume("crowd", 0.9f);
+
+            Assert.AreEqual(0.9f, LoopSource("crowd").volume, 1e-5f);
+        }
+
+        [Test]
+        public void SetLoopPitch_LiveLoop_AppliesImmediately()
+        {
+            _service.PlayLoop("wind", MakeValidSound());
+
+            _service.SetLoopPitch("wind", 1.5f);
+
+            Assert.AreEqual(1.5f, LoopSource("wind").pitch, 1e-5f);
+        }
+
+        [Test]
+        public void SetLoopVolume_LoopFadingOut_DoesNotRevive()
+        {
+            _service.PlayLoop("crowd", MakeValidSound(), volumeScale: 0.5f);
+            _service.StopLoop("crowd", fadeOut: 1f);
+
+            _service.SetLoopVolume("crowd", 1f);
+
+            Assert.LessOrEqual(LoopSource("crowd").volume, 0.5f);
+        }
+
+        [Test]
+        public void SetLoopVolume_StoppedLoop_NoOp()
+        {
+            _service.PlayLoop("crowd", MakeValidSound(), volumeScale: 0.5f);
+            _service.StopLoop("crowd");
+
+            _service.SetLoopVolume("crowd", 1f);
+
+            Assert.AreEqual(0.5f, LoopSource("crowd").volume, 1e-5f);
+        }
+
+        [Test]
+        public void SetLoopPitch_UnknownSlot_NoOp()
+        {
+            Assert.DoesNotThrow(() => _service.SetLoopPitch("unknown", 2f, 0.5f));
+        }
+
+        [Test]
+        public void PlaySFXAtPoint_Config3DSettings_AppliedToSource()
+        {
+            SetBackingField(_config, "Rolloff", AudioRolloffMode.Linear);
+            SetBackingField(_config, "MinDistance", 5f);
+            SetBackingField(_config, "MaxDistance", 30f);
+            SetBackingField(_config, "DopplerLevel", 0f);
+            using var service = new UnityAudioService(_config);
+
+            service.PlaySFXAtPoint(MakeValidSound(), Vector3.zero);
+
+            var source = (AudioSource)GetField<System.Collections.IEnumerable>(service, "_activeSources")
+                .Cast<object>().Single();
+            Assert.AreEqual(AudioRolloffMode.Linear, source.rolloffMode);
+            Assert.AreEqual(5f, source.minDistance);
+            Assert.AreEqual(30f, source.maxDistance);
+            Assert.AreEqual(0f, source.dopplerLevel);
+        }
+
+        private AudioSource LoopSource(string slot) =>
+            GetField<System.Collections.Generic.Dictionary<string, AudioSource>>(_service, "_loopSources")[slot];
+
+        private static T GetField<T>(object target, string name) =>
+            (T)target.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(target);
+
+        private static void SetBackingField(AudioServiceConfig config, string property, object value) =>
+            typeof(AudioServiceConfig)
+                .GetField($"<{property}>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(config, value);
 
         private static SoundConfig MakeValidSound()
         {

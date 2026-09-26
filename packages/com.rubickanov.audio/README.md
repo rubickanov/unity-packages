@@ -1,12 +1,12 @@
 # Audio
 
-Audio service with SFX source pooling, music crossfade, ducking, fade in/out, mixer snapshots, and mixer volume control.
+Audio service with SFX source pooling, loop slots with live volume and pitch, music crossfade, fade in/out, mixer snapshots, and mixer volume control.
 
 ## Dependencies
 
 > `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
-- `UniTask` — async crossfade, fades, ducking, and source lifecycle watchers
+- `UniTask` — async crossfade, fades, ramps, and source lifecycle watchers
 
 Requires Unity 6000.0 or newer (uses `AudioResource` and `AudioSource.resource`).
 
@@ -18,7 +18,7 @@ IAudioService
 └── NullAudioService     — no-op for server/headless builds
 ```
 
-**UnityAudioService** is constructed from an **AudioServiceConfig** (ScriptableObject) that supplies the mixer, its groups, exposed parameter names, pool size, and default crossfade duration. The service creates a `[AudioService]` GameObject (marked `DontDestroyOnLoad` in play mode) that hosts the music sources, the SFX pool, and loop sources.
+**UnityAudioService** is constructed from an **AudioServiceConfig** (ScriptableObject) that supplies the mixer, the music and default SFX groups, pool size, default crossfade duration, 3D distance settings, and whether fades run on real time. The service creates a `[AudioService]` GameObject (marked `DontDestroyOnLoad` in play mode) that hosts the music sources, the SFX pool, and loop sources.
 
 ## Core Concepts
 
@@ -32,7 +32,7 @@ IAudioService
 
 ## Quick Start
 
-1. Create an `AudioServiceConfig` asset via **Create > Config > Audio Service**. Assign the mixer, its groups, and the names of the exposed parameters for master/music/SFX volume.
+1. Create an `AudioServiceConfig` asset via **Create > Config > Audio Service**. Assign the mixer, the music group and the default SFX group; set the 3D distances to the range your camera hears from.
 2. Construct the service:
 
 ```csharp
@@ -61,6 +61,8 @@ audio.PlaySFX(_hitSound, volumeScale: 0.5f);
 audio.PlaySFX(_hitSound, fadeIn: 0.2f);
 ```
 
+Positioned and attached sounds use the 3D settings from `AudioServiceConfig` (`Rolloff`, `MinDistance`, `MaxDistance`, `DopplerLevel`); the defaults match a fresh `AudioSource`.
+
 A one-shot returns its source to the pool automatically when it finishes. An invalid `SoundConfig` (no resource) plays nothing and returns `SoundHandle.Invalid`.
 
 ### Stopping SFX
@@ -69,6 +71,9 @@ A one-shot returns its source to the pool automatically when it finishes. An inv
 SoundHandle handle = audio.PlaySFX(_alarmSound);
 audio.StopSound(handle);                 // immediate
 audio.StopSound(handle, fadeOut: 0.3f);  // fade out, then release to the pool
+
+audio.StopAllSFX();                      // every pooled one-shot; loops and music keep playing
+audio.StopAllSFX(fadeOut: 0.2f);
 ```
 
 ### Loops via Named Slots
@@ -86,6 +91,15 @@ if (audio.IsLoopPlaying("steps"))
 
 Calling `PlayLoop` on a live slot replaces the current sound on the same source.
 
+Change a live loop without restarting it:
+
+```csharp
+audio.SetLoopVolume("crowd", 0.9f, duration: 0.5f);   // ramp to 0.9
+audio.SetLoopPitch("wind", 1.3f, duration: 0.2f);     // absolute pitch, not a multiplier
+```
+
+Both are no-ops on a slot that is stopped or fading out, so a late update can't bring back a loop you stopped.
+
 ### Music
 
 ```csharp
@@ -98,20 +112,9 @@ audio.StopMusic();
 
 Music uses two alternating sources. Switching tracks mid-crossfade cancels the in-flight transition and starts a new one from the current outgoing volume, so volumes never snap.
 
-### Ducking
-
-Temporarily attenuate SFX (e.g., during VO or cinematic beats) without changing the user-set SFX volume:
-
-```csharp
-// Duck to 30% of the current SFX volume for 2s, 50ms attack, 300ms release.
-audio.DuckSFX(amount01: 0.3f, duration: 2f, attack: 0.05f, release: 0.3f);
-```
-
-A new `DuckSFX` call supersedes any duck in progress. Ducking is applied through the SFX mixer parameter, so it costs one parameter write rather than touching every active source.
-
 ### Time
 
-Fades, crossfades and ducking run on real time by default (`AudioServiceConfig.UnscaledTime`), so slow motion doesn't stretch them and `Time.timeScale = 0` doesn't freeze them. Turn it off to have them follow the game's time scale.
+Fades, crossfades and loop ramps run on real time by default (`AudioServiceConfig.UnscaledTime`), so slow motion doesn't stretch them and `Time.timeScale = 0` doesn't freeze them. Turn it off to have them follow the game's time scale.
 
 ### Mixer Snapshots
 
@@ -125,27 +128,20 @@ Snapshots must be defined on the AudioMixer asset. A missing snapshot logs a war
 ### Volume Control
 
 ```csharp
-audio.SetMasterVolume(0.8f);
-audio.SetMusicVolume(0.5f);
-audio.SetSFXVolume(1f);
-
-float master = audio.MasterVolume;   // also MusicVolume, SFXVolume
-
-// Any other exposed parameter, e.g. a voice group:
+audio.SetVolume("MasterVolume", 0.8f);
 audio.SetVolume("VoiceVolume", 0.7f);
 float voice = audio.GetVolume("VoiceVolume");   // 1 until set
 ```
 
-Volumes are clamped to `[0, 1]` and converted to dB (`20·log10(v)`, or `-80 dB` at zero) before being written to the exposed mixer parameters named in `AudioServiceConfig`. `SetVolume` with the master, music or SFX parameter name goes through the matching setter, so ducking keeps the right baseline. If a parameter is not exposed on the mixer, a warning is logged.
+The argument is the name of an exposed mixer parameter. Volumes are clamped to `[0, 1]` and converted to dB (`20·log10(v)`, or `-80 dB` at zero). If a parameter is not exposed on the mixer, a warning is logged. For ducking under voice, use a Duck Volume effect on the mixer: it doesn't fight the player's volume settings.
 
 ### Saving Volumes
 
-The service does not save anything. Every volume starts at `1` when the service is constructed. To keep the player's settings between sessions, the code that owns settings loads them and calls the setters after construction, and saves them wherever it saves the rest:
+The service does not save anything and writes no volume until asked. To keep the player's settings between sessions, the code that owns settings loads them and calls `SetVolume` after construction, and saves them wherever it saves the rest:
 
 ```csharp
-audio.SetMasterVolume(settings.MasterVolume);
-audio.SetMusicVolume(settings.MusicVolume);
-audio.SetSFXVolume(settings.SfxVolume);
+foreach (var (param, volume) in settings.Volumes)
+    audio.SetVolume(param, volume);
 ```
 
 ## Design Decisions
@@ -153,7 +149,9 @@ audio.SetSFXVolume(settings.SfxVolume);
 - **Separate SoundConfig and MusicConfig** — music must not receive random pitch variation; the type system enforces this rather than documentation.
 - **Named loop slots, not handles** — a loop is a semantic slot (`"steps"`, `"ambient"`), not an anonymous instance. Slots are dedicated sources that survive scene loads and are never evicted by the SFX pool, so callers don't manage handles across scenes.
 - **SFX pool evicts oldest at capacity** — when every source is busy, the oldest playing source is stopped, its handle invalidated, and it is reused. No allocation spikes at peak concurrency.
-- **Mixer parameter names live in config** — `MasterVolumeParam`, `MusicVolumeParam`, `SfxVolumeParam` (plus optional UI/Dialog/Ambient) are fields on `AudioServiceConfig`. No hardcoded names.
+- **Volumes by parameter name** — the mixer's layout belongs to the game, so the service takes the exposed parameter name instead of a fixed set of groups.
+- **Routing lives in the sound** — `SoundConfig.Output` names the mixer group, so the caller doesn't pick a group per call.
+- **No ducking API** — a mixer Duck Volume effect ducks by signal level without code and without writing the same parameter as the player's volume setting.
 - **No persistence** — the service plays sound and sets mixer volumes, nothing else. Where settings are saved (PlayerPrefs, a file, a cloud save) belongs to the game, so the package has no dependency on a storage package.
 - **Real time by default** — a game with slow motion or a paused time scale expects its audio fades to keep their length; following the time scale is the opt-in.
 - **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.unscaledDeltaTime` (or `Time.deltaTime`), and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.

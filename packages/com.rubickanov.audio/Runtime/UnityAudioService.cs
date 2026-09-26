@@ -9,22 +9,23 @@ using Object = UnityEngine.Object;
 namespace Rubickanov.Audio
 {
     /// <summary>
-    /// AudioMixer-based audio service with pooled SFX sources and music crossfade. Volumes start at 1 each session;
-    /// saving and restoring them is the caller's job.
+    /// AudioMixer-based audio service with pooled SFX sources, loop slots and music crossfade. The service writes
+    /// no volume until asked; saving and restoring volumes is the caller's job.
     /// </summary>
     public class UnityAudioService : IAudioService, IDisposable
     {
         private readonly AudioMixer _mixer;
         private readonly AudioMixerGroup _musicGroup = default!;
         private readonly AudioMixerGroup _sfxGroup = default!;
-        private readonly string _masterVolumeParam;
-        private readonly string _musicVolumeParam;
-        private readonly string _sfxVolumeParam;
         private readonly GameObject _root;
         private readonly AudioSource _musicSourceA;
         private readonly AudioSource _musicSourceB;
         private readonly float _crossfadeDuration;
         private readonly bool _unscaledTime;
+        private readonly AudioRolloffMode _rolloff;
+        private readonly float _minDistance;
+        private readonly float _maxDistance;
+        private readonly float _dopplerLevel;
         private readonly Queue<AudioSource> _sfxPool = new();
         private readonly LinkedList<AudioSource> _activeSources = new();
         private readonly Dictionary<AudioSource, LinkedListNode<AudioSource>> _activeNodes = new();
@@ -33,21 +34,15 @@ namespace Rubickanov.Audio
         private readonly Dictionary<AudioSource, CancellationTokenSource> _sourceWatchers = new();
         private readonly Dictionary<string, AudioSource> _loopSources = new();
         private readonly Dictionary<string, CancellationTokenSource> _loopWatchers = new();
+        private readonly Dictionary<string, CancellationTokenSource> _loopPitchWatchers = new();
+        private readonly HashSet<string> _stoppingLoops = new();
+        private readonly List<AudioSource> _stopBuffer = new();
         private readonly Dictionary<string, float> _volumes = new();
         private readonly CancellationTokenSource _cts = new();
 
         private long _nextHandleId = 1;
         private bool _musicSourceAActive = true;
         private CancellationTokenSource? _crossfadeCts;
-        private CancellationTokenSource? _duckCts;
-
-        private float _masterVolume = 1f;
-        private float _musicVolume = 1f;
-        private float _sfxVolume = 1f;
-
-        public float MasterVolume => _masterVolume;
-        public float MusicVolume => _musicVolume;
-        public float SFXVolume => _sfxVolume;
 
         public UnityAudioService(AudioServiceConfig config)
         {
@@ -56,11 +51,12 @@ namespace Rubickanov.Audio
             _mixer = config.Mixer;
             _musicGroup = config.MusicGroup;
             _sfxGroup = config.SfxGroup;
-            _masterVolumeParam = config.MasterVolumeParam;
-            _musicVolumeParam = config.MusicVolumeParam;
-            _sfxVolumeParam = config.SfxVolumeParam;
             _crossfadeDuration = config.MusicCrossfadeDuration;
             _unscaledTime = config.UnscaledTime;
+            _rolloff = config.Rolloff;
+            _minDistance = config.MinDistance;
+            _maxDistance = Mathf.Max(config.MinDistance, config.MaxDistance);
+            _dopplerLevel = config.DopplerLevel;
 
             _root = new GameObject("[AudioService]");
             if (Application.isPlaying)
@@ -74,10 +70,6 @@ namespace Rubickanov.Audio
             int maxSources = Mathf.Max(1, config.MaxSfxSources);
             for (int i = 0; i < maxSources; i++)
                 _sfxPool.Enqueue(CreateSFXSource());
-
-            SetMasterVolume(1f);
-            SetMusicVolume(1f);
-            SetSFXVolume(1f);
         }
 
         // Slow motion must not stretch fades, and a zero time scale must not freeze them.
@@ -103,7 +95,17 @@ namespace Rubickanov.Audio
             source.playOnAwake = false;
             source.loop = false;
             if (_sfxGroup != null) source.outputAudioMixerGroup = _sfxGroup;
+            Apply3DSettings(source);
             return source;
+        }
+
+        // The pool never changes these per sound, so setting them once per source is enough.
+        private void Apply3DSettings(AudioSource source)
+        {
+            source.rolloffMode = _rolloff;
+            source.minDistance = _minDistance;
+            source.maxDistance = _maxDistance;
+            source.dopplerLevel = _dopplerLevel;
         }
 
         private AudioSource RentSource()
@@ -342,6 +344,8 @@ namespace Rubickanov.Audio
             if (!sound.IsValid) return;
 
             CancelLoopWatcher(slot);
+            CancelWatcher(_loopPitchWatchers, slot);
+            _stoppingLoops.Remove(slot);
 
             if (!_loopSources.TryGetValue(slot, out var source))
             {
@@ -380,6 +384,8 @@ namespace Rubickanov.Audio
 
             if (fadeOut > 0f)
             {
+                // A fading-out loop is on its way to silence: SetLoopVolume must not revive it.
+                _stoppingLoops.Add(slot);
                 var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
                 _loopWatchers[slot] = cts;
                 FadeOutLoopAsync(slot, source, fadeOut, cts.Token).Forget();
@@ -397,13 +403,82 @@ namespace Rubickanov.Audio
             return _loopSources.TryGetValue(slot, out var source) && source != null && source.isPlaying;
         }
 
-        private void CancelLoopWatcher(string slot)
+        private void CancelLoopWatcher(string slot) => CancelWatcher(_loopWatchers, slot);
+
+        private static void CancelWatcher(Dictionary<string, CancellationTokenSource> watchers, string slot)
         {
-            if (_loopWatchers.Remove(slot, out var cts))
+            if (watchers.Remove(slot, out var cts))
             {
                 cts.Cancel();
                 cts.Dispose();
             }
+        }
+
+        public void SetLoopVolume(string slot, float volumeScale, float duration = 0f)
+        {
+            if (!TryGetLiveLoop(slot, out var source)) return;
+
+            CancelLoopWatcher(slot);
+            if (duration > 0f)
+            {
+                var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                _loopWatchers[slot] = cts;
+                RampAsync(source, pitch: false, volumeScale, duration, cts.Token).Forget();
+            }
+            else
+            {
+                source.volume = volumeScale;
+            }
+        }
+
+        public void SetLoopPitch(string slot, float pitch, float duration = 0f)
+        {
+            if (!TryGetLiveLoop(slot, out var source)) return;
+
+            CancelWatcher(_loopPitchWatchers, slot);
+            if (duration > 0f)
+            {
+                var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                _loopPitchWatchers[slot] = cts;
+                RampAsync(source, pitch: true, pitch, duration, cts.Token).Forget();
+            }
+            else
+            {
+                source.pitch = pitch;
+            }
+        }
+
+        private bool TryGetLiveLoop(string slot, out AudioSource source)
+        {
+            source = null!;
+            if (string.IsNullOrEmpty(slot) || _stoppingLoops.Contains(slot)) return false;
+            if (!_loopSources.TryGetValue(slot, out var found) || found == null || found.resource == null) return false;
+            source = found;
+            return true;
+        }
+
+        private async UniTaskVoid RampAsync(AudioSource source, bool pitch, float target, float duration, CancellationToken ct)
+        {
+            try
+            {
+                float start = pitch ? source.pitch : source.volume;
+                float elapsed = 0f;
+                while (elapsed < duration)
+                {
+                    elapsed += DeltaTime;
+                    float value = Mathf.Lerp(start, target, Mathf.Clamp01(elapsed / duration));
+                    if (source == null) return;
+                    if (pitch) source.pitch = value;
+                    else source.volume = value;
+                    await UniTask.Yield(ct);
+                }
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { Debug.LogException(ex); return; }
+
+            if (source == null) return;
+            if (pitch) source.pitch = target;
+            else source.volume = target;
         }
 
         private async UniTaskVoid FadeOutLoopAsync(string slot, AudioSource source, float duration, CancellationToken ct)
@@ -428,6 +503,7 @@ namespace Rubickanov.Audio
                 source.Stop();
                 source.resource = null;
             }
+            _stoppingLoops.Remove(slot);
             if (_loopWatchers.TryGetValue(slot, out var stored) && !stored.Token.IsCancellationRequested)
             {
                 _loopWatchers.Remove(slot);
@@ -443,6 +519,7 @@ namespace Rubickanov.Audio
             source.playOnAwake = false;
             source.loop = true;
             if (_sfxGroup != null) source.outputAudioMixerGroup = _sfxGroup;
+            Apply3DSettings(source);
             return source;
         }
 
@@ -463,6 +540,23 @@ namespace Rubickanov.Audio
             {
                 ReturnSource(source);
             }
+        }
+
+        public void StopAllSFX(float fadeOut = 0f)
+        {
+            // StopSound unlinks sources from the active list, so walk a copy.
+            _stopBuffer.Clear();
+            foreach (var source in _activeSources)
+                _stopBuffer.Add(source);
+
+            foreach (var source in _stopBuffer)
+            {
+                if (_sourceHandles.TryGetValue(source, out var id))
+                    StopSound(new SoundHandle(id), fadeOut);
+                else
+                    ReturnSource(source);
+            }
+            _stopBuffer.Clear();
         }
 
         private async UniTaskVoid FadeOutAndReclaimAsync(AudioSource source, float duration, CancellationToken ct)
@@ -582,44 +676,17 @@ namespace Rubickanov.Audio
             _musicSourceAActive = true;
         }
 
-        public void SetMasterVolume(float volume01)
-        {
-            _masterVolume = Mathf.Clamp01(volume01);
-            ApplyVolume(_masterVolumeParam, _masterVolume);
-        }
-
-        public void SetMusicVolume(float volume01)
-        {
-            _musicVolume = Mathf.Clamp01(volume01);
-            ApplyVolume(_musicVolumeParam, _musicVolume);
-        }
-
-        public void SetSFXVolume(float volume01)
-        {
-            _sfxVolume = Mathf.Clamp01(volume01);
-            ApplyVolume(_sfxVolumeParam, _sfxVolume);
-        }
-
         public void SetVolume(string mixerParam, float volume01)
         {
             if (string.IsNullOrEmpty(mixerParam)) return;
-            if (mixerParam == _masterVolumeParam) { SetMasterVolume(volume01); return; }
-            if (mixerParam == _musicVolumeParam) { SetMusicVolume(volume01); return; }
-            if (mixerParam == _sfxVolumeParam) { SetSFXVolume(volume01); return; }
 
             float volume = Mathf.Clamp01(volume01);
             _volumes[mixerParam] = volume;
             ApplyVolume(mixerParam, volume);
         }
 
-        public float GetVolume(string mixerParam)
-        {
-            if (string.IsNullOrEmpty(mixerParam)) return 1f;
-            if (mixerParam == _masterVolumeParam) return _masterVolume;
-            if (mixerParam == _musicVolumeParam) return _musicVolume;
-            if (mixerParam == _sfxVolumeParam) return _sfxVolume;
-            return _volumes.TryGetValue(mixerParam, out var volume) ? volume : 1f;
-        }
+        public float GetVolume(string mixerParam) =>
+            !string.IsNullOrEmpty(mixerParam) && _volumes.TryGetValue(mixerParam, out var volume) ? volume : 1f;
 
         private void ApplyVolume(string param, float volume01)
         {
@@ -629,73 +696,10 @@ namespace Rubickanov.Audio
                 Debug.LogWarning($"[AudioService] Mixer parameter '{param}' is not exposed.");
         }
 
-        public void DuckSFX(float amount01, float duration, float attack = 0.05f, float release = 0.3f)
-        {
-            if (_mixer == null || string.IsNullOrEmpty(_sfxVolumeParam)) return;
-            if (duration <= 0f) return;
-
-            _duckCts?.Cancel();
-            _duckCts?.Dispose();
-            _duckCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-
-            float target = Mathf.Clamp01(amount01) * _sfxVolume;
-            DuckAsync(target, duration, Mathf.Max(0f, attack), Mathf.Max(0f, release), _duckCts.Token).Forget();
-        }
-
-        private async UniTaskVoid DuckAsync(float targetVolume, float hold, float attack, float release, CancellationToken ct)
-        {
-            try
-            {
-                float startVolume = _sfxVolume;
-                float elapsed = 0f;
-                while (elapsed < attack)
-                {
-                    elapsed += DeltaTime;
-                    float t = attack > 0f ? Mathf.Clamp01(elapsed / attack) : 1f;
-                    ApplyVolume(_sfxVolumeParam, Mathf.Lerp(startVolume, targetVolume, t));
-                    await UniTask.Yield(ct);
-                }
-                ApplyVolume(_sfxVolumeParam, targetVolume);
-
-                var delayType = _unscaledTime ? DelayType.UnscaledDeltaTime : DelayType.DeltaTime;
-                await UniTask.Delay(TimeSpan.FromSeconds(hold), delayType, cancellationToken: ct);
-
-                elapsed = 0f;
-                while (elapsed < release)
-                {
-                    elapsed += DeltaTime;
-                    float t = release > 0f ? Mathf.Clamp01(elapsed / release) : 1f;
-                    ApplyVolume(_sfxVolumeParam, Mathf.Lerp(targetVolume, _sfxVolume, t));
-                    await UniTask.Yield(ct);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // A cancelled duck (superseded by another DuckSFX or torn down) must not leave the
-                // shared SFX mixer param attenuated — restore the baseline before bailing.
-                ApplyVolume(_sfxVolumeParam, _sfxVolume);
-                return;
-            }
-            catch (Exception ex) { Debug.LogException(ex); }
-
-            ApplyVolume(_sfxVolumeParam, _sfxVolume);
-        }
-
         public void Dispose()
         {
             _crossfadeCts?.Cancel();
             _crossfadeCts?.Dispose();
-
-            if (_duckCts != null)
-            {
-                // The duck coroutine's cancellation handler runs on a later frame (async), but the
-                // mixer is externally owned and outlives this service — restore the SFX param
-                // synchronously so disposing mid-duck doesn't leave it permanently attenuated.
-                _duckCts.Cancel();
-                _duckCts.Dispose();
-                _duckCts = null;
-                ApplyVolume(_sfxVolumeParam, _sfxVolume);
-            }
 
             foreach (var kvp in _sourceWatchers)
             {
@@ -710,6 +714,13 @@ namespace Rubickanov.Audio
                 kvp.Value.Dispose();
             }
             _loopWatchers.Clear();
+
+            foreach (var kvp in _loopPitchWatchers)
+            {
+                kvp.Value.Cancel();
+                kvp.Value.Dispose();
+            }
+            _loopPitchWatchers.Clear();
 
             _cts.Cancel();
             _cts.Dispose();
