@@ -8,7 +8,7 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-All at version `1.0.0`, except `audio` at `3.1.0`, `devconsole` at `3.0.0`, `devconsole.netcode` at `2.0.0` and `ui`, `ui.animations`, `ui.loading`, `ui.localization` at `3.0.0`:
+All at version `1.0.0`, except `audio` at `3.1.0`, `devconsole` at `3.0.1`, `log` at `1.1.0`, `devconsole.netcode` at `2.0.0` and `ui`, `ui.animations`, `ui.loading`, `ui.localization` at `3.0.0`:
 
 | Package | Purpose |
 |---|---|
@@ -29,7 +29,7 @@ All at version `1.0.0`, except `audio` at `3.1.0`, `devconsole` at `3.0.0`, `dev
 | `gas` | Gameplay Ability / Effects System — attribute modifiers with duration, periodicity, tags. |
 | `loading` | Generic loading pipeline: sequential ops, progress, presenters. |
 | `localization` | Localization service, reactive, strongly-typed keys. |
-| `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release. No dependencies. |
+| `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release, a speaker scope (`[Host]`) before every message. No dependencies. |
 | `logging` | ZLogger-based factory with file rotation and platform outputs. |
 | `statemachine` | Generic FSM, hierarchical, deferred transitions, zero-alloc. |
 | `steam-transport` | NGO transport over Steam Networking Sockets P2P. |
