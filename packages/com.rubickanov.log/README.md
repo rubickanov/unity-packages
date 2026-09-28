@@ -78,6 +78,18 @@ foreach (LogChannel channel in LogChannel.All)
 
 `LogChannel.All` lists channels created so far. A channel appears once the class declaring it is first used. Levels reset from the command line on each play session, including with domain reload off.
 
+### Scope
+
+`LogChannel.Scope` goes in front of every message of every channel, to tell apart who is speaking when several
+processes write to one log, such as the host and the clients of a networked game:
+
+```csharp
+LogChannel.Scope = network.IsHost ? "Host" : $"Client {network.LocalClientId}";
+// [Net] [Host] Player 2 joined
+```
+
+It is null by default and again on each play session.
+
 ### Following a Channel
 
 `LevelChanged` lets code with its own log, such as a third-party library, follow a channel's level:

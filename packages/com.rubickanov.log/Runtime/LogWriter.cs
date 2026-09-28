@@ -40,16 +40,17 @@ namespace Rubickanov.Log
 
         private static string Format(LogChannel channel, LogLevel level, string message)
         {
+            string scope = LogChannel.Scope == null ? string.Empty : $"[{LogChannel.Scope}] ";
 #if UNITY_EDITOR
             // Brackets inside the colour, so searching the Console for [Course] finds the channel and not the word.
             channel.Tag ??= $"<b><color=#{ColorOf(channel.Name)}>[{channel.Name}]</color></b> ";
             return level == LogLevel.Verbose
-                ? $"{channel.Tag}<color=#8C8C8C>{message}</color>"
-                : $"{channel.Tag}{message}";
+                ? $"{channel.Tag}{scope}<color=#8C8C8C>{message}</color>"
+                : $"{channel.Tag}{scope}{message}";
 #else
             // Time.frameCount is for the main thread only.
             string frame = Thread.CurrentThread.ManagedThreadId == _mainThread ? Time.frameCount.ToString() : "-";
-            return $"{DateTime.Now:HH:mm:ss.fff} f{frame,-6} {LetterOf(level)} {channel.Name.PadRight(NameWidth)}{message}";
+            return $"{DateTime.Now:HH:mm:ss.fff} f{frame,-6} {LetterOf(level)} {channel.Name.PadRight(NameWidth)}{scope}{message}";
 #endif
         }
 

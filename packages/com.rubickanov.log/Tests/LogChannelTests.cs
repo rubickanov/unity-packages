@@ -94,6 +94,23 @@ namespace Rubickanov.Log.Tests
         }
 
         [Test]
+        public void Info_ScopeSet_WritesScopeBeforeMessage()
+        {
+            LogChannel course = NewChannel();
+            LogAssert.Expect(LogType.Log, new Regex(Regex.Escape(course.Name) + @".*\[Client 2\] Reached the finish"));
+            LogChannel.Scope = "Client 2";
+
+            try
+            {
+                course.Info("Reached the finish");
+            }
+            finally
+            {
+                LogChannel.Scope = null;
+            }
+        }
+
+        [Test]
         public void Warn_ChannelWrites_LogsWarning()
         {
             LogChannel course = NewChannel();

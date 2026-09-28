@@ -50,6 +50,12 @@ namespace Rubickanov.Log
         /// <summary>For code with a log of its own to follow the channel, such as a third-party library's.</summary>
         public event Action<LogChannel> LevelChanged;
 
+        /// <summary>
+        /// Who is speaking, such as Host or Client 2 in a networked game, put in front of every message of every
+        /// channel. Null when there is no one to tell apart.
+        /// </summary>
+        public static string Scope { get; set; }
+
         /// <summary>Every channel so far. A channel appears once the class that declares it is first used.</summary>
         public static IReadOnlyList<LogChannel> All => Channels;
 
@@ -130,6 +136,7 @@ namespace Rubickanov.Log
         private static void ResetLevels()
         {
             LogSettings.Load();
+            Scope = null;
             foreach (LogChannel channel in Channels)
             {
                 channel.Level = LogSettings.LevelFor(channel.Name);
