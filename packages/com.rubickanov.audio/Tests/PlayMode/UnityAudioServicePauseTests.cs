@@ -1,9 +1,12 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Audio;
 using UnityEngine.TestTools;
+using Object = UnityEngine.Object;
 
 namespace Rubickanov.Audio.Tests
 {
@@ -100,6 +103,44 @@ namespace Rubickanov.Audio.Tests
         }
 
         [UnityTest]
+        public IEnumerator PlaySFX_ContainerPlaysOnPauseWhileListenerPaused_KeepsSourceWhileHeard()
+        {
+            AudioListener.pause = true;
+            var handle = _service.PlaySFX(MakeSound(NewContainer(_clip), playsOnPause: true));
+
+            yield return new WaitForSecondsRealtime(ClipSeconds * 0.5f);
+
+            Assert.IsTrue(IsTracked(handle), "a container still sounding must keep its source");
+        }
+
+        // Unity keeps isPlaying true on a container played through a paused listener until the pause ends.
+        [UnityTest]
+        public IEnumerator PlaySFX_ContainerPlaysOnPauseWhileListenerPaused_ReturnsSourceWhenSilent()
+        {
+            AudioListener.pause = true;
+            var handle = _service.PlaySFX(MakeSound(NewContainer(_clip), playsOnPause: true));
+
+            yield return new WaitForSecondsRealtime(ClipSeconds + 0.5f);
+
+            Assert.IsFalse(IsTracked(handle), "a container that plays on pause must free its source once silent");
+            Assert.AreEqual(0, ActiveCount());
+        }
+
+        [UnityTest]
+        public IEnumerator PlaySFXAttached_ContainerPlaysOnPauseWhileListenerPaused_ReturnsSourceWhenSilent()
+        {
+            var target = new GameObject("Target");
+            _garbage.Add(target);
+            AudioListener.pause = true;
+            var handle = _service.PlaySFXAttached(MakeSound(NewContainer(_clip), playsOnPause: true), target.transform);
+
+            yield return new WaitForSecondsRealtime(ClipSeconds + 0.5f);
+
+            Assert.IsFalse(IsTracked(handle), "an attached container that plays on pause must free its source once silent");
+            Assert.AreEqual(0, ActiveCount());
+        }
+
+        [UnityTest]
         public IEnumerator IsLoopPlaying_ListenerPaused_ReturnsTrue()
         {
             _service.PlayLoop("crowd", MakeSound(_clip));
@@ -174,12 +215,30 @@ namespace Rubickanov.Audio.Tests
             return clip;
         }
 
-        private static SoundConfig MakeSound(AudioClip clip, bool playsOnPause = false)
+        private static SoundConfig MakeSound(AudioResource resource, bool playsOnPause = false)
         {
             object boxed = default(SoundConfig);
-            SetField(boxed, "_resource", clip);
+            SetField(boxed, "_resource", resource);
             SetField(boxed, "_playsOnPause", playsOnPause);
             return (SoundConfig)boxed;
+        }
+
+        // AudioRandomContainer and its elements are internal to Unity: built by reflection with one element.
+        private AudioResource NewContainer(AudioClip clip)
+        {
+            const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var assembly = typeof(AudioSource).Assembly;
+            var containerType = assembly.GetType("UnityEngine.Audio.AudioRandomContainer", true);
+            var elementType = assembly.GetType("UnityEngine.Audio.AudioContainerElement", true);
+            var element = (Object)Activator.CreateInstance(elementType, true);
+            elementType.GetProperty("audioClip", any)!.SetValue(element, clip);
+            var elements = Array.CreateInstance(elementType, 1);
+            elements.SetValue(element, 0);
+            var container = (AudioResource)Activator.CreateInstance(containerType, true);
+            containerType.GetProperty("elements", any)!.SetValue(container, elements);
+            _garbage.Add(container);
+            _garbage.Add(element);
+            return container;
         }
 
         private static void SetField(object boxed, string name, object value) =>

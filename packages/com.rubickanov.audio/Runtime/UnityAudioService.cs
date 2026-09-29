@@ -264,11 +264,49 @@ namespace Rubickanov.Audio
         private static bool IsSounding(AudioSource source) =>
             source.isPlaying || (AudioListener.pause && !source.ignoreListenerPause && source.resource != null);
 
+        // Whether a one-shot is still playing. Unity keeps isPlaying true on a source that plays a container
+        // (AudioRandomContainer) through AudioListener.pause until the pause ends, long after the sound is over;
+        // such a one-shot is over once its output has stayed silent for SilenceEnds.
+        private sealed class OneShotEnd
+        {
+            private const double SilenceEnds = 0.2;
+            private const float Floor = 1e-5f;
+
+            // Main thread only, like the whole service.
+            private static readonly float[] Output = new float[256];
+
+            private double _heardAt = double.NaN;
+
+            public bool Sounding(AudioSource source)
+            {
+                if (!IsSounding(source)) return false;
+
+                if (!AudioListener.pause || !source.ignoreListenerPause || source.resource is AudioClip)
+                {
+                    _heardAt = double.NaN;
+                    return true;
+                }
+
+                double now = Time.realtimeSinceStartupAsDouble;
+                if (double.IsNaN(_heardAt) || Heard(source)) _heardAt = now;
+                return now - _heardAt < SilenceEnds;
+            }
+
+            private static bool Heard(AudioSource source)
+            {
+                source.GetOutputData(Output, 0);
+                foreach (float sample in Output)
+                    if (sample > Floor || sample < -Floor) return true;
+                return false;
+            }
+        }
+
         private async UniTaskVoid ReturnAfterPlayAsync(AudioSource source, CancellationToken ct)
         {
             try
             {
-                await UniTask.WaitWhile(() => source != null && IsSounding(source),
+                var end = new OneShotEnd();
+                await UniTask.WaitWhile(() => source != null && end.Sounding(source),
                     cancellationToken: ct);
             }
             catch (OperationCanceledException) { return; }
@@ -381,7 +419,8 @@ namespace Rubickanov.Audio
         {
             try
             {
-                while (source != null && IsSounding(source))
+                var end = new OneShotEnd();
+                while (source != null && end.Sounding(source))
                 {
                     if (follow != null)
                         source.transform.position = follow.position;
