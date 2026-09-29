@@ -166,6 +166,8 @@ audio.PlayMusic(_pauseTheme);    // heard; the game track it replaces fades out 
 audio.PlaySFX(_bodyHit);         // starts paused, plays after unpause
 ```
 
+A container (`AudioRandomContainer`) that plays on pause is heard, but Unity keeps its source's `isPlaying` true until the pause ends, so the service ends such a one-shot once its output has stayed silent for 0.2 s; otherwise every menu click would hold a source, and its `MaxInstances`, for the whole pause.
+
 The service doesn't pause anything itself: setting `AudioListener.pause` is the game's call. Fades keep running while paused, so a sound faded out on the pause screen is gone when the game resumes.
 
 ### Time
@@ -214,6 +216,7 @@ foreach (var (param, volume) in settings.Volumes)
 - **No ducking API** — a mixer Duck Volume effect ducks by signal level without code and without writing the same parameter as the player's volume setting.
 - **No persistence** — the service plays sound and sets mixer volumes, nothing else. Where settings are saved (PlayerPrefs, a file, a cloud save) belongs to the game, so the package has no dependency on a storage package.
 - **Pause lives in the sound** — `PlaysOnPause` sits on `SoundConfig` and `MusicConfig`, like `Output`: a menu sound is a menu sound at every call, and one-shots need it as much as loops, so a flag on the loop slot or a call argument would not do. Mixer groups have no such switch; `ignoreListenerPause` exists only on the source.
+- **Silence ends a container on pause** — Unity reports a container played through a paused listener as playing until the pause ends, and gives its length nowhere; the source's output is the only sign that it is over. Clips keep `isPlaying`, which is exact.
 - **A paused source is busy** — the pool waits for a sound to end, and `isPlaying` is false under `AudioListener.pause`, so a paused source with a resource still counts as playing; otherwise pausing the game would cut every sound and hand its source to the next one.
 - **Real time by default** — a game with slow motion or a paused time scale expects its audio fades to keep their length; following the time scale is the opt-in.
 - **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.unscaledDeltaTime` (or `Time.deltaTime`), and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.
