@@ -10,8 +10,9 @@ namespace Rubickanov.Audio
 {
     /// <summary>
     /// AudioMixer-based audio service with pooled SFX sources, loop slots and music crossfade. The service writes
-    /// no volume until asked; saving and restoring volumes is the caller's job. A full pool evicts the lowest
-    /// priority one-shot, oldest first; <see cref="SoundConfig.MaxInstances"/> and
+    /// no volume until asked; saving and restoring volumes is the caller's job. The pool never grows past
+    /// <see cref="AudioServiceConfig.MaxSfxSources"/>: a full pool first takes the quietest one-shot fading out, then
+    /// evicts the lowest priority one, oldest first; <see cref="SoundConfig.MaxInstances"/> and
     /// <see cref="SoundConfig.MinInterval"/> drop repeats of one sound before they reach the pool. A loop slot plays
     /// in 2D, at a point or following a transform; a destroyed transform fades its loop out.
     /// </summary>
@@ -21,8 +22,9 @@ namespace Rubickanov.Audio
         private readonly AudioMixerGroup _musicGroup = default!;
         private readonly AudioMixerGroup _sfxGroup = default!;
         private readonly GameObject _root;
-        private readonly AudioSource _musicSourceA;
-        private readonly AudioSource _musicSourceB;
+        // Three, so a switch in the middle of a crossfade lets both tracks it heard fade out.
+        private readonly AudioSource[] _musicSources = new AudioSource[3];
+        private readonly float[] _musicFadeFrom = new float[3];
         private readonly float _crossfadeDuration;
         private readonly bool _unscaledTime;
         private readonly AudioRolloffMode _rolloff;
@@ -32,6 +34,8 @@ namespace Rubickanov.Audio
         private readonly float _lostTargetFadeOut;
         private readonly Queue<AudioSource> _sfxPool = new();
         private readonly LinkedList<AudioSource> _activeSources = new();
+        // Stopped with a fade: out of the active list, not yet back in the pool.
+        private readonly List<AudioSource> _fadingSources = new();
         private readonly Dictionary<AudioSource, LinkedListNode<AudioSource>> _activeNodes = new();
         private readonly Dictionary<AudioSource, Voice> _voices = new();
         private readonly Dictionary<AudioResource, int> _instanceCounts = new();
@@ -40,6 +44,8 @@ namespace Rubickanov.Audio
         private readonly Dictionary<AudioSource, long> _sourceHandles = new();
         private readonly Dictionary<AudioSource, CancellationTokenSource> _sourceWatchers = new();
         private readonly Dictionary<string, AudioSource> _loopSources = new();
+        // Sources of stopped slots, for the next slot to start; a level's worth of attached loops is not leaked.
+        private readonly Stack<AudioSource> _freeLoopSources = new();
         private readonly Dictionary<string, CancellationTokenSource> _loopWatchers = new();
         private readonly Dictionary<string, CancellationTokenSource> _loopPitchWatchers = new();
         private readonly HashSet<string> _stoppingLoops = new();
@@ -53,9 +59,12 @@ namespace Rubickanov.Audio
         private readonly Func<double> _now;
 
         private long _nextHandleId = 1;
-        private bool _musicSourceAActive = true;
+        private int _currentMusic = -1;
         private bool _followingLoops;
         private CancellationTokenSource? _crossfadeCts;
+
+        // Silence on the mixer, the floor of its volume faders.
+        private const float MinDecibels = -80f;
 
         public UnityAudioService(AudioServiceConfig config)
         {
@@ -77,10 +86,8 @@ namespace Rubickanov.Audio
             if (Application.isPlaying)
                 Object.DontDestroyOnLoad(_root);
 
-            _musicSourceA = CreateMusicSource("Music_A");
-            _musicSourceA.volume = 1f;
-            _musicSourceB = CreateMusicSource("Music_B");
-            _musicSourceB.volume = 0f;
+            for (int i = 0; i < _musicSources.Length; i++)
+                _musicSources[i] = CreateMusicSource($"Music_{(char)('A' + i)}");
 
             int maxSources = Mathf.Max(1, config.MaxSfxSources);
             for (int i = 0; i < maxSources; i++)
@@ -98,6 +105,7 @@ namespace Rubickanov.Audio
             source.loop = true;
             source.playOnAwake = false;
             source.spatialBlend = 0f;
+            source.volume = 0f;
             if (_musicGroup != null) source.outputAudioMixerGroup = _musicGroup;
             return source;
         }
@@ -124,7 +132,7 @@ namespace Rubickanov.Audio
         }
 
         // Null when the sound may not play: invalid, over its repeat limit, or below every sound in a full pool.
-        private AudioSource? RentSource(in SoundConfig sound)
+        private AudioSource? RentSource(in SoundConfig sound, Transform? follow)
         {
             if (!sound.IsValid || !PassesRepeatLimit(in sound)) return null;
 
@@ -133,6 +141,11 @@ namespace Rubickanov.Audio
             if (_sfxPool.Count > 0)
             {
                 source = _sfxPool.Dequeue();
+            }
+            else if (_fadingSources.Count > 0)
+            {
+                // A stopped sound is on its way out anyway: cutting the quietest one costs least.
+                source = TakeQuietestFading();
             }
             else if (_activeSources.Count > 0)
             {
@@ -148,20 +161,28 @@ namespace Rubickanov.Audio
             }
             else
             {
-                // Pool drained and the active list is empty too: every source is in fade-out
-                // limbo (StopSound removed it from _activeSources but FadeOutAndReclaimAsync
-                // has not reclaimed it to the pool yet). There is nothing to dequeue or evict,
-                // so grow a fresh source rather than dereferencing a null _activeSources.First.
-                // The extra source reclaims back into the pool when it finishes, so the pool
-                // settles at the real peak concurrency.
-                source = CreateSFXSource();
+                // Every source is somewhere else: only a source destroyed from outside gets here.
+                return null;
             }
 
             var node = _activeSources.AddLast(source);
             _activeNodes[source] = node;
-            _voices[source] = new Voice(sound.Priority, sound.Resource);
+            _voices[source] = new Voice(sound.Priority, sound.Resource, follow);
             _instanceCounts[sound.Resource] = InstanceCount(sound.Resource) + 1;
             _lastStarts[sound.Resource] = _now();
+            return source;
+        }
+
+        private AudioSource TakeQuietestFading()
+        {
+            int quietest = 0;
+            for (int i = 1; i < _fadingSources.Count; i++)
+                if (_fadingSources[i].volume < _fadingSources[quietest].volume) quietest = i;
+
+            var source = _fadingSources[quietest];
+            _fadingSources.RemoveAt(quietest);
+            EndWatch(source);
+            source.Stop();
             return source;
         }
 
@@ -335,7 +356,7 @@ namespace Rubickanov.Audio
 
         public SoundHandle PlaySFX(in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f)
         {
-            var source = RentSource(in sound);
+            var source = RentSource(in sound, follow: null);
             if (source == null) return SoundHandle.Invalid;
 
             source.spatialBlend = 0f;
@@ -344,7 +365,7 @@ namespace Rubickanov.Audio
 
         public SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f)
         {
-            var source = RentSource(in sound);
+            var source = RentSource(in sound, follow: null);
             if (source == null) return SoundHandle.Invalid;
 
             source.transform.position = position;
@@ -355,7 +376,7 @@ namespace Rubickanov.Audio
         public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f)
         {
             if (follow == null) return SoundHandle.Invalid;
-            var source = RentSource(in sound);
+            var source = RentSource(in sound, follow);
             if (source == null) return SoundHandle.Invalid;
 
             source.transform.position = follow.position;
@@ -472,7 +493,7 @@ namespace Rubickanov.Audio
 
             if (!_loopSources.TryGetValue(slot, out var source))
             {
-                source = CreateLoopSource(slot);
+                source = RentLoopSource(slot);
                 _loopSources[slot] = source;
             }
 
@@ -552,9 +573,7 @@ namespace Rubickanov.Audio
             }
             else
             {
-                _loopFollows.Remove(slot);
-                source.Stop();
-                source.resource = null;
+                FreeLoop(slot, source);
             }
         }
 
@@ -659,18 +678,40 @@ namespace Rubickanov.Audio
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { Debug.LogException(ex); return; }
 
-            if (source != null)
-            {
-                source.Stop();
-                source.resource = null;
-            }
-            _stoppingLoops.Remove(slot);
-            _loopFollows.Remove(slot);
             if (_loopWatchers.TryGetValue(slot, out var stored) && !stored.Token.IsCancellationRequested)
             {
                 _loopWatchers.Remove(slot);
                 stored.Dispose();
             }
+            if (_loopSources.TryGetValue(slot, out var current) && current == source)
+                FreeLoop(slot, source);
+        }
+
+        // The slot is gone once its loop stops; its source waits for the next slot to start.
+        private void FreeLoop(string slot, AudioSource source)
+        {
+            CancelLoopWatcher(slot);
+            CancelWatcher(_loopPitchWatchers, slot);
+            _stoppingLoops.Remove(slot);
+            _loopFollows.Remove(slot);
+            _loopSources.Remove(slot);
+            if (source == null) return;
+
+            source.Stop();
+            source.resource = null;
+            _freeLoopSources.Push(source);
+        }
+
+        private AudioSource RentLoopSource(string slot)
+        {
+            while (_freeLoopSources.Count > 0)
+            {
+                var free = _freeLoopSources.Pop();
+                if (free == null) continue;
+                free.gameObject.name = $"Loop_{slot}";
+                return free;
+            }
+            return CreateLoopSource(slot);
         }
 
         private AudioSource CreateLoopSource(string slot)
@@ -692,10 +733,13 @@ namespace Rubickanov.Audio
 
             if (fadeOut > 0f)
             {
+                // An attached sound keeps following while it fades.
+                var follow = _voices.TryGetValue(source, out var voice) ? voice.Follow : null;
                 Unlink(source);
                 EndWatch(source);
                 UntrackHandle(source);
-                FadeOutAndReclaimAsync(source, fadeOut, _cts.Token).Forget();
+                _fadingSources.Add(source);
+                FadeOutAndReclaimAsync(source, fadeOut, follow, BeginWatch(source)).Forget();
             }
             else
             {
@@ -720,8 +764,12 @@ namespace Rubickanov.Audio
             _stopBuffer.Clear();
         }
 
-        private async UniTaskVoid FadeOutAndReclaimAsync(AudioSource source, float duration, CancellationToken ct)
+        // Cancelled when the pool takes the source before the fade ends.
+        private async UniTaskVoid FadeOutAndReclaimAsync(AudioSource source, float duration, Transform? follow,
+            CancellationToken ct)
         {
+            // A follower moves after the target has, like FollowAndReturnAsync.
+            var timing = follow != null ? PlayerLoopTiming.LastPostLateUpdate : PlayerLoopTiming.Update;
             try
             {
                 float startVolume = source != null ? source.volume : 0f;
@@ -730,50 +778,115 @@ namespace Rubickanov.Audio
                 {
                     elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
-                    if (source != null) source.volume = startVolume * (1f - t);
-                    await UniTask.Yield(ct);
+                    if (source != null)
+                    {
+                        source.volume = startVolume * (1f - t);
+                        if (follow != null) source.transform.position = follow.position;
+                    }
+                    await UniTask.Yield(timing, ct);
                 }
             }
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { Debug.LogException(ex); return; }
 
+            _fadingSources.Remove(source);
+            EndWatch(source);
             if (source != null)
                 ReclaimToPool(source);
         }
 
+        // A track already playing, or fading in or out, goes on from where it is; every other audible track fades out
+        // from its current volume.
         public void PlayMusic(in MusicConfig music, float? crossfadeDuration = null)
         {
             if (!music.IsValid) return;
 
-            _crossfadeCts?.Cancel();
-            _crossfadeCts?.Dispose();
-            _crossfadeCts = null;
-
-            var incoming = _musicSourceAActive ? _musicSourceB : _musicSourceA;
-            var outgoing = _musicSourceAActive ? _musicSourceA : _musicSourceB;
-            _musicSourceAActive = !_musicSourceAActive;
-
-            float outgoingStartVolume = IsSounding(outgoing) ? outgoing.volume : 0f;
+            CancelCrossfade();
             float duration = crossfadeDuration ?? _crossfadeDuration;
 
-            incoming.resource = music.Resource;
-            incoming.pitch = 1f;
-            incoming.ignoreListenerPause = music.PlaysOnPause;
-            incoming.volume = 0f;
-            incoming.Play();
-
-            if (duration > 0f && outgoingStartVolume > 0f)
+            int incoming = MusicPlaying(music.Resource);
+            if (incoming < 0)
             {
+                incoming = FreeMusicSource();
+                var source = _musicSources[incoming];
+                source.Stop();
+                source.resource = music.Resource;
+                source.pitch = 1f;
+                source.volume = 0f;
+                source.Play();
+            }
+            _musicSources[incoming].ignoreListenerPause = music.PlaysOnPause;
+            _currentMusic = incoming;
+
+            if (duration > 0f && OtherMusicAudible(incoming))
+            {
+                for (int i = 0; i < _musicSources.Length; i++)
+                    _musicFadeFrom[i] = _musicSources[i].volume;
                 _crossfadeCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                CrossfadeAsync(outgoing, incoming, outgoingStartVolume, duration, _crossfadeCts.Token).Forget();
+                CrossfadeAsync(incoming, duration, _crossfadeCts.Token).Forget();
             }
             else
             {
-                outgoing.Stop();
-                outgoing.resource = null;
-                outgoing.volume = 0f;
-                incoming.volume = 1f;
+                SettleMusic(incoming);
             }
+        }
+
+        // The source already playing this track, the current one first.
+        private int MusicPlaying(AudioResource resource)
+        {
+            if (_currentMusic >= 0 && PlaysMusic(_musicSources[_currentMusic], resource)) return _currentMusic;
+            for (int i = 0; i < _musicSources.Length; i++)
+                if (PlaysMusic(_musicSources[i], resource)) return i;
+            return -1;
+        }
+
+        private static bool PlaysMusic(AudioSource source, AudioResource resource) =>
+            source.resource == resource && IsSounding(source);
+
+        // A silent source if there is one; otherwise the quietest track fading out gives way.
+        private int FreeMusicSource()
+        {
+            int quietest = -1;
+            for (int i = 0; i < _musicSources.Length; i++)
+            {
+                if (i == _currentMusic) continue;
+                var source = _musicSources[i];
+                if (!IsSounding(source)) return i;
+                if (quietest < 0 || source.volume < _musicSources[quietest].volume) quietest = i;
+            }
+            return quietest;
+        }
+
+        private bool OtherMusicAudible(int current)
+        {
+            for (int i = 0; i < _musicSources.Length; i++)
+                if (i != current && IsSounding(_musicSources[i]) && _musicSources[i].volume > 0f) return true;
+            return false;
+        }
+
+        // The current track at full volume, every other one stopped.
+        private void SettleMusic(int current)
+        {
+            for (int i = 0; i < _musicSources.Length; i++)
+            {
+                var source = _musicSources[i];
+                if (source == null) continue;
+                if (i == current)
+                {
+                    source.volume = 1f;
+                    continue;
+                }
+                source.Stop();
+                source.resource = null;
+                source.volume = 0f;
+            }
+        }
+
+        private void CancelCrossfade()
+        {
+            _crossfadeCts?.Cancel();
+            _crossfadeCts?.Dispose();
+            _crossfadeCts = null;
         }
 
         public void TransitionToSnapshot(string snapshotName, float duration)
@@ -789,9 +902,8 @@ namespace Rubickanov.Audio
             snapshot.TransitionTo(Mathf.Max(0f, duration));
         }
 
-        private async UniTaskVoid CrossfadeAsync(
-            AudioSource outgoing, AudioSource incoming,
-            float outgoingStartVolume, float duration, CancellationToken ct)
+        // Every source moves from its volume at the start to full (the current one) or silence over the duration.
+        private async UniTaskVoid CrossfadeAsync(int current, float duration, CancellationToken ct)
         {
             try
             {
@@ -800,8 +912,11 @@ namespace Rubickanov.Audio
                 {
                     elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
-                    if (outgoing != null) outgoing.volume = outgoingStartVolume * (1f - t);
-                    if (incoming != null) incoming.volume = t;
+                    for (int i = 0; i < _musicSources.Length; i++)
+                    {
+                        var source = _musicSources[i];
+                        if (source != null) source.volume = Mathf.Lerp(_musicFadeFrom[i], i == current ? 1f : 0f, t);
+                    }
                     await UniTask.Yield(ct);
                 }
             }
@@ -812,30 +927,21 @@ namespace Rubickanov.Audio
                 return;
             }
 
-            if (outgoing != null)
-            {
-                outgoing.Stop();
-                outgoing.resource = null;
-                outgoing.volume = 0f;
-            }
-            if (incoming != null) incoming.volume = 1f;
+            SettleMusic(current);
         }
 
         public void StopMusic()
         {
-            _crossfadeCts?.Cancel();
-            _crossfadeCts?.Dispose();
-            _crossfadeCts = null;
+            CancelCrossfade();
 
-            _musicSourceA.Stop();
-            _musicSourceA.resource = null;
-            _musicSourceA.volume = 0f;
+            foreach (var source in _musicSources)
+            {
+                source.Stop();
+                source.resource = null;
+                source.volume = 0f;
+            }
 
-            _musicSourceB.Stop();
-            _musicSourceB.resource = null;
-            _musicSourceB.volume = 0f;
-
-            _musicSourceAActive = true;
+            _currentMusic = -1;
         }
 
         public void SetVolume(string mixerParam, float volume01)
@@ -847,13 +953,19 @@ namespace Rubickanov.Audio
             ApplyVolume(mixerParam, volume);
         }
 
-        public float GetVolume(string mixerParam) =>
-            !string.IsNullOrEmpty(mixerParam) && _volumes.TryGetValue(mixerParam, out var volume) ? volume : 1f;
+        public float GetVolume(string mixerParam)
+        {
+            if (string.IsNullOrEmpty(mixerParam)) return 1f;
+            if (_volumes.TryGetValue(mixerParam, out var volume)) return volume;
+            // Never set here: the mixer's own value, from its asset or a snapshot.
+            if (_mixer == null || !_mixer.GetFloat(mixerParam, out float dB)) return 1f;
+            return dB > MinDecibels ? Mathf.Clamp01(Mathf.Pow(10f, dB / 20f)) : 0f;
+        }
 
         private void ApplyVolume(string param, float volume01)
         {
             if (_mixer == null || string.IsNullOrEmpty(param)) return;
-            float dB = volume01 > 0.0001f ? Mathf.Log10(volume01) * 20f : -80f;
+            float dB = volume01 > 0.0001f ? Mathf.Log10(volume01) * 20f : MinDecibels;
             if (!_mixer.SetFloat(param, dB))
                 Debug.LogWarning($"[AudioService] Mixer parameter '{param}' is not exposed.");
         }
@@ -898,11 +1010,13 @@ namespace Rubickanov.Audio
         {
             public readonly int Priority;
             public readonly AudioResource Resource;
+            public readonly Transform? Follow;
 
-            public Voice(int priority, AudioResource resource)
+            public Voice(int priority, AudioResource resource, Transform? follow)
             {
                 Priority = priority;
                 Resource = resource;
+                Follow = follow;
             }
         }
     }

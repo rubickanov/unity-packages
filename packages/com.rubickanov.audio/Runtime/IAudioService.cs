@@ -30,6 +30,10 @@ namespace Rubickanov.Audio
         void StopLoop(string slot, float fadeOut = 0f);
         bool IsLoopPlaying(string slot);
 
+        /// <summary>
+        /// Crossfades to the track. A track already playing goes on instead of starting over; to restart it, call
+        /// <see cref="StopMusic"/> first.
+        /// </summary>
         void PlayMusic(in MusicConfig music, float? crossfadeDuration = null);
         void StopMusic();
 
@@ -37,7 +41,10 @@ namespace Rubickanov.Audio
 
         /// <summary>Sets an exposed mixer volume parameter from a linear 0..1 value.</summary>
         void SetVolume(string mixerParam, float volume01);
-        /// <summary>The last value set for the parameter, or 1 if it was never set.</summary>
+        /// <summary>
+        /// The last value set for the parameter; never set, the mixer's own value; 1 without a mixer or if the
+        /// parameter is not exposed.
+        /// </summary>
         float GetVolume(string mixerParam);
     }
 }

@@ -70,7 +70,7 @@ A one-shot returns its source to the pool automatically when it finishes. An inv
 ```csharp
 SoundHandle handle = audio.PlaySFX(_alarmSound);
 audio.StopSound(handle);                 // immediate
-audio.StopSound(handle, fadeOut: 0.3f);  // fade out, then release to the pool
+audio.StopSound(handle, fadeOut: 0.3f);  // fade out, then release to the pool; an attached sound keeps following
 
 audio.StopAllSFX();                      // every pooled one-shot; loops and music keep playing
 audio.StopAllSFX(fadeOut: 0.2f);
@@ -82,7 +82,7 @@ Set in the Inspector on each `SoundConfig`; zeros mean no rule, so a new sound b
 
 | Field | Effect |
 |---|---|
-| `Priority` | When the pool is full, the playing one-shot with the lowest priority is evicted, oldest first. A sound whose priority is below every playing one is dropped. |
+| `Priority` | When the pool is full, the playing one-shot with the lowest priority is evicted, oldest first. A sound whose priority is below every playing one is dropped. One-shots fading out after `StopSound` go first, the quietest of them, whatever their priority. |
 | `MaxInstances` | At most this many copies of the sound play at once; one more is dropped. |
 | `MinInterval` | Seconds between two starts of the sound (`0.05` = at most once per 50 ms); a start inside the window is dropped. |
 
@@ -108,7 +108,7 @@ if (audio.IsLoopPlaying("steps"))
     audio.StopLoop("steps", fadeOut: 0.2f);
 ```
 
-Calling `PlayLoop` on a live slot replaces the current sound on the same source.
+Calling `PlayLoop` on a live slot replaces the current sound on the same source. A slot ends when its loop stops (after its fade, if any); its source is kept and reused by the next slot that starts, so many short-lived slot names (`"piston-17"`) don't pile up sources.
 
 Change a live loop without restarting it:
 
@@ -148,7 +148,9 @@ audio.PlayMusic(_battleTheme, crossfadeDuration: 3f);   // per-call override
 audio.StopMusic();
 ```
 
-Music uses two alternating sources. Switching tracks mid-crossfade cancels the in-flight transition and starts a new one from the current outgoing volume, so volumes never snap.
+`PlayMusic` with the track already playing keeps it going instead of starting it over, so a level can ask for its music on every restart; a track that is fading in or out picks up from its current volume. To start a track from the beginning, call `StopMusic` first.
+
+Music uses three sources. Switching tracks mid-crossfade cancels the in-flight transition and fades every audible track out from its current volume, so volumes never snap; only a third switch inside one crossfade cuts the quietest track.
 
 ### Pause
 
@@ -190,10 +192,10 @@ Snapshots must be defined on the AudioMixer asset. A missing snapshot logs a war
 ```csharp
 audio.SetVolume("MasterVolume", 0.8f);
 audio.SetVolume("VoiceVolume", 0.7f);
-float voice = audio.GetVolume("VoiceVolume");   // 1 until set
+float voice = audio.GetVolume("VoiceVolume");   // the mixer's value until set
 ```
 
-The argument is the name of an exposed mixer parameter. Volumes are clamped to `[0, 1]` and converted to dB (`20·log10(v)`, or `-80 dB` at zero). If a parameter is not exposed on the mixer, a warning is logged. For ducking under voice, use a Duck Volume effect on the mixer: it doesn't fight the player's volume settings.
+The argument is the name of an exposed mixer parameter. Volumes are clamped to `[0, 1]` and converted to dB (`20·log10(v)`, or `-80 dB` at zero). If a parameter is not exposed on the mixer, a warning is logged. `GetVolume` returns the last value set; for a parameter never set it reads the mixer (`-80 dB` and below is `0`), and returns `1` without a mixer or for a parameter that is not exposed. For ducking under voice, use a Duck Volume effect on the mixer: it doesn't fight the player's volume settings.
 
 ### Saving Volumes
 
@@ -210,6 +212,7 @@ foreach (var (param, volume) in settings.Volumes)
 - **Named loop slots, not handles** — a loop is a semantic slot (`"steps"`, `"ambient"`), not an anonymous instance. Slots are dedicated sources that survive scene loads and are never evicted by the SFX pool, so callers don't manage handles across scenes.
 - **A lost target fades its loop out** — a destroyed transform is almost always an object that left the scene, so its loop should end with it; a short fade avoids a click, and a slot the caller stopped is left to its own fade.
 - **SFX pool evicts by priority at capacity** — when every source is busy, the lowest priority playing source (oldest among equals) is stopped, its handle invalidated, and it is reused; a sound below every playing one is dropped instead. `AudioSource.priority` is not enough: it only decides which voices Unity mutes, not which one-shot the pool gives up. No allocation spikes at peak concurrency.
+- **A fading one-shot gives way first** — a sound stopped with a fade still holds its source until the fade ends. A full pool cuts the quietest of them before any playing sound, so `MaxSfxSources` stays a hard cap after `StopAllSFX(fadeOut)` and the fade costs no live sound.
 - **Repeat limits drop the newcomer** — over `MaxInstances` or inside `MinInterval` the new start is dropped rather than cutting a copy already playing, so a burst of contacts can't turn into a stutter of restarts.
 - **Volumes by parameter name** — the mixer's layout belongs to the game, so the service takes the exposed parameter name instead of a fixed set of groups.
 - **Routing lives in the sound** — `SoundConfig.Output` names the mixer group, so the caller doesn't pick a group per call.
