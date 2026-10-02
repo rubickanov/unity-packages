@@ -40,12 +40,6 @@
       "source": "local",
       "dependencies": {}
     },
-    "com.rubickanov.statemachine": {
-      "version": "file:../../packages/com.rubickanov.statemachine",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {}
-    },
     "com.rubickanov.ui": {
       "version": "file:../../packages/com.rubickanov.ui",
       "depth": 0,

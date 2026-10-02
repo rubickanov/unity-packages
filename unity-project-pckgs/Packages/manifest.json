@@ -6,7 +6,6 @@
     "com.rubickanov.devconsole": "file:../../packages/com.rubickanov.devconsole",
     "com.rubickanov.eqs": "file:../../packages/com.rubickanov.eqs",
     "com.rubickanov.log": "file:../../packages/com.rubickanov.log",
-    "com.rubickanov.statemachine": "file:../../packages/com.rubickanov.statemachine",
     "com.rubickanov.ui": "file:../../packages/com.rubickanov.ui",
     "com.unity.ai.inference": "2.6.1",
     "com.unity.ide.rider": "3.0.40",
@@ -57,7 +56,6 @@
     "com.rubickanov.devconsole",
     "com.rubickanov.eqs",
     "com.rubickanov.log",
-    "com.rubickanov.statemachine",
     "com.rubickanov.ui"
   ],
   "scopedRegistries": [
