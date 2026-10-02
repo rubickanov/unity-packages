@@ -7,6 +7,7 @@ namespace Rubickanov.DevConsole.Editor
     {
         private SerializedObject _serializedSettings;
         private DevConsoleSettings _settings;
+        private string _savedTo;
 
         private DevConsoleSettingsProvider()
             : base("Project/Dev Console", SettingsScope.Project)
@@ -19,6 +20,7 @@ namespace Rubickanov.DevConsole.Editor
         {
             _settings = DevConsoleSettings.GetOrCreate();
             _serializedSettings = new SerializedObject(_settings);
+            _savedTo = DevConsoleSettingsStore.FindAssetPath();
         }
 
         public override void OnGUI(string searchContext)
@@ -58,7 +60,17 @@ namespace Rubickanov.DevConsole.Editor
                 new GUIContent("Console Height", "Height as fraction of screen."));
 
             if (_serializedSettings.ApplyModifiedProperties())
-                _settings.Save();
+            {
+                DevConsoleSettingsStore.Save(_settings);
+                _savedTo = DevConsoleSettingsStore.FindAssetPath();
+            }
+
+            EditorGUILayout.Space(8);
+            EditorGUILayout.HelpBox(
+                _savedTo != null
+                    ? $"Saved to {_savedTo}, which builds carry."
+                    : $"Every setting has its default. A change creates {DevConsoleSettingsStore.DefaultAssetPath}, which builds carry.",
+                MessageType.None);
         }
 
         [SettingsProvider]
