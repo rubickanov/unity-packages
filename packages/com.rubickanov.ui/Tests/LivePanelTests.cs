@@ -1,5 +1,5 @@
 using System;
-using System.Reflection;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using R3;
 using UnityEngine;
@@ -41,133 +41,94 @@ namespace Rubickanov.UI.Tests
             Object.DestroyImmediate(_settings);
         }
 
-        private VisualElement? Tooltip => _root.Q("overlay-layer").Q(className: PopupStyle.Tooltip);
-
-        /// <summary>Moves the mouse over <paramref name="element"/> the way the panel does, sending enter and leave events.</summary>
-        private void HoverTo(VisualElement element)
+        /// <summary>A pointer press on <paramref name="element"/>, dispatched by the panel.</summary>
+        private static void PressOn(VisualElement element)
         {
-            var panel = _root.panel;
-            MethodInfo? set = null;
-            MethodInfo? commit = null;
-            for (var type = panel.GetType(); type != null && (set == null || commit == null); type = type.BaseType)
-            {
-                foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public |
-                                                       BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                {
-                    var parameters = method.GetParameters();
-                    if (method.Name == "SetTopElementUnderPointer" && parameters.Length == 3 &&
-                        parameters[2].ParameterType == typeof(Vector2))
-                        set = method;
-                    if (method.Name == "CommitElementUnderPointers" && parameters.Length == 0)
-                        commit = method;
-                }
-            }
-
-            set!.Invoke(panel, new object[] { PointerId.mousePointerId, element, new Vector2(10f, 10f) });
-            commit!.Invoke(panel, null);
-        }
-
-        /// <summary>Puts the panel on a clock the test moves, so scheduled items run when the test says.</summary>
-        private sealed class PanelClock
-        {
-            private readonly IPanel _panel;
-            private readonly MethodInfo _update;
-            private readonly object _scheduler;
-            public double Seconds = 1000.0;
-
-            public PanelClock(IPanel panel)
-            {
-                _panel = panel;
-                const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                var type = panel.GetType();
-                var time = FindProperty(type, "TimeSinceStartupFunc", flags);
-                time.SetValue(panel, Delegate.CreateDelegate(time.PropertyType, this, nameof(Now)));
-                _scheduler = FindProperty(type, "scheduler", flags).GetValue(panel);
-                _update = _scheduler.GetType().GetMethod("UpdateScheduledEvents", flags)!;
-            }
-
-            private double Now() => Seconds;
-
-            public void Advance(float seconds)
-            {
-                Seconds += seconds;
-                _update.Invoke(_scheduler, null);
-            }
-
-            private static PropertyInfo FindProperty(Type type, string name, BindingFlags flags)
-            {
-                for (var t = type; t != null; t = t.BaseType)
-                {
-                    var property = t.GetProperty(name, flags | BindingFlags.DeclaredOnly);
-                    if (property != null) return property;
-                }
-                throw new MissingMemberException(type.Name, name);
-            }
-        }
-
-        private (VisualElement row, VisualElement other) AddRowWithTooltip(float delay = 0f)
-        {
-            var row = new VisualElement { name = "row" };
-            row.Add(new Label("text"));
-            var other = new VisualElement { name = "other" };
-            _root.Q("screen-layer").Add(row);
-            _root.Q("screen-layer").Add(other);
-            row.AttachTooltip(_popups, "hint", delay);
-            return (row, other);
+            using var press = PointerDownEvent.GetPooled();
+            press.target = element;
+            element.SendEvent(press);
         }
 
         [Test]
-        public void AttachTooltip_PointerEntersThenLeaves_OpensThenCloses()
+        public async Task ClickOutside_PressOnBackdrop_ClosesAsClickOutside()
         {
-            var (row, other) = AddRowWithTooltip();
+            var popup = _popups.Create().Content(() => new Label("modal")).Modal()
+                .CloseOn(PopupCloseTriggers.ClickOutside).Open();
 
-            HoverTo(row.Q<Label>());
-            var openedOnEnter = Tooltip != null;
-            HoverTo(other);
+            PressOn(popup.Panel.parent);
 
-            Assert.IsTrue(openedOnEnter);
-            Assert.IsNull(Tooltip);
+            Assert.IsFalse(popup.IsOpen);
+            Assert.AreEqual(PopupCloseReason.ClickOutside, (await popup.Result).Reason);
         }
 
         [Test]
-        public void AttachTooltip_HoveredElementLeavesPanel_Closes()
+        public void ClickOutside_PressInsidePanel_StaysOpen()
         {
-            var (row, other) = AddRowWithTooltip();
-            HoverTo(row.Q<Label>());
+            var label = new Label("modal");
+            var popup = _popups.Create().Content(() => label).Modal().CloseOn(PopupCloseTriggers.ClickOutside).Open();
 
-            row.RemoveFromHierarchy();
-            HoverTo(other);
+            PressOn(label);
 
-            Assert.IsNull(Tooltip);
+            Assert.IsTrue(popup.IsOpen);
         }
 
         [Test]
-        public void AttachTooltip_WithDelay_OpensOnlyAfterIt()
+        public void ModalWithoutClickOutside_PressOnBackdrop_StaysOpen()
         {
-            var clock = new PanelClock(_root.panel);
-            var (row, _) = AddRowWithTooltip(delay: 0.3f);
+            var popup = _popups.Create().Content(() => new Label("modal")).Modal().Open();
 
-            HoverTo(row.Q<Label>());
-            clock.Advance(0.1f);
-            var openedEarly = Tooltip != null;
-            clock.Advance(0.3f);
+            PressOn(popup.Panel.parent);
 
-            Assert.IsFalse(openedEarly);
-            Assert.IsNotNull(Tooltip);
+            Assert.IsTrue(popup.IsOpen);
+        }
+
+        // Off a panel a field sends no ChangeEvent: picks need the live panel.
+        [Test]
+        public async Task BindDropdown_TwoWay_IndexFollowsPropertyAndPick()
+        {
+            await _ui.Register<BindingHelperTests.DropdownView>();
+            var view = _ui.Get<BindingHelperTests.DropdownView>();
+            var vm = new BindingHelperTests.DropdownViewModel(1);
+            await _ui.Show<BindingHelperTests.DropdownView, BindingHelperTests.DropdownViewModel>(vm);
+
+            var appliedAtBind = view.Quality.index;
+            vm.Quality.Value = 2;
+            var followedProperty = view.Quality.index;
+            view.Quality.index = 0;
+
+            Assert.AreEqual(1, appliedAtBind);
+            Assert.AreEqual(2, followedProperty);
+            Assert.AreEqual(0, vm.Quality.Value);
+            CollectionAssert.AreEqual(BindingHelperTests.DropdownView.Choices, view.Quality.choices);
         }
 
         [Test]
-        public void AttachTooltip_LeftBeforeDelay_NeverOpens()
+        public async Task BindDropdown_OneWay_InitialIndexThenCallbackOnPick()
         {
-            var clock = new PanelClock(_root.panel);
-            var (row, other) = AddRowWithTooltip(delay: 0.3f);
+            await _ui.Register<BindingHelperTests.DropdownView>();
+            var view = _ui.Get<BindingHelperTests.DropdownView>();
+            var vm = new BindingHelperTests.DropdownViewModel(0);
+            await _ui.Show<BindingHelperTests.DropdownView, BindingHelperTests.DropdownViewModel>(vm);
 
-            HoverTo(row.Q<Label>());
-            clock.Advance(0.1f);
-            HoverTo(other);
-            clock.Advance(0.5f);
+            var initial = view.Language.index;
+            view.Language.index = 1;
 
-            Assert.IsNull(Tooltip);
+            Assert.AreEqual(2, initial);
+            CollectionAssert.AreEqual(new[] { 1 }, vm.Picked);
+        }
+
+        [Test]
+        public async Task BindDropdown_AfterHide_PickNoLongerReachesViewModel()
+        {
+            await _ui.Register<BindingHelperTests.DropdownView>();
+            var view = _ui.Get<BindingHelperTests.DropdownView>();
+            var vm = new BindingHelperTests.DropdownViewModel(0);
+            await _ui.Show<BindingHelperTests.DropdownView, BindingHelperTests.DropdownViewModel>(vm);
+
+            _ui.Hide<BindingHelperTests.DropdownView>();
+            view.Language.index = 0;
+
+            CollectionAssert.IsEmpty(vm.Picked);
         }
 
         [Test]
@@ -175,7 +136,7 @@ namespace Rubickanov.UI.Tests
         {
             _ui.Register<TextView>().GetAwaiter().GetResult();
             var property = new ReactiveProperty<string>("ab");
-            _ui.Show<TextView>(new TextViewModel(property)).GetAwaiter().GetResult();
+            _ui.Show<TextView, TextViewModel>(new TextViewModel(property)).GetAwaiter().GetResult();
             var field = _ui.Get<TextView>().Field;
             var text = field.Q<TextElement>();
             field.SetValueWithoutNotify("abc");

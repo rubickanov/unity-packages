@@ -140,14 +140,16 @@ namespace Rubickanov.UI.Tests
             }
 
             public T Get<T>() where T : View => throw new NotSupportedException();
-            public UniTask Show<T>(ViewModelBase viewModel) where T : View => UniTask.CompletedTask;
-            public UniTask Navigate<T>(Func<ViewModelBase> createViewModel) where T : View => UniTask.CompletedTask;
+
+            public UniTask Show<TView, TViewModel>(TViewModel viewModel)
+                where TView : View<TViewModel> where TViewModel : ViewModelBase => UniTask.CompletedTask;
+
+            public UniTask Navigate<TView, TViewModel>(Func<TViewModel> createViewModel)
+                where TView : View<TViewModel> where TViewModel : ViewModelBase => UniTask.CompletedTask;
+
             public bool CanNavigateBack => false;
-            public UniTask<bool> NavigateBack() => UniTask.FromResult(false);
             public void Hide<T>() where T : View { }
             public UniTask HideAsync<T>() where T : View => UniTask.CompletedTask;
-            public void HideScreen() { }
-            public UniTask HideScreenAsync() => UniTask.CompletedTask;
             public IDisposable CapturePointer() => throw new NotSupportedException();
             public ReadOnlyReactiveProperty<bool> PointerCaptured => throw new NotSupportedException();
             public IDisposable PushBackHandler(Func<bool> handler) => throw new NotSupportedException();
