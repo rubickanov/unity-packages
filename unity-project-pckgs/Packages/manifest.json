@@ -5,6 +5,7 @@
     "com.rubickanov.audio": "file:../../packages/com.rubickanov.audio",
     "com.rubickanov.devconsole": "file:../../packages/com.rubickanov.devconsole",
     "com.rubickanov.eqs": "file:../../packages/com.rubickanov.eqs",
+    "com.rubickanov.input": "file:../../packages/com.rubickanov.input",
     "com.rubickanov.log": "file:../../packages/com.rubickanov.log",
     "com.rubickanov.save": "file:../../packages/com.rubickanov.save",
     "com.rubickanov.ui": "file:../../packages/com.rubickanov.ui",
@@ -56,6 +57,7 @@
     "com.rubickanov.audio",
     "com.rubickanov.devconsole",
     "com.rubickanov.eqs",
+    "com.rubickanov.input",
     "com.rubickanov.log",
     "com.rubickanov.save",
     "com.rubickanov.ui"

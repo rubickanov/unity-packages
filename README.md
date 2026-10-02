@@ -43,8 +43,8 @@ Which package needs what:
 
 | Needs | Packages |
 |---|---|
-| `R3` | `ui` |
-| `UniTask` | `audio`, `eqs` (optional asm), `save`, `ui` |
+| `R3` | `input`, `ui` |
+| `UniTask` | `audio`, `eqs` (optional asm), `input`, `save`, `ui` |
 
 `unity-project-pckgs/Packages/manifest.json` is the reference — it has every one
 of these wired up and is the configuration all packages are developed against.
