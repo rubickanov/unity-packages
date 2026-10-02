@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "com.annulusgames.lit-motion": "https://github.com/annulusgames/LitMotion.git?path=src/LitMotion/Assets/LitMotion",
     "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.rubickanov.audio": "file:../../packages/com.rubickanov.audio",
@@ -11,7 +10,6 @@
     "com.rubickanov.log": "file:../../packages/com.rubickanov.log",
     "com.rubickanov.statemachine": "file:../../packages/com.rubickanov.statemachine",
     "com.rubickanov.ui": "file:../../packages/com.rubickanov.ui",
-    "com.rubickanov.ui.animations": "file:../../packages/com.rubickanov.ui.animations",
     "com.rubickanov.utils": "file:../../packages/com.rubickanov.utils",
     "com.unity.ai.inference": "2.6.1",
     "com.unity.ide.rider": "3.0.40",
@@ -66,7 +64,6 @@
     "com.rubickanov.log",
     "com.rubickanov.statemachine",
     "com.rubickanov.ui",
-    "com.rubickanov.ui.animations",
     "com.rubickanov.utils"
   ],
   "scopedRegistries": [
