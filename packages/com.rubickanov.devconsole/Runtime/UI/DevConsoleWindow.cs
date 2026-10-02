@@ -113,6 +113,28 @@ namespace Rubickanov.DevConsole
             Toggled = null;
         }
 
+        // Created by the package rather than placed in a scene: a scene object would turn into a missing script in a
+        // build without ENABLE_CONSOLE, and every game wrote the same code to create one.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void CreateAtStartup()
+        {
+            if (DevConsoleSettings.GetOrCreate().CreateWindow)
+                Create();
+        }
+
+        /// <summary>
+        /// The console window, created on a <c>[DevConsole]</c> object that survives scene loads when there is none.
+        /// The package calls it before the first scene loads unless Create Window is off in the settings.
+        /// </summary>
+        public static DevConsoleWindow Create()
+        {
+            if (_instance != null) return _instance;
+
+            var host = new GameObject("[DevConsole]");
+            if (Application.isPlaying) DontDestroyOnLoad(host);
+            return host.AddComponent<DevConsoleWindow>();
+        }
+
         private void Awake()
         {
             if (_instance != null && _instance != this)
@@ -129,7 +151,6 @@ namespace Rubickanov.DevConsole
         {
             _instance = this;
             _history = new CommandHistory();
-            CommandRegistry.Instance.Initialize();
 
             ConsoleLog.OnLogAdded += OnLogAdded;
             ConsoleLog.OnCleared += OnCleared;

@@ -1,13 +1,12 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.LowLevel;
 
 namespace Rubickanov.DevConsole
 {
     /// <summary>
     /// What is left of a <c>;</c> chain or an exec file after <c>wait N</c>: it runs through the same registry, logged
-    /// like typed input, once N frames have passed. A frame counts at the start of Update.
+    /// like typed input, once N frames have passed. A frame counts at the start of Update, ticked by
+    /// <see cref="ConsoleLoop"/>.
     /// </summary>
     internal static class DeferredCommands
     {
@@ -18,9 +17,6 @@ namespace Rubickanov.DevConsole
             public int FramesLeft;
         }
 
-        // The player loop system is found again by this type, so a second registration replaces the first.
-        private struct TickSystem { }
-
         private static readonly List<Entry> Pending = new();
         private static readonly List<Entry> Due = new();
 
@@ -28,11 +24,7 @@ namespace Rubickanov.DevConsole
         internal static int Count => Pending.Count;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void Install()
-        {
-            Clear();
-            InsertTickSystem();
-        }
+        private static void ResetStatics() => Clear();
 
         internal static void Clear() => Pending.Clear();
 
@@ -66,31 +58,6 @@ namespace Rubickanov.DevConsole
 
             for (int i = 0; i < Due.Count; i++)
                 Due[i].Registry.ExecuteAndLog(Due[i].CommandLine);
-        }
-
-        private static void InsertTickSystem()
-        {
-            var root = PlayerLoop.GetCurrentPlayerLoop();
-            var phases = root.subSystemList;
-            if (phases == null) return;
-
-            for (int i = 0; i < phases.Length; i++)
-            {
-                if (phases[i].type != typeof(UnityEngine.PlayerLoop.Update)) continue;
-
-                var old = phases[i].subSystemList ?? Array.Empty<PlayerLoopSystem>();
-                var systems = new List<PlayerLoopSystem>(old.Length + 1) { new() { type = typeof(TickSystem), updateDelegate = Tick } };
-                foreach (var system in old)
-                {
-                    if (system.type != typeof(TickSystem))
-                        systems.Add(system);
-                }
-
-                phases[i].subSystemList = systems.ToArray();
-                root.subSystemList = phases;
-                PlayerLoop.SetPlayerLoop(root);
-                return;
-            }
         }
     }
 }

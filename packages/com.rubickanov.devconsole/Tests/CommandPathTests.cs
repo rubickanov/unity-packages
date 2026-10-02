@@ -160,7 +160,7 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Help_Group_ListsItsSubcommands()
         {
-            // Initialize also discovers the package's own `log unity`, and runs autoexec from a test config
+            // Initialize also discovers the package's own `log unity`
             var config = TestConfig.Use();
             try
             {

@@ -59,6 +59,16 @@ namespace Rubickanov.DevConsole.Editor
                 _serializedSettings.FindProperty("consoleHeight"),
                 new GUIContent("Console Height", "Height as fraction of screen."));
 
+            EditorGUILayout.PropertyField(
+                _serializedSettings.FindProperty("createWindow"),
+                new GUIContent("Create Window",
+                    "Create the console window before the first scene loads. Off: call DevConsoleWindow.Create() yourself."));
+
+            EditorGUILayout.PropertyField(
+                _serializedSettings.FindProperty("runStartupCommands"),
+                new GUIContent("Run Startup Commands",
+                    "Run the -command lines on the first frame, after autoexec. Off: call StartupCommands.Run(CommandRegistry.Instance) when your commands are registered."));
+
             if (_serializedSettings.ApplyModifiedProperties())
             {
                 DevConsoleSettingsStore.Save(_settings);

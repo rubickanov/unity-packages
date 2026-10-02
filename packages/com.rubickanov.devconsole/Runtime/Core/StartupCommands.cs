@@ -9,10 +9,12 @@ namespace Rubickanov.DevConsole
     /// in order. It is <c>exec</c> from argv instead of from a file, for a build nobody can type into — a headless
     /// host, a machine driven over ssh, a run that has to start in a known state.
     ///
-    /// The game decides WHEN they run, because only the game knows when its own command groups have registered: call
-    /// <see cref="Run"/> from a hook that comes after everything has started. The queue drains as it runs and is reset
-    /// once per process (subsystem registration, like the rest of this package's statics), so a scene reload that
-    /// rebuilds the game's scopes finds nothing left and does not start a second session on top of the first.
+    /// The package runs them on the first frame, after autoexec, once the game has started and registered its commands
+    /// (<see cref="ConsoleStartup"/>). A game whose commands come later, with a scene it loads, turns Run Startup
+    /// Commands off in the settings and calls <see cref="Run(CommandRegistry)"/> itself when they are there. The queue
+    /// drains as it runs and is reset once per process (subsystem registration, like the rest of this package's
+    /// statics), so a scene reload that rebuilds the game's scopes finds nothing left and does not start a second
+    /// session on top of the first.
     /// </summary>
     public static class StartupCommands
     {

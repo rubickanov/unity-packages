@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
-using UnityEngine.LowLevel;
 
 namespace Rubickanov.DevConsole
 {
@@ -49,7 +48,7 @@ namespace Rubickanov.DevConsole
             Application.logMessageReceivedThreaded += Receive;
             Application.quitting += Uninstall;
             _subscribed = true;
-            InsertDrainSystem();
+            PlayerLoopSystems.Insert(typeof(UnityEngine.PlayerLoop.PreUpdate), typeof(DrainSystem), Drain, atStart: false);
         }
 
         // In the editor quitting is leaving play mode. Without it a play session with domain reload off would keep
@@ -134,32 +133,6 @@ namespace Rubickanov.DevConsole
                 default:
                     ConsoleLog.Log(condition);
                     break;
-            }
-        }
-
-        private static void InsertDrainSystem()
-        {
-            var root = PlayerLoop.GetCurrentPlayerLoop();
-            var phases = root.subSystemList;
-            if (phases == null) return;
-
-            for (int i = 0; i < phases.Length; i++)
-            {
-                if (phases[i].type != typeof(UnityEngine.PlayerLoop.PreUpdate)) continue;
-
-                var old = phases[i].subSystemList ?? Array.Empty<PlayerLoopSystem>();
-                var systems = new List<PlayerLoopSystem>(old.Length + 1);
-                foreach (var system in old)
-                {
-                    if (system.type != typeof(DrainSystem))
-                        systems.Add(system);
-                }
-
-                systems.Add(new PlayerLoopSystem { type = typeof(DrainSystem), updateDelegate = Drain });
-                phases[i].subSystemList = systems.ToArray();
-                root.subSystemList = phases;
-                PlayerLoop.SetPlayerLoop(root);
-                return;
             }
         }
     }
