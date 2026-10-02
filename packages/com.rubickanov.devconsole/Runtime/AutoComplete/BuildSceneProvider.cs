@@ -2,12 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine.SceneManagement;
-using UnityEngine.Scripting;
 
 namespace Rubickanov.DevConsole
 {
     /// <summary>Suggests the names of the scenes in the build.</summary>
-    [Preserve]
     public class BuildSceneProvider : IAutoCompleteProvider
     {
         public string Hint => "<scene>";

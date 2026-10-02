@@ -1,6 +1,6 @@
 # Dev Console
 
-In-game developer console: an IMGUI window with attribute-discovered commands, word-by-word autocomplete, subcommand groups, aliases, key bindings and a history kept in plain files.
+In-game developer console: an IMGUI window with attribute commands registered by a source generator, word-by-word autocomplete, subcommand groups, aliases, key bindings and a history kept in plain files.
 
 ## Dependencies
 
@@ -12,10 +12,13 @@ Requires Unity 6000.0+.
 ## Architecture
 
 ```
-[ConsoleCommand] static methods ──► CommandRegistry.Instance ◄── Register / RegisterTarget / Group
+[ConsoleCommand] methods ─source generator─► registration code
+                                                  │
+                                                  ▼
+                                     CommandRegistry.Instance ◄── Register / RegisterTarget / Group
                                      ├── Aliases, Bindings   ── persistentDataPath/console/config.cfg
                                      └── History             ── persistentDataPath/console/history.txt
-first frame (ConsoleStartup): discover ─► autoexec.cfg ─► -command lines
+first frame (ConsoleStartup): register ─► autoexec.cfg ─► -command lines
 DevConsoleWindow ──ExecuteAndLog──► CommandRegistry ──► ConsoleLog (ring buffer, 1000 entries)
 CommandBindings  ──ExecuteAndLog──┘          Unity log ──► ConsoleLog
 ```
@@ -37,7 +40,7 @@ live in an assembly with the same constraint.
 
 ## Core Concepts
 
-**CommandRegistry** — The console itself: the commands (discovered and registered), their parsing and execution,
+**CommandRegistry** — The console itself: the commands (from attributes and from code), their parsing and execution,
 autocomplete, and the console's aliases, bindings and history. `CommandRegistry.Instance` is the one the window uses.
 
 **ConsoleLog** — Static ring buffer (1000 entries) with typed levels (`Info`, `Warning`, `Error`, `Success`, `Input`).
@@ -47,8 +50,8 @@ The window renders it; any other UI can subscribe to `OnLogAdded` / `OnCleared`.
 
 **The first frame** — The console starts once per process on the first frame's Update, before any
 `MonoBehaviour.Update`: after every `Awake`, `OnEnable` and `Start` of the first scene and after VContainer's
-`IStartable` and `IPostStartable`, which run in EarlyUpdate. It discovers the commands, runs `autoexec.cfg`, then the
-`-command` lines. A discovered command replaces a same-named one registered before that.
+`IStartable` and `IPostStartable`, which run in EarlyUpdate. It registers the static attribute commands, runs `autoexec.cfg`,
+then the `-command` lines. An attribute command replaces a same-named one registered before that.
 
 ## Quick Start
 
@@ -96,7 +99,7 @@ public static class GameCommands
 
 ### Instance Commands via RegisterTarget
 
-`[ConsoleCommand]` works on instance methods too, but they are never auto-discovered. Register the owning object explicitly — useful for command classes resolved by a DI container:
+`[ConsoleCommand]` works on instance methods too, registered with their object. Register the owning object explicitly — useful for command classes resolved by a DI container:
 
 ```csharp
 public class InventoryCommands
@@ -117,7 +120,7 @@ public class InventoryCommands
 }
 ```
 
-`RegisterTarget` scans the target's public and non-public instance methods. Call `UnregisterTarget` when the owner is destroyed to drop stale handlers.
+`RegisterTarget` registers the target's instance commands, its base classes' included; an object none of whose types declare any gets a warning. Call `UnregisterTarget` when the owner is destroyed to drop stale handlers.
 
 ### Supported Parameter Types
 
@@ -150,7 +153,7 @@ For custom types, register a parser — see [Custom Type Parsers](#custom-type-p
 public static void SetDifficulty(string difficulty) { }
 ```
 
-`providerArgs` are forwarded to the provider's constructor via `Activator.CreateInstance` — here `StaticListProvider("easy", "normal", …)`. Match the provider's ctor signature.
+The source generator writes the provider's construction from `providerArgs` — here `new StaticListProvider("easy", "normal", …)`. A provider without a constructor those strings can call is a compile error. A provider without arguments is made once per registry and shared by every command that names it.
 
 Built-in providers:
 
@@ -163,10 +166,9 @@ Built-in providers:
 
 ### Custom Autocomplete Provider
 
-Implement **IAutoCompleteProvider** and mark it `[Preserve]` (see Code Stripping). `GetSuggestions` must append to the supplied list without allocating:
+Implement **IAutoCompleteProvider**. `GetSuggestions` must append to the supplied list without allocating:
 
 ```csharp
-[Preserve]
 public class PlayerNameProvider : IAutoCompleteProvider
 {
     public string Hint => "<player>";
@@ -498,18 +500,60 @@ Command classes resolved by the container register themselves with `RegisterTarg
 `UnregisterTarget(this)` in `Dispose`; they are there for autoexec and `-command` as long as they register before the
 first frame.
 
-## Code Stripping
+## Source Generator
 
-Commands and autocomplete providers are reached only through reflection, which the IL2CPP linker cannot see. At the
-Minimal stripping level nothing of the game or the packages is stripped; at Low and above:
+`Runtime/Generator/Rubickanov.DevConsole.Generator.dll` is a Roslyn source generator. Unity runs it for
+`Rubickanov.DevConsole.Runtime` and every assembly that references it. For each assembly it writes the code that
+registers its `[ConsoleCommand]` methods and calls them with typed arguments, so nothing finds or invokes a command
+through reflection. Code stripping, at any level, keeps every command, provider constructor and parameter type, since
+plain code references them: nothing needs `[Preserve]`. An assembly with commands is also marked
+`[assembly: AlwaysLinkAssembly]` (unless it already is), so one that nothing references keeps its commands.
 
-- `[ConsoleCommand]` derives from `UnityEngine.Scripting.PreserveAttribute`, so every command is kept with its class,
-  static or registered with `RegisterTarget`. Nothing to do.
-- A provider named in `[AutoComplete]` is created with `Activator.CreateInstance`, and only its type is referenced.
-  Mark your providers `[Preserve]`, and the constructor too when it takes arguments; the package's own are marked.
-  A provider whose constructor was stripped fails at registration with an error that says so.
-- `Rubickanov.DevConsole.Log` is referenced by nothing and carries `[assembly: AlwaysLinkAssembly]`, so the linker
-  still looks into it.
+The generated code adds itself to the console as the domain loads: `InitializeOnLoadMethod` in the editor, so edit-mode
+code and tests have the commands, and `RuntimeInitializeOnLoadMethod` at `SubsystemRegistration` in a player.
+
+A command is:
+
+- a static method, or an instance method of a class;
+- not generic and not in a generic type, with parameters passed by value;
+- internal or public, in types internal or public all the way out — or else declared in `partial` types. A private
+  command, or one in a private nested class, works when its class and every class around it are `partial`: the code is
+  then generated inside it.
+
+```csharp
+public partial class InventoryTests
+{
+    private partial class Cheats        // private: partial here and around it
+    {
+        [ConsoleCommand("give")]
+        private string Give(string item) => item;
+    }
+}
+```
+
+Mistakes the console used to find at runtime, or not at all, are compile errors on the command:
+
+| Id | | When |
+|----|----|------|
+| DEVCON001 | Error | Empty command name |
+| DEVCON002 | Error | Generic method, or a method in a generic type |
+| DEVCON003 | Error | A `ref`, `out` or `in` parameter |
+| DEVCON004 | Error | Private or protected command, or in a private type, whose types are not all `partial` |
+| DEVCON005 | Error | `[AutoComplete]` index past the last parameter |
+| DEVCON006 | Error | `[AutoComplete]` type is not a non-abstract class implementing `IAutoCompleteProvider` |
+| DEVCON007 | Error | No provider constructor the `[AutoComplete]` strings can call |
+| DEVCON008 | Error | `[Remainder]` not on the last parameter, or not on a string |
+| DEVCON009 | Error | Instance command in a struct or an interface |
+| DEVCON010 | Warning | Two static commands with one name in one assembly |
+| DEVCON011 | Error | Commands in an assembly with No Engine References |
+| DEVCON012 | Warning | Two `[AutoComplete]` for one parameter |
+
+The generator sees only source Unity compiles: a `[ConsoleCommand]` in a precompiled DLL is not registered. Register
+such commands with `Register` or `Group`.
+
+The generator's source and tests are in `Generator~/`, which Unity does not import. `Generator~/build.sh` runs the tests
+and rebuilds the DLL into `Runtime/Generator/` (needs the .NET SDK); the build is deterministic, so unchanged source
+gives the same bytes. Rider may need a restart to load a new DLL.
 
 ## Design Decisions
 
@@ -525,9 +569,12 @@ Minimal stripping level nothing of the game or the packages is stripped; at Low 
   `PreUpdate`.
 - **Quiet in the game's log** — the console's routine news (commands registered, autoexec ran) goes to the console
   only; only problems, and the `-command` lines, reach Unity's log.
-- **Discovery reads only assemblies that reference the console** — only they can carry `[ConsoleCommand]`, and
-  checking references loads no types (24 ms → 2 ms in the sandbox editor). Not `TypeCache`, which exists only in the
-  editor and would make the editor and builds find commands differently.
+- **Commands registered by generated code** — until 5.0 the console found commands by reflection over every assembly
+  that referenced it and called them through `MethodInfo.Invoke`. Code stripping cut what only reflection reached (a
+  provider's constructor dropped silently), mistakes such as a provider without the constructor its arguments need
+  showed up as runtime warnings, and a command's exception arrived wrapped. A source generator writes the registration
+  and the calls instead: editor and player run the same code, stripping sees plain references, mistakes are compile
+  errors, and the debugger stops in the command itself. Not `TypeCache`, which exists only in the editor.
 - **Arguments parse with TryParse** — a typo is the common case; an exception per typo is slow and stops a debugger
   that breaks on throw.
 - **Aliases, bindings and history belong to the registry** — not singletons of their own, so a fresh registry is a
@@ -542,5 +589,5 @@ Minimal stripping level nothing of the game or the packages is stripped; at Low 
   that runs, not the group.
 - **`wait` is a command, not syntax** — so the same `PreExecuteFilter` that guards everything else decides whether a
   deferred rest may run.
-- **Per-execution allocation in the reflection path** — `Execute` allocates a small `object?[]` for boxed arguments per
-  call. Fine for a dev tool; not a per-frame hot path. Autocomplete allocates only the typed words and the group path.
+- **Per-execution allocation** — `Execute` allocates a small `object?[]` for the parsed, boxed arguments the generated
+  call unboxes. Fine for a dev tool; not a per-frame hot path. Autocomplete allocates only the typed words and the group path.

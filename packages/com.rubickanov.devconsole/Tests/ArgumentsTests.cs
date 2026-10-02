@@ -3,7 +3,7 @@ using NUnit.Framework;
 namespace Rubickanov.DevConsole.Tests
 {
     [TestFixture]
-    public class ArgumentsTests
+    public partial class ArgumentsTests
     {
         private CommandRegistry _registry = null!;
         private string _config = null!;
@@ -158,7 +158,7 @@ namespace Rubickanov.DevConsole.Tests
             CollectionAssert.AreEquivalent(new[] { "true", "false" }, results);
         }
 
-        private class Commands
+        private partial class Commands
         {
             [ConsoleCommand("opt")]
             public string Opt(int? value = null) => value?.ToString() ?? "unset";

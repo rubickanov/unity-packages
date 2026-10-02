@@ -8,12 +8,12 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-Versions: `audio` `3.1.2`, `log` `1.2.0`, `eqs` `2.0.0`, `devconsole` and `ui` `4.0.0`:
+Versions: `audio` `3.1.2`, `log` `1.2.0`, `eqs` `2.0.0`, `ui` `4.0.0`, `devconsole` `5.0.0`:
 
 | Package | Purpose |
 |---|---|
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
-| `devconsole` | In-game dev console: one IMGUI window the package creates, command discovery, autocomplete, chains, aliases, bindings and history in plain files, `autoexec.cfg` and `-command` run on the first frame, optional `log` commands. |
+| `devconsole` | In-game dev console: one IMGUI window the package creates, `[ConsoleCommand]` methods registered by a source generator (no reflection, safe under code stripping), autocomplete, chains, aliases, bindings and history in plain files, `autoexec.cfg` and `-command` run on the first frame, optional `log` commands. |
 | `eqs` | Environment Query System — data-driven spatial queries for AI. |
 | `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release, a speaker scope (`[Host]`) before every message. No dependencies. |
 | `ui` | UI Toolkit framework (no UGUI or TextMeshPro): views with view models on layers, a screen history, popups (with registered views as content), unscaled-time animations, pointer capture, back stack and keyboard/pad menu navigation fed by the game, UXML catalog. |

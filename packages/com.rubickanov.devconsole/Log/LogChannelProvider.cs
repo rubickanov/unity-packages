@@ -1,12 +1,10 @@
 using System;
 using System.Collections.Generic;
 using Rubickanov.Log;
-using UnityEngine.Scripting;
 
 namespace Rubickanov.DevConsole.Log
 {
     /// <summary>Suggests the log channels there are so far, and <c>*</c> for all of them.</summary>
-    [Preserve]
     public sealed class LogChannelProvider : IAutoCompleteProvider
     {
         public string Hint => "<channel>";
