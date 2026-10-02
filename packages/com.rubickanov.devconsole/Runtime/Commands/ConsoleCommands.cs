@@ -245,11 +245,11 @@ namespace Rubickanov.DevConsole.Commands
             try
             {
                 if (RunFile(registry, ConsoleConfig.AutoexecFileName, out var executed) && executed > 0)
-                    Debug.Log($"[DevConsole] Ran {executed} command(s) from {ConsoleConfig.AutoexecFileName}.");
+                    ConsoleDiagnostics.Info($"Ran {executed} command(s) from {ConsoleConfig.AutoexecFileName}.");
             }
             catch (CommandException e)
             {
-                Debug.LogWarning($"[DevConsole] {ConsoleConfig.AutoexecFileName}: {e.Message}");
+                ConsoleDiagnostics.Warning($"{ConsoleConfig.AutoexecFileName}: {e.Message}");
             }
         }
 

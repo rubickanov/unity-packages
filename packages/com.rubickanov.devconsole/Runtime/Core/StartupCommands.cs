@@ -54,7 +54,7 @@ namespace Rubickanov.DevConsole
             {
                 // Said as the queue fills, so a log that shows commands queued and never run points at the game not
                 // calling Run rather than at the arguments; without this that failure is completely silent
-                Debug.Log($"[DevConsole] {_pending.Count} startup command(s) queued from {Flag}");
+                ConsoleDiagnostics.Report($"{_pending.Count} startup command(s) queued from {Flag}");
             }
 
             return _pending;
@@ -153,18 +153,18 @@ namespace Rubickanov.DevConsole
                 {
                     if (string.IsNullOrEmpty(result.Message))
                     {
-                        Debug.Log($"[DevConsole] {Flag} \"{command}\"");
+                        ConsoleDiagnostics.Report($"{Flag} \"{command}\"");
                     }
                     else
                     {
                         ConsoleLog.Log(result.Message!);
-                        Debug.Log($"[DevConsole] {Flag} \"{command}\": {result.Message}");
+                        ConsoleDiagnostics.Report($"{Flag} \"{command}\": {result.Message}");
                     }
                 }
                 else
                 {
                     ConsoleLog.LogError(result.Message ?? "failed");
-                    Debug.LogError($"[DevConsole] {Flag} \"{command}\" failed: {result.Message}");
+                    ConsoleDiagnostics.Error($"{Flag} \"{command}\" failed: {result.Message}");
                 }
             }
 
