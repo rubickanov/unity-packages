@@ -37,7 +37,6 @@ Install these first:
 | Dependency | Channel | How |
 |---|---|---|
 | `R3` | NuGet | [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity) → install `R3` |
-| `Microsoft.Extensions.Logging.Abstractions` | NuGet | NuGetForUnity → install `Microsoft.Extensions.Logging.Abstractions` |
 | `UniTask` | git URL | `https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask` |
 
 Which package needs what:
@@ -45,8 +44,7 @@ Which package needs what:
 | Needs | Packages |
 |---|---|
 | `R3` | `ui` |
-| `Microsoft.Extensions.Logging.Abstractions` | `config` |
-| `UniTask` | `audio`, `config`, `eqs` (optional asm), `statemachine` (async asm), `ui` |
+| `UniTask` | `audio`, `eqs` (optional asm), `statemachine` (async asm), `ui` |
 
 `unity-project-pckgs/Packages/manifest.json` is the reference — it has every one
 of these wired up and is the configuration all packages are developed against.
