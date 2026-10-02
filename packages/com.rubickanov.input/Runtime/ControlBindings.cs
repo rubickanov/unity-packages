@@ -5,6 +5,7 @@ using Cysharp.Threading.Tasks;
 using R3;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Utilities;
 
 namespace Rubickanov.Input
 {
@@ -90,6 +91,7 @@ namespace Rubickanov.Input
     /// </summary>
     public sealed class ControlBindings : IDisposable
     {
+        private readonly IInputActionCollection2 _input;
         private readonly InputBlocker _blocker;
         private readonly RebindOptions _options;
         private readonly List<RebindSlot> _slots;
@@ -99,11 +101,7 @@ namespace Rubickanov.Input
         /// <param name="blocker">Takes every map away while a key is listened for: Unity rebinds only disabled actions.</param>
         public ControlBindings(IInputActionCollection2 input, InputBlocker blocker, RebindOptions options)
         {
-            if (input == null)
-            {
-                throw new ArgumentNullException(nameof(input));
-            }
-
+            _input = input ?? throw new ArgumentNullException(nameof(input));
             _blocker = blocker ?? throw new ArgumentNullException(nameof(blocker));
             _options = options ?? throw new ArgumentNullException(nameof(options));
             _slots = BuildSlots(input, options);
@@ -219,7 +217,9 @@ namespace Rubickanov.Input
         /// <summary>
         /// Waits for the player to press the key for <paramref name="slot"/>: a key or mouse button for a keyboard slot, a
         /// pad control for a pad slot. The cancel key or button backs out. Every map is blocked meanwhile, so nothing else
-        /// hears the press. A free key is bound; a taken one comes back Taken for the player to agree to the swap.
+        /// hears the press. A free key is bound; a taken one comes back Taken for the player to agree to the swap. With
+        /// the input's <c>devices</c> set (a local player's), only those devices are heard, the cancel key or button too,
+        /// and a slot of a scheme the player has no device for comes back Cancelled at once.
         /// </summary>
         public UniTask<RebindResult> ListenAsync(RebindSlot slot, CancellationToken ct)
         {
@@ -233,7 +233,7 @@ namespace Rubickanov.Input
                 throw new InvalidOperationException("A key is already being listened for");
             }
 
-            return ct.IsCancellationRequested || _life.IsCancellationRequested
+            return ct.IsCancellationRequested || _life.IsCancellationRequested || !HasDeviceFor(slot.Scheme)
                 ? UniTask.FromResult(new RebindResult(RebindKind.Cancelled, slot, null))
                 : ListenCoreAsync(slot, ct);
         }
@@ -332,13 +332,11 @@ namespace Rubickanov.Input
         private InputActionRebindingExtensions.RebindingOperation Listen(RebindSlot slot)
         {
             string cancelButton = _options.CancelButton;
-            InputActionRebindingExtensions.RebindingOperation operation = slot.Action
-                .PerformInteractiveRebinding(slot.BindingIndex)
-                .WithCancelingThrough(_options.CancelKey)
+            ReadOnlyArray<InputDevice>? devices = _input.devices;
+            InputActionRebindingExtensions.RebindingOperation operation =
+                (devices == null ? slot.Action.PerformInteractiveRebinding(slot.BindingIndex) : PlayersOperation(slot))
                 .WithMagnitudeHavingToBeGreaterThan(_options.Actuation)
                 .OnMatchWaitForAnother(_options.SettleTime)
-                // The pad's cancel backs out whatever the slot; it has to be a candidate to be seen.
-                .WithControlsHavingToMatchPath(cancelButton)
                 .OnPotentialMatch(op =>
                 {
                     if (op.candidates.Count > 0 && InputControlPath.Matches(cancelButton, op.candidates[0]))
@@ -346,29 +344,144 @@ namespace Rubickanov.Input
                         op.Cancel();
                     }
                 });
-            if (slot.Scheme == ControlScheme.Pad)
+            if (devices == null)
             {
-                operation.WithControlsHavingToMatchPath("<Gamepad>");
-                foreach (string direction in _options.PadExcluded)
+                // The pad's cancel backs out whatever the slot; it has to be a candidate to be seen.
+                operation.WithCancelingThrough(_options.CancelKey).WithControlsHavingToMatchPath(cancelButton);
+                if (slot.Scheme == ControlScheme.Pad)
                 {
-                    operation.WithControlsExcluding(direction);
+                    operation.WithControlsHavingToMatchPath("<Gamepad>");
                 }
-
-                return operation;
+                else
+                {
+                    operation.WithControlsHavingToMatchPath("<Keyboard>");
+                    foreach (string button in _options.MouseButtons)
+                    {
+                        operation.WithControlsHavingToMatchPath(button);
+                    }
+                }
+            }
+            else
+            {
+                HearOnly(operation, slot.Scheme, devices.Value);
             }
 
-            operation.WithControlsHavingToMatchPath("<Keyboard>");
-            foreach (string button in _options.MouseButtons)
+            foreach (string excluded in slot.Scheme == ControlScheme.Pad ? _options.PadExcluded : _options.KeysExcluded)
             {
-                operation.WithControlsHavingToMatchPath(button);
-            }
-
-            foreach (string key in _options.KeysExcluded)
-            {
-                operation.WithControlsExcluding(key);
+                operation.WithControlsExcluding(excluded);
             }
 
             return operation;
+        }
+
+        // PerformInteractiveRebinding without a target binding: a target binding in a control scheme lets in every device
+        // the scheme names, every pad among them. The slot is applied by Set anyway; a composite's part still looks for
+        // its part's kind of control.
+        private static InputActionRebindingExtensions.RebindingOperation PlayersOperation(RebindSlot slot)
+        {
+            InputActionRebindingExtensions.RebindingOperation operation =
+                new InputActionRebindingExtensions.RebindingOperation()
+                    .WithAction(slot.Action)
+                    .WithControlsExcluding("<Pointer>/delta")
+                    .WithControlsExcluding("<Pointer>/position")
+                    .WithControlsExcluding("<Touchscreen>/touch*/position")
+                    .WithControlsExcluding("<Touchscreen>/touch*/delta")
+                    .WithControlsExcluding("<Mouse>/clickCount")
+                    .WithMatchingEventsBeingSuppressed();
+            if (slot.Part != null)
+            {
+                string? layout = InputBindingComposite.GetExpectedControlLayoutName(CompositeOf(slot), slot.Part);
+                if (!string.IsNullOrEmpty(layout))
+                {
+                    operation.WithExpectedControlType(layout);
+                }
+            }
+
+            return operation;
+        }
+
+        private static string CompositeOf(RebindSlot slot)
+        {
+            ReadOnlyArray<InputBinding> bindings = slot.Action.bindings;
+            for (int i = slot.BindingIndex; i >= 0; i--)
+            {
+                if (bindings[i].isComposite)
+                {
+                    return bindings[i].GetNameOfComposite();
+                }
+            }
+
+            return "";
+        }
+
+        private bool HasDeviceFor(ControlScheme scheme)
+        {
+            ReadOnlyArray<InputDevice>? devices = _input.devices;
+            if (devices == null)
+            {
+                return true;
+            }
+
+            foreach (InputDevice device in devices.Value)
+            {
+                if (scheme == ControlScheme.Pad ? device is Gamepad : device is Keyboard)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // The same paths as for every device, each made the player's own device's: another player's keys are no
+        // candidates and their Esc or Start cancels nothing.
+        private void HearOnly(InputActionRebindingExtensions.RebindingOperation operation, ControlScheme scheme,
+            ReadOnlyArray<InputDevice> devices)
+        {
+            foreach (InputDevice device in devices)
+            {
+                switch (device)
+                {
+                    case Gamepad pad:
+                        IncludeOn(operation, pad, _options.CancelButton);
+                        if (scheme == ControlScheme.Pad)
+                        {
+                            operation.WithControlsHavingToMatchPath(pad.path);
+                        }
+
+                        break;
+                    case Keyboard keyboard:
+                        InputControl? cancel = InputControlPath.TryFindControl(keyboard, _options.CancelKey);
+                        if (cancel != null)
+                        {
+                            operation.WithCancelingThrough(cancel);
+                        }
+
+                        if (scheme == ControlScheme.Keys)
+                        {
+                            operation.WithControlsHavingToMatchPath(keyboard.path);
+                        }
+
+                        break;
+                    case Mouse mouse when scheme == ControlScheme.Keys:
+                        foreach (string button in _options.MouseButtons)
+                        {
+                            IncludeOn(operation, mouse, button);
+                        }
+
+                        break;
+                }
+            }
+        }
+
+        private static void IncludeOn(InputActionRebindingExtensions.RebindingOperation operation, InputDevice device,
+            string path)
+        {
+            InputControl? control = InputControlPath.TryFindControl(device, path);
+            if (control != null)
+            {
+                operation.WithControlsHavingToMatchPath(control.path);
+            }
         }
 
         private RebindResult Check(RebindSlot slot, string path)
