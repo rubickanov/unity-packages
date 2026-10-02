@@ -5,6 +5,7 @@
         "Rubickanov.DevConsole.Runtime",
         "Rubickanov.DevConsole.Editor",
         "Unity.InputSystem",
+        "Unity.InputSystem.TestFramework",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
