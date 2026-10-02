@@ -20,12 +20,6 @@
       "source": "local",
       "dependencies": {}
     },
-    "com.rubickanov.codegen": {
-      "version": "file:../../packages/com.rubickanov.codegen",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {}
-    },
     "com.rubickanov.devconsole": {
       "version": "file:../../packages/com.rubickanov.devconsole",
       "depth": 0,
@@ -54,12 +48,6 @@
     },
     "com.rubickanov.ui": {
       "version": "file:../../packages/com.rubickanov.ui",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {}
-    },
-    "com.rubickanov.utils": {
-      "version": "file:../../packages/com.rubickanov.utils",
       "depth": 0,
       "source": "local",
       "dependencies": {}

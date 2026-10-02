@@ -3,13 +3,11 @@
     "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.rubickanov.audio": "file:../../packages/com.rubickanov.audio",
-    "com.rubickanov.codegen": "file:../../packages/com.rubickanov.codegen",
     "com.rubickanov.devconsole": "file:../../packages/com.rubickanov.devconsole",
     "com.rubickanov.eqs": "file:../../packages/com.rubickanov.eqs",
     "com.rubickanov.log": "file:../../packages/com.rubickanov.log",
     "com.rubickanov.statemachine": "file:../../packages/com.rubickanov.statemachine",
     "com.rubickanov.ui": "file:../../packages/com.rubickanov.ui",
-    "com.rubickanov.utils": "file:../../packages/com.rubickanov.utils",
     "com.unity.ai.inference": "2.6.1",
     "com.unity.ide.rider": "3.0.40",
     "com.unity.ide.visualstudio": "2.0.27",
@@ -56,13 +54,11 @@
   },
   "testables": [
     "com.rubickanov.audio",
-    "com.rubickanov.codegen",
     "com.rubickanov.devconsole",
     "com.rubickanov.eqs",
     "com.rubickanov.log",
     "com.rubickanov.statemachine",
-    "com.rubickanov.ui",
-    "com.rubickanov.utils"
+    "com.rubickanov.ui"
   ],
   "scopedRegistries": [
     {

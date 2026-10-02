@@ -91,11 +91,11 @@ Add the packages you want to test to `testables` manually, alongside
 {
   "dependencies": {
     "com.rubickanov.ui": "file:../../unity-packages/packages/com.rubickanov.ui",
-    "com.rubickanov.utils": "file:../../unity-packages/packages/com.rubickanov.utils"
+    "com.rubickanov.log": "file:../../unity-packages/packages/com.rubickanov.log"
   },
   "testables": [
     "com.rubickanov.ui",
-    "com.rubickanov.utils"
+    "com.rubickanov.log"
   ]
 }
 ```
