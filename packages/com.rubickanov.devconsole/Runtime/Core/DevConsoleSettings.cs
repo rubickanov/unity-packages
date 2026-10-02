@@ -63,7 +63,7 @@ namespace Rubickanov.DevConsole
             }
             catch (ArgumentException e)
             {
-                Debug.LogWarning($"[DevConsole] {ResourceName}.json could not be read, using the defaults: {e.Message}");
+                ConsoleDiagnostics.Warning($"{ResourceName}.json could not be read, using the defaults: {e.Message}");
             }
 
             return settings;

@@ -74,7 +74,7 @@ namespace Rubickanov.DevConsole
                 var data = JsonUtility.FromJson<HistoryData>(PlayerPrefs.GetString(PrefsKey));
                 if (data?.commands != null) _history.AddRange(data.commands);
             }
-            catch (Exception e) { Debug.LogWarning($"[DevConsole] Failed to load command history: {e.Message}"); }
+            catch (Exception e) { ConsoleDiagnostics.Warning($"Failed to load command history: {e.Message}"); }
         }
 
         [Serializable]

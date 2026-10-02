@@ -76,7 +76,7 @@ namespace Rubickanov.DevConsole
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[DevConsole] Failed to write {ConfigPath}: {e.Message}");
+                ConsoleDiagnostics.Warning($"Failed to write {ConfigPath}: {e.Message}");
                 return;
             }
 
@@ -98,7 +98,7 @@ namespace Rubickanov.DevConsole
             if (command.IndexOf(';') >= 0)
             {
                 if (command.IndexOf('"') >= 0)
-                    Debug.LogWarning($"[DevConsole] {kind} '{name}' mixes ';' and quotes and will not read back intact.");
+                    ConsoleDiagnostics.Warning($"{kind} '{name}' mixes ';' and quotes and will not read back intact.");
                 sb.Append('"').Append(command).Append('"');
             }
             else
@@ -120,7 +120,7 @@ namespace Rubickanov.DevConsole
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[DevConsole] Failed to read {ConfigPath}: {e.Message}");
+                ConsoleDiagnostics.Warning($"Failed to read {ConfigPath}: {e.Message}");
                 return entries;
             }
 
@@ -153,7 +153,7 @@ namespace Rubickanov.DevConsole
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[DevConsole] Failed to read saved {prefsKey}: {e.Message}");
+                ConsoleDiagnostics.Warning($"Failed to read saved {prefsKey}: {e.Message}");
             }
 
             return entries;

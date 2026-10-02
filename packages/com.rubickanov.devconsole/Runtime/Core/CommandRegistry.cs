@@ -56,8 +56,7 @@ namespace Rubickanov.DevConsole
             DiscoverCommands();
             RegisterBuiltInCommands();
 
-            Debug.Log($"[DevConsole] Registered {_commands.Count} commands.");
-            ConsoleLog.LogSuccess($"Initialization complete. Registered {_commands.Count} commands.");
+            ConsoleDiagnostics.Info($"Registered {_commands.Count} commands.");
         }
 
         /// <summary>Registers a custom parser for type <typeparamref name="T"/>. Returns this for chaining.</summary>
@@ -366,7 +365,7 @@ namespace Rubickanov.DevConsole
                     var loaderMsg = e.LoaderExceptions.Length > 0 && e.LoaderExceptions[0] != null
                         ? e.LoaderExceptions[0]!.Message
                         : e.Message;
-                    Debug.LogWarning($"[DevConsole] Skipped assembly '{asmName}': {loaderMsg}");
+                    ConsoleDiagnostics.Warning($"Skipped assembly '{asmName}': {loaderMsg}");
                 }
             }
         }
@@ -406,7 +405,7 @@ namespace Rubickanov.DevConsole
                 providers[i] ??= ResolveProviderForType(parameters[i].ParameterType);
 
             if (_commands.TryGetValue(attr.Name, out _))
-                Debug.LogWarning($"[DevConsole] Duplicate command '{attr.Name}', overwriting.");
+                ConsoleDiagnostics.Warning($"Duplicate command '{attr.Name}', overwriting.");
 
             var hasRemainder = false;
             for (int i = 0; i < parameters.Length; i++)
@@ -415,8 +414,8 @@ namespace Rubickanov.DevConsole
                 if (i == parameters.Length - 1 && parameters[i].ParameterType == typeof(string))
                     hasRemainder = true;
                 else
-                    Debug.LogWarning(
-                        $"[DevConsole] [Remainder] on '{parameters[i].Name}' of '{attr.Name}' ignored: it must be the last parameter and a string.");
+                    ConsoleDiagnostics.Warning(
+                        $"[Remainder] on '{parameters[i].Name}' of '{attr.Name}' ignored: it must be the last parameter and a string.");
             }
 
             _commands[attr.Name] = new RegisteredCommand
@@ -455,7 +454,7 @@ namespace Rubickanov.DevConsole
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError($"[DevConsole] Failed to create provider {providerType.Name}: {e.Message}");
+                    ConsoleDiagnostics.Error($"Failed to create provider {providerType.Name}: {e.Message}");
                     return null;
                 }
             }
@@ -470,7 +469,7 @@ namespace Rubickanov.DevConsole
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError($"[DevConsole] Failed to create provider {providerType.Name}: {e.Message}");
+                    ConsoleDiagnostics.Error($"Failed to create provider {providerType.Name}: {e.Message}");
                     return null;
                 }
             }
