@@ -4,7 +4,6 @@
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.rubickanov.audio": "file:../../packages/com.rubickanov.audio",
     "com.rubickanov.codegen": "file:../../packages/com.rubickanov.codegen",
-    "com.rubickanov.config": "file:../../packages/com.rubickanov.config",
     "com.rubickanov.devconsole": "file:../../packages/com.rubickanov.devconsole",
     "com.rubickanov.eqs": "file:../../packages/com.rubickanov.eqs",
     "com.rubickanov.log": "file:../../packages/com.rubickanov.log",
@@ -58,7 +57,6 @@
   "testables": [
     "com.rubickanov.audio",
     "com.rubickanov.codegen",
-    "com.rubickanov.config",
     "com.rubickanov.devconsole",
     "com.rubickanov.eqs",
     "com.rubickanov.log",

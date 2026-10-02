@@ -22,6 +22,7 @@ automatically.
 | `com.rubickanov.steam-transport`, `com.rubickanov.devconsole.netcode` | Prototypes for Netcode for GameObjects, which no game uses now. Archived 2026-10-02. |
 | `com.rubickanov.devconsole.config` | About ten lines of `RegisterParser` in game code. Archived 2026-10-02. |
 | `com.rubickanov.ui.animations` | LitMotion fade, scale, slide and composite on scaled time, so at `Time.timeScale` 0 a pause menu's hide never finished; and the looks a game wants are its own (wipeout's wipe and squeeze). `com.rubickanov.ui` 4.0.0 has the unscaled `Tween.Run` they are built on, `AnimationTarget` for animating an inner element, and a plain `ViewAnimations.Fade`. Archived 2026-10-02. |
+| `com.rubickanov.config` | Addressables-backed config loading with catalog refresh, built for remote content updates no game has; the games keep their configs as assets handed out by their scopes or `Resources`. It also leaked every Addressables handle; `ISSUES.md` beside it lists what to fix before a revival. Archived 2026-10-02. |
 
 Projects that use an archived package pin it to a commit (`#<hash>` in the git URL), so moving it here
 does not break them as long as history is not rewritten.
