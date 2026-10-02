@@ -669,7 +669,19 @@ namespace Rubickanov.DevConsole
             result = null;
 
             if (_customParsers.TryGetValue(targetType, out var custom))
-                return custom(input, out result);
+            {
+                // A game's parser that throws, say on a lookup before its data loaded, is a value that did not parse,
+                // not an exception out of Execute
+                try
+                {
+                    return custom(input, out result);
+                }
+                catch (Exception)
+                {
+                    result = null;
+                    return false;
+                }
+            }
 
             // An optional argument is declared as `int? value = null`, so leaving it out reads as "show the current
             // value" without a sentinel like -1 leaking into the usage string
@@ -677,69 +689,90 @@ namespace Rubickanov.DevConsole
             if (underlying != null)
                 return TryParseArg(input, underlying, out result);
 
-            try
+            // Try* all the way down: a typo is the common case here, and an exception per typo is slow and stops a
+            // debugger that breaks on thrown exceptions
+            var culture = CultureInfo.InvariantCulture;
+            if (targetType == typeof(string))
             {
-                if (targetType == typeof(string))
-                {
-                    result = input;
-                    return true;
-                }
-
-                if (targetType == typeof(int))
-                {
-                    result = int.Parse(input, CultureInfo.InvariantCulture);
-                    return true;
-                }
-
-                if (targetType == typeof(float))
-                {
-                    result = float.Parse(input, CultureInfo.InvariantCulture);
-                    return true;
-                }
-
-                if (targetType == typeof(ulong))
-                {
-                    result = ulong.Parse(input, CultureInfo.InvariantCulture);
-                    return true;
-                }
-
-                if (targetType == typeof(long))
-                {
-                    result = long.Parse(input, CultureInfo.InvariantCulture);
-                    return true;
-                }
-
-                if (targetType == typeof(bool))
-                {
-                    result = bool.Parse(input);
-                    return true;
-                }
-
-                if (targetType.IsEnum)
-                {
-                    result = Enum.Parse(targetType, input, true);
-                    return true;
-                }
-
-                if (targetType == typeof(Vector3))
-                {
-                    var p = input.Split(',');
-                    if (p.Length == 3)
-                    {
-                        result = new Vector3(
-                            float.Parse(p[0].Trim(), CultureInfo.InvariantCulture),
-                            float.Parse(p[1].Trim(), CultureInfo.InvariantCulture),
-                            float.Parse(p[2].Trim(), CultureInfo.InvariantCulture));
-                        return true;
-                    }
-                }
-
-                return false;
+                result = input;
+                return true;
             }
-            catch
+
+            if (targetType == typeof(int))
+                return Box(int.TryParse(input, NumberStyles.Integer, culture, out var i), i, out result);
+            if (targetType == typeof(float))
+                return Box(float.TryParse(input, NumberStyles.Float | NumberStyles.AllowThousands, culture, out var f), f, out result);
+            if (targetType == typeof(ulong))
+                return Box(ulong.TryParse(input, NumberStyles.Integer, culture, out var ul), ul, out result);
+            if (targetType == typeof(long))
+                return Box(long.TryParse(input, NumberStyles.Integer, culture, out var l), l, out result);
+            if (targetType == typeof(bool))
+                return Box(bool.TryParse(input, out var b), b, out result);
+            if (targetType.IsEnum)
+                return TryParseEnum(input, targetType, out result);
+
+            if (targetType == typeof(Vector3))
             {
-                return false;
+                var p = input.Split(',');
+                if (p.Length == 3 &&
+                    float.TryParse(p[0].Trim(), NumberStyles.Float, culture, out var x) &&
+                    float.TryParse(p[1].Trim(), NumberStyles.Float, culture, out var y) &&
+                    float.TryParse(p[2].Trim(), NumberStyles.Float, culture, out var z))
+                {
+                    result = new Vector3(x, y, z);
+                    return true;
+                }
             }
+
+            return false;
+        }
+
+        private static bool Box<T>(bool ok, T value, out object? result)
+        {
+            result = ok ? value : null;
+            return ok;
+        }
+
+        // Each enum's names, in any case, with their values; built once per type
+        private static readonly Dictionary<Type, Dictionary<string, long>> EnumValues = new();
+
+        // What Enum.Parse(type, input, true) accepts, without its exceptions: a name in any case, a number, or names and
+        // numbers joined by commas, combined. Enum.TryParse(Type, ...) is missing from the .NET Framework profile.
+        private static bool TryParseEnum(string input, Type enumType, out object? result)
+        {
+            result = null;
+            if (!EnumValues.TryGetValue(enumType, out var byName))
+            {
+                byName = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                var names = Enum.GetNames(enumType);
+                var values = Enum.GetValues(enumType);
+                var unsigned = Enum.GetUnderlyingType(enumType) == typeof(ulong);
+                for (int n = 0; n < names.Length; n++)
+                {
+                    var v = values.GetValue(n);
+                    byName[names[n]] = unsigned ? unchecked((long)Convert.ToUInt64(v)) : Convert.ToInt64(v);
+                }
+                EnumValues[enumType] = byName;
+            }
+
+            long combined = 0;
+            var start = 0;
+            while (start <= input.Length)
+            {
+                var comma = input.IndexOf(',', start);
+                var end = comma < 0 ? input.Length : comma;
+                var part = input.Substring(start, end - start).Trim();
+                if (byName.TryGetValue(part, out var value))
+                    combined |= value;
+                else if (part.Length > 0 && long.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+                    combined |= number;
+                else
+                    return false;
+                start = end + 1;
+            }
+
+            result = Enum.ToObject(enumType, combined);
+            return true;
         }
 
         /// <summary>Fills <paramref name="results"/> with autocomplete suggestions for the current input. Zero-alloc.</summary>
