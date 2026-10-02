@@ -8,37 +8,22 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-All at version `1.0.0`, except `audio` at `3.1.1`, `devconsole` at `3.0.1`, `log` at `1.1.0`, `devconsole.netcode` at `2.0.0` and `ui`, `ui.animations`, `ui.loading`, `ui.localization` at `3.0.0`:
+All at version `1.0.0`, except `audio` at `3.1.1`, `devconsole` at `3.0.1`, `log` at `1.1.0`, `eqs` at `2.0.0` and `ui`, `ui.animations` at `3.0.0`:
 
 | Package | Purpose |
 |---|---|
-| `acs` | Aspect/component entity framework. Aspects hold reactive data, components hold behavior. |
-| `acs.debug` | Editor window listing live entities in the active `World` with their aspect field values. Editor-only. |
-| `acs.netcode` | NGO networking layer for ACS. Declarative via `[Replicated]` / `[ReplicatedEvent]` attributes on aspect fields. |
-| `acs.persistence` | Snapshot/restore for ACS aspects. Collects `[PersistedState]` fields into a POCO; stable keys, migrations. No storage backend. |
-| `acs.reactive` | Computed (derived) reactive properties for ACS aspects. |
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
-| `behaviortree` | Serializable BT with visual editor, blackboard, subtrees. |
-| `codegen` | Centralized Editor codegen: shared identifier sanitization, idempotent writes, generator registry + Project Settings panel. Built-in generators for scenes/layers/tags/sorting-layers/animator-params/resources/streaming-assets/shader-props/uitoolkit-names; `localization` and `gameplaytags` generators ride on it. |
+| `codegen` | Centralized Editor codegen: shared identifier sanitization, idempotent writes, generator registry + Project Settings panel. Built-in generators for scenes/layers/tags/sorting-layers/animator-params/resources/streaming-assets/shader-props/uitoolkit-names. |
 | `config` | Type-safe config loading via Addressables, caching, validation. |
 | `devconsole` | In-game dev console with auto-discovery and autocomplete. |
-| `devconsole.config` | Resolves `config` database items by `Id` in console command arguments. |
-| `devconsole.netcode` | NGO extension for devconsole. |
 | `eqs` | Environment Query System — data-driven spatial queries for AI. |
-| `gameplaytags` | Hierarchical gameplay tags (Unreal-style). |
-| `gas` | Gameplay Ability / Effects System — attribute modifiers with duration, periodicity, tags. |
-| `loading` | Generic loading pipeline: sequential ops, progress, presenters. |
-| `localization` | Localization service, reactive, strongly-typed keys. |
 | `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release, a speaker scope (`[Host]`) before every message. No dependencies. |
-| `logging` | ZLogger-based factory with file rotation and platform outputs. |
 | `statemachine` | Generic FSM, hierarchical, deferred transitions, zero-alloc. |
-| `steam-transport` | NGO transport over Steam Networking Sockets P2P. |
-| `storage` | Key-value storage with pluggable backends (PlayerPrefs / file / encrypted). |
 | `ui` | UI Toolkit framework (no UGUI or TextMeshPro): views with view models on layers, a screen history, list binding over `ObservableCollections`, popups (with registered views as content), dialogs, tooltips, spinner, pointer capture and back stack, UXML catalog. |
 | `ui.animations` | LitMotion fade/scale/slide/composite animations for UI views and popups. |
-| `ui.loading` | Registers UI views into a scene scope as a `loading` pipeline step. |
-| `ui.localization` | Localized text and RTL bindings for UI views, localized values in view models. |
 | `utils` | Shared utilities: deterministic random, circular buffer, pooling, etc. |
+
+Frozen packages live in `archived/` with the reason for each (`archived/README.md`); they are not in the sandbox or the docs.
 
 ## Repo layout
 

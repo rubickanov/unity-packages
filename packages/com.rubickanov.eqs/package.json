@@ -1,6 +1,6 @@
 {
   "name": "com.rubickanov.eqs",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "license": "MIT",
   "displayName": "Environment Query System",
   "description": "Data-driven spatial query system for AI. Generates candidate positions or actors, scores them with weighted tests, and returns the best match.",
