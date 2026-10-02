@@ -34,6 +34,14 @@
       "source": "local",
       "dependencies": {}
     },
+    "com.rubickanov.input": {
+      "version": "file:../../packages/com.rubickanov.input",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.unity.inputsystem": "1.7.0"
+      }
+    },
     "com.rubickanov.log": {
       "version": "file:../../packages/com.rubickanov.log",
       "depth": 0,

@@ -1,0 +1,27 @@
+{
+    "name": "Rubickanov.Input.Save",
+    "rootNamespace": "Rubickanov.Input",
+    "references": [
+        "Rubickanov.Input",
+        "Rubickanov.Save.Runtime",
+        "Unity.InputSystem",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "RUBICKANOV_SAVE"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.rubickanov.save",
+            "expression": "1.0.0",
+            "define": "RUBICKANOV_SAVE"
+        }
+    ],
+    "noEngineReferences": false
+}

@@ -1,0 +1,13 @@
+{
+    "name": "com.rubickanov.input",
+    "version": "1.0.0",
+    "license": "MIT",
+    "displayName": "Input",
+    "description": "What Unity's Input System leaves to every game, on its own action types: the device in hand (Steam Input's duplicate pad included), keys named for the player's layout and pad family, an action's keys for the device in hand, rebind slots with conflicts and swaps, and maps blocked by reason.",
+    "unity": "6000.0",
+    "dependencies": {
+        "com.unity.inputsystem": "1.7.0"
+    },
+    "keywords": ["input", "rebinding", "controls", "gamepad", "key names"],
+    "author": { "name": "rubickanov" }
+}
