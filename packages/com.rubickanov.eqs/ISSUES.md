@@ -1,6 +1,8 @@
 # Known issues
 
-Found in a review on 2026-10-02; not fixed, since no game uses the package yet. Fix before adopting it.
+Found in reviews on 2026-10-02; not fixed, since no game uses the package yet. Fix before adopting it. The package
+stays (Unity has nothing like it); the plan is a future AI package (perception, navigation, decisions on
+`com.unity.behavior`) that depends on it, grown from the first game with AI agents.
 
 - **Pruned candidates are missing from the result.** `EQSQuery.cs:242-252` marks dominated items dead and
   `BuildResult` (`:303`) skips them, so `TopN` (`EQSQueryResult.cs:47`) and the debugger's gradient lose every
@@ -19,3 +21,9 @@ Found in a review on 2026-10-02; not fixed, since no game uses the package yet. 
 - **`SphereOverlapGenerator`** returns one item per collider (an object with several colliders appears several
   times), excludes only the querier's root and not its child colliders (`:35`), and stops at 32 results silently.
 - **No NavMesh generator**; one exists only as a sample in `README.md`.
+- **`Tick` may never advance.** The budget is checked before the first item or chunk (`EQSQuery.cs:135`, `:162`),
+  so with a budget at or near zero (`Tick(0)`, `RunAsync(..., budgetMs: 0)`) every call returns `false` with no
+  progress and `RunAsync` loops forever. Score at least one item or chunk per call.
+- **The generator is outside the budget.** `Start` runs `Generate` whole (`EQSQuery.cs:60`), ground raycasts of
+  `CircleGenerator` and `GridGenerator` included; only the tests are spread over frames.
+- **No node for `com.unity.behavior`**, the decision layer the games would use.
