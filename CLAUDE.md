@@ -13,13 +13,11 @@ All at version `1.0.0`, except `audio` at `3.1.2`, `log` at `1.2.0`, `eqs` at `2
 | Package | Purpose |
 |---|---|
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
-| `codegen` | Centralized Editor codegen: shared identifier sanitization, idempotent writes, generator registry + Project Settings panel. Built-in generators for scenes/layers/tags/sorting-layers/animator-params/resources/streaming-assets/shader-props/uitoolkit-names. |
 | `devconsole` | In-game dev console: one IMGUI window the package creates, command discovery, autocomplete, chains, aliases, bindings and history in plain files, `autoexec.cfg` and `-command` run on the first frame, optional `log` commands. |
 | `eqs` | Environment Query System — data-driven spatial queries for AI. |
 | `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release, a speaker scope (`[Host]`) before every message. No dependencies. |
 | `statemachine` | Generic FSM, hierarchical, deferred transitions, zero-alloc. |
 | `ui` | UI Toolkit framework (no UGUI or TextMeshPro): views with view models on layers, a screen history, popups (with registered views as content), unscaled-time animations, pointer capture, back stack and keyboard/pad menu navigation fed by the game, UXML catalog. |
-| `utils` | Shared utilities: deterministic random, circular buffer, pooling, etc. |
 
 Frozen packages live in `archived/` with the reason for each (`archived/README.md`); they are not in the sandbox or the docs.
 
