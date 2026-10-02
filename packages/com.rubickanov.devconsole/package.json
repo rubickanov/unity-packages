@@ -1,9 +1,9 @@
 {
     "name": "com.rubickanov.devconsole",
-    "version": "3.0.1",
+    "version": "4.0.0",
     "license": "MIT",
     "displayName": "Dev Console",
-    "description": "In-game developer console with attribute-based auto-discovery, autocomplete, subcommands, and persistent history.",
+    "description": "In-game developer console window (IMGUI) with attribute-based auto-discovery, autocomplete, subcommands, and persistent history.",
     "unity": "6000.0",
     "dependencies": {
         "com.unity.inputsystem": "1.7.0"

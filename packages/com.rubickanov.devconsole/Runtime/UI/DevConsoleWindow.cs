@@ -7,21 +7,28 @@ using UnityEngine.InputSystem;
 namespace Rubickanov.DevConsole
 {
     /// <summary>
-    /// IMGUI frontend for the DevConsole package backend (CommandRegistry + ConsoleLog).
-    /// Behaviorally mirrors <see cref="DevConsoleUIToolkit"/>: vertical autocomplete dropdown with
-    /// descriptions, arrow-key suggestion/history navigation, token-aware completion and persisted
-    /// command history. Zero setup — no UIDocument or UXML required.
+    /// The console window, drawn with IMGUI over the top of the screen: the log, an autocomplete dropdown with
+    /// descriptions, arrow-key suggestion and history navigation, and the command line. One at a time; a second one
+    /// destroys itself.
     /// </summary>
-    public class DevConsoleIMGUI : MonoBehaviour
+    public sealed class DevConsoleWindow : MonoBehaviour
     {
         private const string InputControlName = "DevConsoleInput";
         private const int MaxSuggestions = 10;
         private static readonly int LogSelectionHint = "DevConsoleLogSelection".GetHashCode();
 
-        private static DevConsoleIMGUI? _instance;
+        private static DevConsoleWindow? _instance;
 
-        public static DevConsoleIMGUI? Instance => _instance;
+        /// <summary>The window, or null while there is none.</summary>
+        public static DevConsoleWindow? Instance => _instance;
+
+        /// <summary>
+        /// Raised with true when the window opens and false when it closes, also when it is destroyed while open, so a
+        /// game that blocks its own input while the console is up always gets it back.
+        /// </summary>
         public static event Action<bool>? Toggled;
+
+        /// <summary>Whether a console window exists and is open.</summary>
         public static bool IsOpen => _instance != null && _instance._isOpen;
 
         private bool _isOpen;
@@ -114,6 +121,12 @@ namespace Rubickanov.DevConsole
                 return;
             }
 
+            Attach();
+        }
+
+        /// <summary>Becomes the window. Awake's work, apart so edit-mode tests can run it.</summary>
+        internal void Attach()
+        {
             _instance = this;
             _history = new CommandHistory();
             CommandRegistry.Instance.Initialize();
@@ -124,11 +137,7 @@ namespace Rubickanov.DevConsole
 
         private void OnDestroy()
         {
-            ConsoleLog.OnLogAdded -= OnLogAdded;
-            ConsoleLog.OnCleared -= OnCleared;
-
-            if (_instance == this)
-                _instance = null;
+            Detach();
 
             DestroyTex(ref _consoleBgTex);
             DestroyTex(ref _acBgTex);
@@ -137,6 +146,21 @@ namespace Rubickanov.DevConsole
             DestroyTex(ref _borderWeakTex);
             DestroyTex(ref _acBorderTex);
             DestroyTex(ref _clearTex);
+        }
+
+        /// <summary>Stops being the window, closing it first. OnDestroy's work, apart so edit-mode tests can run it.</summary>
+        internal void Detach()
+        {
+            ConsoleLog.OnLogAdded -= OnLogAdded;
+            ConsoleLog.OnCleared -= OnCleared;
+            if (_instance != this) return;
+
+            // A window destroyed while open, with its scene or its owner, would otherwise leave whoever listens to
+            // Toggled thinking it is still open: a game blocking its input until then would never get it back
+            var wasOpen = _isOpen;
+            _isOpen = false;
+            _instance = null;
+            if (wasOpen) Toggled?.Invoke(false);
         }
 
         // While text is selected the log stays where it is, so the selection does not scroll away.
@@ -148,8 +172,7 @@ namespace Rubickanov.DevConsole
             _scrollToBottom = true;
         }
 
-        // Drive the built-in toggle from DevConsoleSettings, mirroring DevConsoleUIToolkit so the
-        // two frontends honor the same Toggle Key / Use Built-in Toggle options. Polling the Input
+        // Drive the built-in toggle from DevConsoleSettings. Polling the Input
         // System here (once per frame) rather than in OnGUI avoids the multi-event-per-frame
         // double-toggle that wasPressedThisFrame would cause inside OnGUI.
         private void Update()
@@ -263,7 +286,7 @@ namespace Rubickanov.DevConsole
                     e.Use();
             }
 
-            // --- Layout (top → bottom: log, autocomplete, input), mirroring the UI Toolkit flex column ---
+            // --- Layout (top → bottom: log, autocomplete, input) ---
             float consoleHeight = Screen.height * DevConsoleSettings.GetOrCreate().ConsoleHeight;
             const float inputRowHeight = 28f;
             const float acRowHeight = 18f;
@@ -889,7 +912,6 @@ namespace Rubickanov.DevConsole
             if (_stylesInitialized) return;
             _stylesInitialized = true;
 
-            // Colors mirror DevConsoleUI.uss so both frontends look identical.
             _consoleBgTex = MakeTex(new Color(0.059f, 0.059f, 0.078f, 0.92f));
             _acBgTex = MakeTex(new Color(0.078f, 0.078f, 0.110f, 0.95f));
             _selectedBgTex = MakeTex(new Color(0.235f, 0.353f, 0.549f, 0.5f));
