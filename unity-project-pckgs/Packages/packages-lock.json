@@ -40,6 +40,16 @@
       "source": "local",
       "dependencies": {}
     },
+    "com.rubickanov.save": {
+      "version": "file:../../packages/com.rubickanov.save",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.unity.modules.imageconversion": "1.0.0",
+        "com.unity.modules.unitywebrequest": "1.0.0",
+        "com.unity.modules.unitywebrequesttexture": "1.0.0"
+      }
+    },
     "com.rubickanov.ui": {
       "version": "file:../../packages/com.rubickanov.ui",
       "depth": 0,

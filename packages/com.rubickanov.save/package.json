@@ -1,0 +1,15 @@
+{
+    "name": "com.rubickanov.save",
+    "version": "1.0.0",
+    "license": "MIT",
+    "displayName": "Save",
+    "description": "One store for everything a game keeps of the player's, named by game-declared area and name instead of a path, async for consoles, written whole or not at all: files on desktop, memory for tests, small documents read once and written in turn, pictures decoded off the main thread.",
+    "unity": "6000.0",
+    "dependencies": {
+        "com.unity.modules.imageconversion": "1.0.0",
+        "com.unity.modules.unitywebrequest": "1.0.0",
+        "com.unity.modules.unitywebrequesttexture": "1.0.0"
+    },
+    "keywords": ["save", "storage", "persistence", "files"],
+    "author": { "name": "rubickanov" }
+}
