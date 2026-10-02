@@ -8,19 +8,18 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-All at version `1.0.0`, except `audio` at `3.1.1`, `devconsole` at `3.0.1`, `log` at `1.1.0`, `eqs` at `2.0.0` and `ui`, `ui.animations` at `3.0.0`:
+All at version `1.0.0`, except `audio` at `3.1.2`, `log` at `1.2.0`, `eqs` at `2.0.0` and `devconsole`, `ui` at `4.0.0`:
 
 | Package | Purpose |
 |---|---|
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
 | `codegen` | Centralized Editor codegen: shared identifier sanitization, idempotent writes, generator registry + Project Settings panel. Built-in generators for scenes/layers/tags/sorting-layers/animator-params/resources/streaming-assets/shader-props/uitoolkit-names. |
 | `config` | Type-safe config loading via Addressables, caching, validation. |
-| `devconsole` | In-game dev console with auto-discovery and autocomplete. |
+| `devconsole` | In-game dev console: one IMGUI window the package creates, command discovery, autocomplete, chains, aliases, bindings and history in plain files, `autoexec.cfg` and `-command` run on the first frame, optional `log` commands. |
 | `eqs` | Environment Query System — data-driven spatial queries for AI. |
 | `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release, a speaker scope (`[Host]`) before every message. No dependencies. |
 | `statemachine` | Generic FSM, hierarchical, deferred transitions, zero-alloc. |
-| `ui` | UI Toolkit framework (no UGUI or TextMeshPro): views with view models on layers, a screen history, list binding over `ObservableCollections`, popups (with registered views as content), dialogs, tooltips, spinner, pointer capture and back stack, UXML catalog. |
-| `ui.animations` | LitMotion fade/scale/slide/composite animations for UI views and popups. |
+| `ui` | UI Toolkit framework (no UGUI or TextMeshPro): views with view models on layers, a screen history, popups (with registered views as content), unscaled-time animations, pointer capture, back stack and keyboard/pad menu navigation fed by the game, UXML catalog. |
 | `utils` | Shared utilities: deterministic random, circular buffer, pooling, etc. |
 
 Frozen packages live in `archived/` with the reason for each (`archived/README.md`); they are not in the sandbox or the docs.

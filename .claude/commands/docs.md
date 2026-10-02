@@ -39,7 +39,7 @@ instead of guessing.
 
 - Classify the package as **Core** or **Extension** per `README_STANDARD.md`
   ("Package Tiers" section). Extension packages are small addons to a core
-  package (e.g. `acs.netcode`, `devconsole.netcode`, `ui.animations`) — they
+  package (none at the moment; the archived `ui.animations` was one) — they
   get the much shorter Extension template.
 - Copy the appropriate template from `README_STANDARD.md` ("Templates"
   section) as the starting skeleton.
