@@ -57,8 +57,17 @@ namespace Rubickanov.DevConsole
                 }
             }
 
+            // A key name is a word: Enum.TryParse would also take a number, or "A,B" as the two values or-ed into
+            // some third key
             var keyName = parts[^1].Trim();
-            if (keyName.Length == 0 || char.IsDigit(keyName[0]) || keyName[0] == '-') return false;
+            if (keyName.Length == 0 || !char.IsLetter(keyName[0])) return false;
+            for (int i = 1; i < keyName.Length; i++)
+            {
+                if (!char.IsLetterOrDigit(keyName[i])) return false;
+            }
+
+            // IMESelected is a placeholder of the Input System, not a key; a keyboard has no control for it
+            if (string.Equals(keyName, "IMESelected", StringComparison.OrdinalIgnoreCase)) return false;
             if (!Enum.TryParse(keyName, true, out Key key) || key == Key.None) return false;
 
             chord = new KeyChord(key, modifiers);
@@ -68,7 +77,11 @@ namespace Rubickanov.DevConsole
         /// <summary>Whether the key went down this frame with exactly these modifiers held.</summary>
         public bool WasPressedThisFrame(Keyboard keyboard)
         {
-            return keyboard[Key].wasPressedThisFrame && HeldModifiers(keyboard) == Modifiers;
+            // The keyboard's indexer throws for a key it has no control for, which in CommandBindings would stop every
+            // binding after this one, every frame
+            var index = (int)Key - 1;
+            if (index < 0 || index >= keyboard.allKeys.Count) return false;
+            return keyboard.allKeys[index].wasPressedThisFrame && HeldModifiers(keyboard) == Modifiers;
         }
 
         private static KeyModifiers HeldModifiers(Keyboard keyboard)
