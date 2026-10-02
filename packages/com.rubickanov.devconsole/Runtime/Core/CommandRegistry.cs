@@ -40,6 +40,22 @@ namespace Rubickanov.DevConsole
         /// <summary>All registered commands keyed by lowercase name, words separated by one space.</summary>
         public IReadOnlyDictionary<string, RegisteredCommand> Commands => _commands;
 
+        private AliasRegistry? _aliases;
+        private BindingRegistry? _bindings;
+        private CommandHistory? _history;
+
+        /// <summary>The aliases, read from <c>config.cfg</c> when first asked for.</summary>
+        public AliasRegistry Aliases => _aliases ??= new AliasRegistry(SaveConfig);
+
+        /// <summary>The key bindings, read from <c>config.cfg</c> when first asked for.</summary>
+        public BindingRegistry Bindings => _bindings ??= new BindingRegistry(SaveConfig);
+
+        /// <summary>The lines typed into the console, read from <c>history.txt</c> when first asked for.</summary>
+        public CommandHistory History => _history ??= new CommandHistory();
+
+        // An alias change writes the bindings too, so both are read before the file is rewritten
+        private void SaveConfig() => ConsoleConfig.Write(Aliases, Bindings);
+
         /// <summary>Optional filter invoked before command execution. Return non-null to override.</summary>
         public Func<RegisteredCommand, string[], ExecutionResult?>? PreExecuteFilter;
 
@@ -557,7 +573,7 @@ namespace Rubickanov.DevConsole
             var cmdName = line.Tokens[0].ToLowerInvariant();
 
             // Alias expansion
-            if (!IsCommandOrGroup(cmdName) && AliasRegistry.Instance.TryResolve(cmdName, out var aliasCommand))
+            if (!IsCommandOrGroup(cmdName) && Aliases.TryResolve(cmdName, out var aliasCommand))
             {
                 if (aliasDepth >= 8)
                     return ExecutionResult.Error("Alias recursion limit reached (max 8).");
@@ -819,7 +835,7 @@ namespace Rubickanov.DevConsole
                     }
                 }
 
-                var aliasNames = AliasRegistry.Instance.SortedNames;
+                var aliasNames = Aliases.SortedNames;
                 for (int i = 0; i < aliasNames.Count; i++)
                 {
                     if (aliasNames[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase) &&
@@ -838,7 +854,7 @@ namespace Rubickanov.DevConsole
             {
                 // An alias that only prefixes one command completes as that command would: `tp ` after
                 // `alias tp teleport` suggests teleport's arguments. One with $ or ; has no such single place.
-                if (aliasDepth < 8 && AliasRegistry.Instance.TryResolve(cmdName, out var aliasCommand) &&
+                if (aliasDepth < 8 && Aliases.TryResolve(cmdName, out var aliasCommand) &&
                     aliasCommand.IndexOf('$') < 0 && aliasCommand.IndexOf(';') < 0)
                 {
                     var call = new CommandLine(input);
@@ -983,7 +999,7 @@ namespace Rubickanov.DevConsole
                 return null;
             }
 
-            if (AliasRegistry.Instance.TryResolve(key, out var aliasCommand))
+            if (Aliases.TryResolve(key, out var aliasCommand))
             {
                 ConsoleLog.Log($"<b>{key}</b> is an alias for: {aliasCommand}");
                 return null;
@@ -1023,9 +1039,9 @@ namespace Rubickanov.DevConsole
             }
         }
 
-        private static void LogAliases()
+        private void LogAliases()
         {
-            var aliases = AliasRegistry.Instance;
+            var aliases = Aliases;
             var names = aliases.SortedNames;
             if (names.Count == 0) return;
 
@@ -1051,7 +1067,7 @@ namespace Rubickanov.DevConsole
                 for (int i = 0; i < words.Length; i++)
                     if (words[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase)) results.Add(words[i]);
 
-                var aliases = AliasRegistry.Instance.SortedNames;
+                var aliases = _registry.Aliases.SortedNames;
                 for (int i = 0; i < aliases.Count; i++)
                     if (aliases[i].StartsWith(partial, StringComparison.OrdinalIgnoreCase)) results.Add(aliases[i]);
 

@@ -150,7 +150,7 @@ namespace Rubickanov.DevConsole
         internal void Attach()
         {
             _instance = this;
-            _history = new CommandHistory();
+            _history = CommandRegistry.Instance.History;
 
             ConsoleLog.OnLogAdded += OnLogAdded;
             ConsoleLog.OnCleared += OnCleared;

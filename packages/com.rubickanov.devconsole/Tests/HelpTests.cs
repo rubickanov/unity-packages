@@ -59,7 +59,7 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Help_Alias_SaysWhatItRuns()
         {
-            AliasRegistry.Instance.Set("slow", "timescale 0.2");
+            _registry.Aliases.Set("slow", "timescale 0.2");
 
             _registry.Execute("help slow");
 

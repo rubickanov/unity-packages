@@ -19,20 +19,20 @@ namespace Rubickanov.DevConsole.Commands
         internal static void Register(CommandRegistry registry)
         {
             registry.Group("alias", "Short names for commands", "Console", g => g
-                .Add("list", ListAliases, "Show all aliases")
+                .Add("list", args => ListAliases(registry, args), "Show all aliases")
                 .AddWithRest("set", 1, SetAlias(registry),
                     "Create or replace an alias; $1..$9 and $* take the call's arguments",
                     "<name> <command...>", null, CommandLineProvider.Instance)
-                .Add("remove", RemoveAlias, "Remove an alias", AliasNameProvider.Instance)
-                .Add("clear", ClearAliases, "Remove all aliases"));
+                .Add("remove", args => RemoveAlias(registry, args), "Remove an alias", new AliasNameProvider(registry))
+                .Add("clear", args => ClearAliases(registry, args), "Remove all aliases"));
 
             registry.Group("bind", "Run commands on key presses", "Console", g => g
-                .Add("list", ListBindings, "Show all bindings")
-                .AddWithRest("set", 1, SetBinding,
+                .Add("list", args => ListBindings(registry, args), "Show all bindings")
+                .AddWithRest("set", 1, args => SetBinding(registry, args),
                     "Bind a key, with optional ctrl+/shift+/alt+, to a command",
                     "<key> <command...>", new KeyChordProvider(), CommandLineProvider.Instance)
-                .Add("remove", RemoveBinding, "Remove a binding", BoundKeyProvider.Instance)
-                .Add("clear", ClearBindings, "Remove all bindings"));
+                .Add("remove", args => RemoveBinding(registry, args), "Remove a binding", new BoundKeyProvider(registry))
+                .Add("clear", args => ClearBindings(registry, args), "Remove all bindings"));
 
             // A registered command rather than syntax, so a PreExecuteFilter can refuse it: the netcode bridge does for
             // commands sent by a client, whose deferred rest would otherwise run later without that client's checks
@@ -49,16 +49,16 @@ namespace Rubickanov.DevConsole.Commands
                 new IAutoCompleteProvider?[] { CommandLineProvider.Instance });
 
             registry.Group("history", "Previously entered commands", "Console", g => g
-                .Add("list", ListHistory, "Show the last N commands, all when N is left out")
-                .Add("clear", ClearHistory, "Remove all history entries"));
+                .Add("list", args => ListHistory(registry, args), "Show the last N commands, all when N is left out")
+                .Add("clear", args => ClearHistory(registry, args), "Remove all history entries"));
         }
 
         // ── alias ────────────────────────────────────────────────────
 
-        private static string? ListAliases(string[] args)
+        private static string? ListAliases(CommandRegistry registry, string[] args)
         {
             ExpectAtMost(args, 0, "alias list");
-            var aliases = AliasRegistry.Instance;
+            var aliases = registry.Aliases;
             if (aliases.Aliases.Count == 0) return "No aliases defined.";
 
             var names = aliases.SortedNames;
@@ -78,34 +78,34 @@ namespace Rubickanov.DevConsole.Commands
             if (registry.Commands.ContainsKey(name.ToLowerInvariant()))
                 throw new CommandException($"'{name}' is already a command, an alias with that name would never run.");
 
-            AliasRegistry.Instance.Set(name, args[1]);
+            registry.Aliases.Set(name, args[1]);
             ConsoleLog.LogSuccess($"Alias '{name.ToLowerInvariant()}' → '{args[1]}'");
             return null;
         };
 
-        private static string? RemoveAlias(string[] args)
+        private static string? RemoveAlias(CommandRegistry registry, string[] args)
         {
             ExpectExactly(args, 1, "alias remove <name>");
-            if (!AliasRegistry.Instance.Remove(args[0]))
+            if (!registry.Aliases.Remove(args[0]))
                 throw new CommandException($"Alias '{args[0]}' not found.");
             ConsoleLog.LogSuccess($"Alias '{args[0]}' removed.");
             return null;
         }
 
-        private static string? ClearAliases(string[] args)
+        private static string? ClearAliases(CommandRegistry registry, string[] args)
         {
             ExpectAtMost(args, 0, "alias clear");
-            AliasRegistry.Instance.Clear();
+            registry.Aliases.Clear();
             ConsoleLog.LogSuccess("All aliases cleared.");
             return null;
         }
 
         // ── bind ─────────────────────────────────────────────────────
 
-        private static string? ListBindings(string[] args)
+        private static string? ListBindings(CommandRegistry registry, string[] args)
         {
             ExpectAtMost(args, 0, "bind list");
-            var bindings = BindingRegistry.Instance.Bindings;
+            var bindings = registry.Bindings.Bindings;
             if (bindings.Count == 0) return "No key bindings defined.";
 
             var keys = new List<string>(bindings.Count);
@@ -123,7 +123,7 @@ namespace Rubickanov.DevConsole.Commands
             return null;
         }
 
-        private static string? SetBinding(string[] args)
+        private static string? SetBinding(CommandRegistry registry, string[] args)
         {
             if (args.Length < 2) throw new CommandException("Usage: bind set <key> <command...>");
 
@@ -132,27 +132,27 @@ namespace Rubickanov.DevConsole.Commands
             if (settings.UseBuiltInToggle && chord.Key == settings.ToggleKey)
                 ConsoleLog.LogWarning($"{settings.ToggleKey} also opens the console.");
 
-            BindingRegistry.Instance.Set(chord, args[1]);
+            registry.Bindings.Set(chord, args[1]);
             // Created now and not only at startup, so a binding made in a session with none works straight away
             if (Application.isPlaying) CommandBindings.EnsureExists();
             ConsoleLog.LogSuccess($"Bound {chord} → '{args[1]}'");
             return null;
         }
 
-        private static string? RemoveBinding(string[] args)
+        private static string? RemoveBinding(CommandRegistry registry, string[] args)
         {
             ExpectExactly(args, 1, "bind remove <key>");
             var chord = ParseChord(args[0]);
-            if (!BindingRegistry.Instance.Remove(chord))
+            if (!registry.Bindings.Remove(chord))
                 throw new CommandException($"No binding for {chord}.");
             ConsoleLog.LogSuccess($"Unbound {chord}.");
             return null;
         }
 
-        private static string? ClearBindings(string[] args)
+        private static string? ClearBindings(CommandRegistry registry, string[] args)
         {
             ExpectAtMost(args, 0, "bind clear");
-            BindingRegistry.Instance.Clear();
+            registry.Bindings.Clear();
             ConsoleLog.LogSuccess("All key bindings cleared.");
             return null;
         }
@@ -186,13 +186,10 @@ namespace Rubickanov.DevConsole.Commands
 
         // ── history ──────────────────────────────────────────────────
 
-        private static string? ListHistory(string[] args)
+        private static string? ListHistory(CommandRegistry registry, string[] args)
         {
             ExpectAtMost(args, 1, "history list [N]");
-            var history = CommandHistory.Current;
-            if (history == null) throw new CommandException("Command history not available.");
-
-            var entries = history.Entries;
+            var entries = registry.History.Entries;
             if (entries.Count == 0) return "History is empty.";
 
             var first = 0;
@@ -208,12 +205,10 @@ namespace Rubickanov.DevConsole.Commands
             return null;
         }
 
-        private static string? ClearHistory(string[] args)
+        private static string? ClearHistory(CommandRegistry registry, string[] args)
         {
             ExpectAtMost(args, 0, "history clear");
-            var history = CommandHistory.Current;
-            if (history == null) throw new CommandException("Command history not available.");
-            history.Clear();
+            registry.History.Clear();
             ConsoleLog.LogSuccess("Command history cleared.");
             return null;
         }

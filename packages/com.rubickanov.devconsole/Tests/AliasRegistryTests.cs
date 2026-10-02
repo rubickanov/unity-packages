@@ -5,6 +5,7 @@ namespace Rubickanov.DevConsole.Tests
     [TestFixture]
     public class AliasRegistryTests
     {
+        private CommandRegistry _registry = null!;
         private AliasRegistry _aliases = null!;
         private string _config = null!;
 
@@ -12,7 +13,8 @@ namespace Rubickanov.DevConsole.Tests
         public void SetUp()
         {
             _config = TestConfig.Use();
-            _aliases = AliasRegistry.Instance;
+            _registry = new CommandRegistry();
+            _aliases = _registry.Aliases;
         }
 
         [TearDown]
@@ -63,12 +65,11 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Execute_AliasRecursionLimit_BailsAfter8Levels()
         {
-            var registry = new CommandRegistry();
-            registry.Register("real", _ => "ok");
+            _registry.Register("real", _ => "ok");
             for (int i = 0; i < 10; i++)
                 _aliases.Set($"a{i}", $"a{i + 1}");
 
-            var result = registry.Execute("a0");
+            var result = _registry.Execute("a0");
 
             Assert.IsFalse(result.Success);
             StringAssert.Contains("recursion limit", result.Message ?? "");

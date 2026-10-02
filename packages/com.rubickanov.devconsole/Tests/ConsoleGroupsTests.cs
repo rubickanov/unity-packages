@@ -29,7 +29,7 @@ namespace Rubickanov.DevConsole.Tests
             var result = _registry.Execute("alias set slow timescale 0.2");
 
             Assert.IsTrue(result.Success, result.Message);
-            AliasRegistry.Instance.TryResolve("slow", out var command);
+            _registry.Aliases.TryResolve("slow", out var command);
             Assert.AreEqual("timescale 0.2", command);
         }
 
@@ -38,7 +38,7 @@ namespace Rubickanov.DevConsole.Tests
         {
             _registry.Execute("alias set reset \"timescale 1; clear\"");
 
-            AliasRegistry.Instance.TryResolve("reset", out var command);
+            _registry.Aliases.TryResolve("reset", out var command);
             Assert.AreEqual("timescale 1; clear", command);
         }
 
@@ -48,7 +48,7 @@ namespace Rubickanov.DevConsole.Tests
             var result = _registry.Execute("alias set echo history list");
 
             Assert.IsFalse(result.Success);
-            Assert.IsFalse(AliasRegistry.Instance.TryResolve("echo", out _));
+            Assert.IsFalse(_registry.Aliases.TryResolve("echo", out _));
         }
 
         [Test]
@@ -63,7 +63,7 @@ namespace Rubickanov.DevConsole.Tests
             var result = _registry.Execute("bind set ctrl+F5 echo \"a b\" c");
 
             Assert.IsTrue(result.Success, result.Message);
-            Assert.IsTrue(BindingRegistry.Instance.Bindings.TryGetValue(
+            Assert.IsTrue(_registry.Bindings.Bindings.TryGetValue(
                 new KeyChord(Key.F5, KeyModifiers.Ctrl), out var command));
             Assert.AreEqual("echo \"a b\" c", command);
         }
@@ -72,7 +72,7 @@ namespace Rubickanov.DevConsole.Tests
         public void BindSet_UnknownKey_IsAnError()
         {
             Assert.IsFalse(_registry.Execute("bind set Nope echo").Success);
-            Assert.AreEqual(0, BindingRegistry.Instance.Bindings.Count);
+            Assert.AreEqual(0, _registry.Bindings.Bindings.Count);
         }
 
         [Test]
@@ -82,7 +82,7 @@ namespace Rubickanov.DevConsole.Tests
             _registry.Execute("bind set shift+F5 echo");
 
             Assert.IsTrue(_registry.Execute("bind remove F5").Success);
-            Assert.AreEqual(1, BindingRegistry.Instance.Bindings.Count);
+            Assert.AreEqual(1, _registry.Bindings.Bindings.Count);
             Assert.IsFalse(_registry.Execute("bind remove F5").Success);
         }
 
@@ -91,7 +91,7 @@ namespace Rubickanov.DevConsole.Tests
         {
             _registry.Execute("bind set alt+K echo");
 
-            var reloaded = (BindingRegistry)System.Activator.CreateInstance(typeof(BindingRegistry), true);
+            var reloaded = new CommandRegistry().Bindings;
 
             Assert.IsTrue(reloaded.Bindings.ContainsKey(new KeyChord(Key.K, KeyModifiers.Alt)));
         }
@@ -172,7 +172,7 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Suggestions_AliasRemove_OffersExistingAliases()
         {
-            AliasRegistry.Instance.Set("slow", "echo");
+            _registry.Aliases.Set("slow", "echo");
             var results = new List<string>();
 
             _registry.GetSuggestions("alias remove s", results);

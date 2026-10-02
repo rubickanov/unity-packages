@@ -61,7 +61,7 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Alias_ToChain_RunsEveryCommand()
         {
-            AliasRegistry.Instance.Set("both", "a; b");
+            _registry.Aliases.Set("both", "a; b");
 
             _registry.Execute("both z");
 
@@ -75,7 +75,7 @@ namespace Rubickanov.DevConsole.Tests
         [TestCase("b", "al \"x y\" z", "b x y,z")]
         public void Alias_Placeholders_TakeTheCallArguments(string alias, string call, string ran)
         {
-            AliasRegistry.Instance.Set("al", alias);
+            _registry.Aliases.Set("al", alias);
 
             _registry.Execute(call);
 
@@ -95,7 +95,7 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void GetSuggestions_AliasNames_FollowCommands()
         {
-            AliasRegistry.Instance.Set("bee", "b");
+            _registry.Aliases.Set("bee", "b");
             var results = new List<string>();
 
             _registry.GetSuggestions("b", results);
@@ -107,7 +107,7 @@ namespace Rubickanov.DevConsole.Tests
         public void GetSuggestions_AfterAliasName_SuggestsTheTargetCommandArguments()
         {
             _registry.Register("pick", _ => null, argProviders: new IAutoCompleteProvider?[] { new StaticListProvider("one", "two") });
-            AliasRegistry.Instance.Set("p", "pick");
+            _registry.Aliases.Set("p", "pick");
             var results = new List<string>();
 
             _registry.GetSuggestions("p t", results);
@@ -122,7 +122,7 @@ namespace Rubickanov.DevConsole.Tests
             Assert.IsFalse(AliasRegistry.IsValidName("a;b"));
             Assert.IsFalse(AliasRegistry.IsValidName("$a"));
             Assert.IsTrue(AliasRegistry.IsValidName("tp.home"));
-            Assert.Throws<System.ArgumentException>(() => AliasRegistry.Instance.Set("a b", "x"));
+            Assert.Throws<System.ArgumentException>(() => _registry.Aliases.Set("a b", "x"));
         }
 
         [TestCase("he", "help", "help ")]
