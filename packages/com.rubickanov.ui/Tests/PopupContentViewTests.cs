@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
@@ -39,7 +38,7 @@ namespace Rubickanov.UI.Tests
             await _ui.Register<FriendsView>();
             var viewModel = new FakeViewModel();
 
-            _popups.Create().Title("Invite").Content<FriendsView>(viewModel).Open();
+            _popups.Create().Content<FriendsView, FakeViewModel>(viewModel).Open();
 
             var content = PopupLayer.Q(className: PopupStyle.Content);
             Assert.IsNotNull(content);
@@ -53,8 +52,8 @@ namespace Rubickanov.UI.Tests
         {
             await _ui.Register<FriendsView>();
 
-            _popups.Create().Content<FriendsView>(new FakeViewModel()).Open();
-            _popups.Create().Content<FriendsView>(new FakeViewModel()).Open();
+            _popups.Create().Content<FriendsView, FakeViewModel>(new FakeViewModel()).Open();
+            _popups.Create().Content<FriendsView, FakeViewModel>(new FakeViewModel()).Open();
 
             Assert.AreEqual(2, PopupLayer.Query(className: PopupStyle.Content).ToList().Count);
         }
@@ -65,7 +64,7 @@ namespace Rubickanov.UI.Tests
             await _ui.Register<FriendsView>();
             var animation = new ControlledAnimation();
             var viewModel = new FakeViewModel();
-            var popup = _popups.Create().Content<FriendsView>(viewModel).Animation(animation).Open();
+            var popup = _popups.Create().Content<FriendsView, FakeViewModel>(viewModel).Animation(animation).Open();
             animation.CompleteShow();
 
             popup.Close();
@@ -82,7 +81,7 @@ namespace Rubickanov.UI.Tests
         {
             await _ui.Register<FriendsView>();
 
-            _popups.Create().Content<FriendsView>(new FakeViewModel()).Open();
+            _popups.Create().Content<FriendsView, FakeViewModel>(new FakeViewModel()).Open();
 
             Assert.IsTrue(_ui.PointerCaptured.CurrentValue);
         }
@@ -93,7 +92,7 @@ namespace Rubickanov.UI.Tests
             var viewModel = new FakeViewModel();
 
             var ex = Assert.Throws<InvalidOperationException>(() =>
-                _popups.Create().Content<FriendsView>(viewModel).Open());
+                _popups.Create().Content<FriendsView, FakeViewModel>(viewModel).Open());
 
             StringAssert.Contains(nameof(FriendsView), ex.Message);
             Assert.AreEqual(1, viewModel.DisposeCalls);
@@ -102,34 +101,13 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task Open_WrongViewModelType_ThrowsArgument()
-        {
-            await _ui.Register<FriendsView>();
-
-            Assert.Throws<ArgumentException>(() =>
-                _popups.Create().Content<FriendsView>(new OtherViewModel()).Open());
-        }
-
-        [Test]
-        public async Task CreateDialog_WithContentView_ShowsView()
-        {
-            await _ui.Register<FriendsView>();
-
-            _popups.CreateDialog("Invite").Content<FriendsView>(new FakeViewModel()).Button("Close", "close").Open();
-
-            var content = _root.Q(className: PopupStyle.Content);
-            Assert.IsNotNull(content);
-            Assert.AreEqual("friends", content.name);
-        }
-
-        [Test]
         public async Task ShowView_PopupView_FillsPopupLayerWithoutChrome()
         {
             await _ui.Register<FriendsView>();
 
-            var popup = _popups.ShowView<FriendsView>(new FakeViewModel());
+            var popup = _popups.ShowView<FriendsView, FakeViewModel>(new FakeViewModel());
 
-            Assert.AreSame(PopupLayer, popup.Panel.parent);
+            Assert.AreSame(PopupLayer, popup.Panel.parent.parent);
             Assert.IsTrue(popup.Panel.ClassListContains(PopupStyle.View));
             Assert.IsTrue(_ui.PointerCaptured.CurrentValue);
         }
@@ -138,19 +116,19 @@ namespace Rubickanov.UI.Tests
         public async Task ShowView_ViewReachesItsPopup_ClosesItself()
         {
             await _ui.Register<SelfClosingView>();
-            var popup = _popups.ShowView<SelfClosingView>(new FakeViewModel());
+            var popup = _popups.ShowView<SelfClosingView, FakeViewModel>(new FakeViewModel());
 
             SelfClosingView.Last!.CloseFromView();
 
             Assert.IsFalse(popup.IsOpen);
-            Assert.AreEqual("done", (await popup.Result).ButtonId);
+            Assert.AreEqual("done", (await popup.Result).Id);
         }
 
         [Test]
         public async Task Back_ContentViewConsumes_PopupStaysOpen()
         {
             await _ui.Register<SelfClosingView>();
-            var popup = _popups.ShowView<SelfClosingView>(new FakeViewModel());
+            var popup = _popups.ShowView<SelfClosingView, FakeViewModel>(new FakeViewModel());
             SelfClosingView.Last!.ConsumeBack = true;
 
             var first = _ui.Back();
@@ -168,7 +146,7 @@ namespace Rubickanov.UI.Tests
         public async Task Unregister_WhilePopupShowsView_UxmlReleasedWhenPopupCloses()
         {
             await _ui.Register<UxmlFriendsView>();
-            var popup = _popups.ShowView<UxmlFriendsView>(new FakeViewModel());
+            var popup = _popups.ShowView<UxmlFriendsView, FakeViewModel>(new FakeViewModel());
 
             _ui.Unregister<UxmlFriendsView>();
             var releasedWhileOpen = _loader.Released.Count;
@@ -179,26 +157,69 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task Unregister_WhilePopupShowsView_ViewStillCreatesChildren()
-        {
-            await _ui.Register<ListContent>();
-            _popups.ShowView<ListContent>(new FakeViewModel());
-
-            _ui.Unregister<ListContent>();
-
-            Assert.DoesNotThrow(() => ListContent.Last!.AddRow());
-            CollectionAssert.IsEmpty(_loader.Released);
-        }
-
-        [Test]
         public async Task Open_ContentViewWithAnimation_PlaysIt()
         {
             await _ui.Register<AnimatedView>();
             AnimatedView.TestAnimation = new ControlledAnimation();
 
-            _popups.ShowView<AnimatedView>(new FakeViewModel());
+            _popups.ShowView<AnimatedView, FakeViewModel>(new FakeViewModel());
 
-            Assert.AreEqual(1, AnimatedView.TestAnimation.Shows.Count);
+            Assert.AreEqual(1, ((ControlledAnimation)AnimatedView.TestAnimation).Shows.Count);
+        }
+
+        [Test]
+        public async Task Open_ContentViewBuilderTwice_ThrowsInsteadOfBindingDisposedViewModel()
+        {
+            await _ui.Register<FriendsView>();
+            var builder = _popups.Create().Content<FriendsView, FakeViewModel>(new FakeViewModel());
+            builder.Open().Close();
+
+            var ex = Assert.Throws<InvalidOperationException>(() => builder.Open());
+
+            StringAssert.Contains(nameof(FriendsView), ex.Message);
+        }
+
+        [Test]
+        public void Open_FactoryBuilderTwice_BuildsContentForEach()
+        {
+            var built = 0;
+            var builder = _popups.Create().Content(() =>
+            {
+                built++;
+                return new VisualElement();
+            });
+
+            builder.Open();
+            builder.Open();
+
+            Assert.AreEqual(2, built);
+        }
+
+        [Test]
+        public async Task Open_ContentViewWithAnimationTarget_PlaysOnIt()
+        {
+            await _ui.Register<StripPopup>();
+            var animation = new RecordingAnimation();
+            StripPopup.TestAnimation = animation;
+
+            var popup = _popups.ShowView<StripPopup, FakeViewModel>(new FakeViewModel());
+            popup.Close();
+
+            Assert.AreEqual(2, animation.Targets.Count);
+            Assert.AreEqual("strip", animation.Targets[0].name);
+            Assert.AreSame(animation.Targets[0], animation.Targets[1]);
+        }
+
+        [Test]
+        public async Task Open_ContentViewAnimatingItsRoot_PlaysOnThePanel()
+        {
+            await _ui.Register<AnimatedView>();
+            var animation = new RecordingAnimation();
+            AnimatedView.TestAnimation = animation;
+
+            var popup = _popups.ShowView<AnimatedView, FakeViewModel>(new FakeViewModel());
+
+            CollectionAssert.AreEqual(new[] { popup.Panel }, animation.Targets);
         }
 
         public sealed class FriendsView : View<FakeViewModel>
@@ -216,22 +237,6 @@ namespace Rubickanov.UI.Tests
             protected override void OnBind() { }
         }
 
-        public sealed class ChildRow : View<FakeViewModel>
-        {
-            protected override UILayer Layer => UILayer.HUD;
-            protected override void OnBind() { }
-        }
-
-        public sealed class ListContent : View<FakeViewModel>
-        {
-            public static ListContent? Last;
-
-            protected override UILayer Layer => UILayer.Popup;
-            protected override IReadOnlyList<Type> ChildViews => new[] { typeof(ChildRow) };
-            protected override void OnBind() => Last = this;
-            public void AddRow() => CreateChild<ChildRow, FakeViewModel>(new FakeViewModel(), Root);
-        }
-
         public sealed class SelfClosingView : View<FakeViewModel>
         {
             public static SelfClosingView? Last;
@@ -241,16 +246,29 @@ namespace Rubickanov.UI.Tests
             protected override string? UxmlName => null;
             protected override void OnBind() => Last = this;
             protected override bool OnBack() => ConsumeBack;
-            public void CloseFromView() => Popup!.Close("done", PopupCloseReason.Button);
+            public void CloseFromView() => Popup!.Close("done");
         }
 
         public sealed class AnimatedView : View<FakeViewModel>
         {
-            public static ControlledAnimation TestAnimation = new();
+            public static IViewAnimation TestAnimation = new ControlledAnimation();
 
             protected override UILayer Layer => UILayer.Popup;
             protected override string? UxmlName => null;
             protected override IViewAnimation Animation => TestAnimation;
+            protected override void OnBind() { }
+        }
+
+        public sealed class StripPopup : View<FakeViewModel>
+        {
+            public static IViewAnimation TestAnimation = NoneAnimation.Instance;
+            private readonly VisualElement _strip = new() { name = "strip" };
+
+            protected override UILayer Layer => UILayer.Popup;
+            protected override string? UxmlName => null;
+            protected override IViewAnimation Animation => TestAnimation;
+            protected override VisualElement AnimationTarget => _strip;
+            protected override void OnInitialize() => Root.Add(_strip);
             protected override void OnBind() { }
         }
     }

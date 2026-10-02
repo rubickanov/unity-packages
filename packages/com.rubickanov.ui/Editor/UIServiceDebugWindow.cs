@@ -82,7 +82,6 @@ namespace Rubickanov.UI.Editor
             DrawScreenHistory(service);
             DrawPopupViews(service);
             DrawRegisteredViews(service);
-            DrawActions(service);
             EditorGUI.indentLevel--;
             EditorGUILayout.Space();
         }
@@ -191,18 +190,6 @@ namespace Rubickanov.UI.Editor
             };
             EditorGUILayout.LabelField(viewType.Name, view.State.ToString());
             GUI.color = color;
-        }
-
-        private static void DrawActions(UIService service)
-        {
-            EditorGUILayout.Space();
-            using (new EditorGUI.DisabledScope(service.DebugActiveScreen == null))
-            {
-                if (GUILayout.Button("Hide Screen"))
-                {
-                    service.HideScreen();
-                }
-            }
         }
     }
 }

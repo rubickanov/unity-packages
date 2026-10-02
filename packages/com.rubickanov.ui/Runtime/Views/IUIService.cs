@@ -7,7 +7,7 @@ namespace Rubickanov.UI
     public interface IUIService
     {
         /// <summary>
-        /// Loads the view's UXML (and its child views') and attaches it to the layer the view declares. A popup view
+        /// Loads the view's UXML and attaches the view to the layer it declares. A popup view
         /// (<see cref="UILayer.Popup"/>) is only loaded: <see cref="IPopupService"/> builds an instance per popup.
         /// </summary>
         UniTask Register<T>() where T : View;
@@ -21,37 +21,30 @@ namespace Rubickanov.UI
         /// Binds <paramref name="viewModel"/> and shows the view with its animation. The view model belongs to this
         /// show: it is disposed when the view unbinds it. Showing a screen clears the screen history.
         /// </summary>
-        UniTask Show<T>(ViewModelBase viewModel) where T : View;
+        UniTask Show<TView, TViewModel>(TViewModel viewModel)
+            where TView : View<TViewModel>
+            where TViewModel : ViewModelBase;
 
         /// <summary>
-        /// Shows the screen <typeparamref name="T"/> with a view model from <paramref name="createViewModel"/> and
-        /// records it in the screen history, so <see cref="NavigateBack"/> (and <see cref="Back"/> through the
-        /// screen's default <c>OnBack</c>) returns to the screen before it. The factory runs again on every return,
-        /// since a view model lives for one show. A screen already in the history is returned to: everything above
-        /// it is dropped.
+        /// Shows the screen <typeparamref name="TView"/> with a view model from <paramref name="createViewModel"/> and
+        /// records it in the screen history, so <see cref="Back"/> (through the screen's default <c>OnBack</c>) returns
+        /// to the screen before it. The factory runs again on every return, since a view model lives for one show. A
+        /// screen already in the history is returned to: everything above it is dropped.
         /// </summary>
-        /// <exception cref="InvalidOperationException"><typeparamref name="T"/> is not a screen.</exception>
-        UniTask Navigate<T>(Func<ViewModelBase> createViewModel) where T : View;
+        /// <exception cref="InvalidOperationException"><typeparamref name="TView"/> is not a screen.</exception>
+        UniTask Navigate<TView, TViewModel>(Func<TViewModel> createViewModel)
+            where TView : View<TViewModel>
+            where TViewModel : ViewModelBase;
 
         /// <summary>True while the screen history holds a screen to return to.</summary>
         bool CanNavigateBack { get; }
 
-        /// <summary>
-        /// Shows the previous screen of the history with a new view model from its factory. Returns false, changing
-        /// nothing, when there is none.
-        /// </summary>
-        UniTask<bool> NavigateBack();
-
         void Hide<T>() where T : View;
         UniTask HideAsync<T>() where T : View;
 
-        /// <summary>Hides the active screen, whichever it is, and clears the history.</summary>
-        void HideScreen();
-        UniTask HideScreenAsync();
-
         /// <summary>
         /// Asks for a free pointer. Counted: <see cref="PointerCaptured"/> stays true while any handle is alive.
-        /// The visible screen, and modal or interactive popups while on screen, hold one.
+        /// Every visible view that takes input, and every modal or interactive popup, holds one.
         /// </summary>
         IDisposable CapturePointer();
 

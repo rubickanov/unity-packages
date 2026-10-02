@@ -1,6 +1,5 @@
 using System;
 using Cysharp.Threading.Tasks;
-using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace Rubickanov.UI
@@ -11,25 +10,17 @@ namespace Rubickanov.UI
         /// <summary>False once the popup has closed.</summary>
         bool IsOpen { get; }
 
-        /// <summary>Completes when the popup closes, carrying the reason and any button/input.</summary>
+        /// <summary>Completes when the popup closes, carrying the reason and the id it was closed with.</summary>
         UniTask<PopupResult> Result { get; }
 
-        /// <summary>The popup's panel root, for changes to its own content.</summary>
+        /// <summary>The popup's panel, holding its content.</summary>
         VisualElement Panel { get; }
 
-        /// <summary>Closes the popup. No-op if already closed.</summary>
-        void Close(string? buttonId = null, PopupCloseReason reason = PopupCloseReason.Code);
-
-        /// <summary>Changes the title, if the popup has one.</summary>
-        void SetTitle(string text);
-
-        /// <summary>Changes the message, if the popup has one.</summary>
-        void SetMessage(string text);
-
-        /// <summary>Changes the icon, if the popup has one.</summary>
-        void SetIcon(Texture2D texture);
-
-        /// <summary>Re-anchors the popup to a new placement. No-op if already closed.</summary>
-        void SetPlacement(in PopupPlacement placement);
+        /// <summary>
+        /// Closes the popup with <paramref name="id"/> as <see cref="PopupResult.Id"/>: a question's view closes it with
+        /// the answer picked. Completes <see cref="Result"/> at once, then plays the hide animation. No-op if already
+        /// closed.
+        /// </summary>
+        void Close(string? id = null);
     }
 }

@@ -100,8 +100,6 @@ namespace Rubickanov.UI.Tests
         protected override void OnDispose() => DisposeCalls++;
     }
 
-    public sealed class OtherViewModel : ViewModelBase { }
-
     public abstract class FakeView : View<FakeViewModel>
     {
         protected override string? UxmlName => null;
@@ -150,6 +148,50 @@ namespace Rubickanov.UI.Tests
 
     public sealed class HudA : FakeHud { }
     public sealed class HudB : FakeHud { }
+
+    /// <summary>An overlay that takes input, answering Back itself.</summary>
+    public sealed class InputOverlay : FakeView
+    {
+        public int BackCalls { get; private set; }
+        protected override UILayer Layer => UILayer.Overlay;
+        protected override bool InterceptsInput => true;
+
+        protected override bool OnBack()
+        {
+            BackCalls++;
+            return true;
+        }
+    }
+
+    /// <summary>A HUD whose root covers the screen and whose animation plays on a strip inside it.</summary>
+    public sealed class StripHud : FakeView
+    {
+        public VisualElement Strip { get; } = new() { name = "strip" };
+        protected override UILayer Layer => UILayer.HUD;
+        protected override VisualElement AnimationTarget => Strip;
+        protected override void OnInitialize() => Root.Add(Strip);
+    }
+
+    /// <summary>Records the elements it plays on and resets; completes at once.</summary>
+    public sealed class RecordingAnimation : IViewAnimation
+    {
+        public readonly List<VisualElement> Targets = new();
+        public readonly List<VisualElement> Resets = new();
+
+        public UniTask PlayShowAsync(VisualElement target, CancellationToken ct)
+        {
+            Targets.Add(target);
+            return UniTask.CompletedTask;
+        }
+
+        public UniTask PlayHideAsync(VisualElement target, CancellationToken ct)
+        {
+            Targets.Add(target);
+            return UniTask.CompletedTask;
+        }
+
+        public void Reset(VisualElement target) => Resets.Add(target);
+    }
 
     public sealed class UxmlScreen : View<FakeViewModel>
     {

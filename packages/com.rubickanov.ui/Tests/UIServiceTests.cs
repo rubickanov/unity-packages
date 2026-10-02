@@ -72,7 +72,7 @@ namespace Rubickanov.UI.Tests
         {
             await _ui.Register<PopupA>();
 
-            Assert.ThrowsAsync<InvalidOperationException>(async () => await _ui.Show<PopupA>(new FakeViewModel()));
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await _ui.Show<PopupA, FakeViewModel>(new FakeViewModel()));
         }
 
         [Test]
@@ -152,7 +152,7 @@ namespace Rubickanov.UI.Tests
             Assert.AreEqual(0, _root.Q("screen-layer").childCount);
         }
 
-        // ── Show and view model type ─────────────────────────────
+        // ── Show ─────────────────────────────────────────────────
 
         [Test]
         public async Task ShowScreen_NoActive_BindsAndShows()
@@ -160,7 +160,7 @@ namespace Rubickanov.UI.Tests
             var a = await Registered<ScreenA>();
             var vm = new FakeViewModel();
 
-            await _ui.Show<ScreenA>(vm);
+            await _ui.Show<ScreenA, FakeViewModel>(vm);
 
             Assert.AreEqual(1, a.BindCalls);
             Assert.AreSame(vm, a.LastViewModel);
@@ -169,34 +169,13 @@ namespace Rubickanov.UI.Tests
         }
 
         [Test]
-        public async Task Show_WrongViewModelType_ThrowsBeforeAnyStateChange()
-        {
-            var a = await Registered<HudA>();
-            var b = await Registered<HudB>();
-            var vm = new FakeViewModel();
-            await _ui.Show<HudA>(vm);
-
-            var ex = Assert.ThrowsAsync<ArgumentException>(async () => await _ui.Show<HudA>(new OtherViewModel()));
-
-            StringAssert.Contains(nameof(HudA), ex.Message);
-            StringAssert.Contains(nameof(FakeViewModel), ex.Message);
-            StringAssert.Contains(nameof(OtherViewModel), ex.Message);
-            Assert.ThrowsAsync<ArgumentException>(async () => await _ui.Show<HudB>(new OtherViewModel()));
-            Assert.AreEqual(ViewState.Shown, a.State);
-            Assert.AreEqual(1, a.BindCalls);
-            Assert.AreEqual(0, vm.DisposeCalls);
-            Assert.AreEqual(ViewState.Hidden, b.State);
-            Assert.AreEqual(0, b.BindCalls);
-        }
-
-        [Test]
         public async Task Show_SameViewModelTwice_BindsOnceAndDoesNotDispose()
         {
             var a = await Registered<HudA>();
             var vm = new FakeViewModel();
 
-            await _ui.Show<HudA>(vm);
-            await _ui.Show<HudA>(vm);
+            await _ui.Show<HudA, FakeViewModel>(vm);
+            await _ui.Show<HudA, FakeViewModel>(vm);
 
             Assert.AreEqual(1, a.BindCalls);
             Assert.AreEqual(0, a.UnbindCalls);
@@ -211,8 +190,8 @@ namespace Rubickanov.UI.Tests
             var firstVm = new FakeViewModel();
             var secondVm = new FakeViewModel();
 
-            await _ui.Show<HudA>(firstVm);
-            await _ui.Show<HudA>(secondVm);
+            await _ui.Show<HudA, FakeViewModel>(firstVm);
+            await _ui.Show<HudA, FakeViewModel>(secondVm);
 
             Assert.AreEqual(2, a.BindCalls);
             Assert.AreEqual(1, a.UnbindCalls);
@@ -229,7 +208,7 @@ namespace Rubickanov.UI.Tests
             a.ThrowOnBind = new InvalidOperationException("boom");
             var vm = new FakeViewModel();
 
-            Assert.ThrowsAsync<InvalidOperationException>(async () => await _ui.Show<ScreenA>(vm));
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await _ui.Show<ScreenA, FakeViewModel>(vm));
 
             Assert.AreEqual(ViewState.Hidden, a.State);
             Assert.IsNull(_ui.DebugActiveScreen);
@@ -241,10 +220,10 @@ namespace Rubickanov.UI.Tests
         {
             var a = await Registered<ScreenA>();
             var b = await Registered<ScreenB>();
-            await _ui.Show<ScreenA>(new FakeViewModel());
+            await _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
             b.ThrowOnBind = new InvalidOperationException("boom");
 
-            Assert.ThrowsAsync<InvalidOperationException>(async () => await _ui.Show<ScreenB>(new FakeViewModel()));
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await _ui.Show<ScreenB, FakeViewModel>(new FakeViewModel()));
 
             Assert.AreEqual(ViewState.Shown, a.State);
             Assert.AreSame(a, _ui.DebugActiveScreen);
@@ -256,7 +235,7 @@ namespace Rubickanov.UI.Tests
             var animation = new ControlledAnimation();
             var a = await Registered<ScreenA>(animation);
             var vm = new FakeViewModel();
-            var show = _ui.Show<ScreenA>(vm);
+            var show = _ui.Show<ScreenA, FakeViewModel>(vm);
 
             animation.FailShow(new InvalidOperationException("boom"));
 
@@ -276,12 +255,12 @@ namespace Rubickanov.UI.Tests
             var a = await Registered<HudA>(animation);
             var firstVm = new FakeViewModel();
             var secondVm = new FakeViewModel();
-            var firstShow = _ui.Show<HudA>(firstVm);
+            var firstShow = _ui.Show<HudA, FakeViewModel>(firstVm);
             animation.CompleteShow();
             await firstShow;
 
             var hide = _ui.HideAsync<HudA>();
-            var secondShow = _ui.Show<HudA>(secondVm);
+            var secondShow = _ui.Show<HudA, FakeViewModel>(secondVm);
 
             Assert.AreEqual(ViewState.Showing, a.State);
             Assert.AreSame(secondVm, a.LastViewModel);
@@ -304,12 +283,12 @@ namespace Rubickanov.UI.Tests
             var animation = new ControlledAnimation();
             var a = await Registered<HudA>(animation);
             var vm = new FakeViewModel();
-            var firstShow = _ui.Show<HudA>(vm);
+            var firstShow = _ui.Show<HudA, FakeViewModel>(vm);
             animation.CompleteShow();
             await firstShow;
 
             var hide = _ui.HideAsync<HudA>();
-            var secondShow = _ui.Show<HudA>(vm);
+            var secondShow = _ui.Show<HudA, FakeViewModel>(vm);
             animation.CompleteShow();
             await hide;
             await secondShow;
@@ -325,7 +304,7 @@ namespace Rubickanov.UI.Tests
             var animation = new ControlledAnimation();
             var a = await Registered<HudA>(animation);
             var vm = new FakeViewModel();
-            var show = _ui.Show<HudA>(vm);
+            var show = _ui.Show<HudA, FakeViewModel>(vm);
 
             var hide = _ui.HideAsync<HudA>();
 
@@ -349,7 +328,7 @@ namespace Rubickanov.UI.Tests
             var animation = new ControlledAnimation();
             var a = await Registered<HudA>(animation);
             var vm = new FakeViewModel();
-            var show = _ui.Show<HudA>(vm);
+            var show = _ui.Show<HudA, FakeViewModel>(vm);
 
             _ui.Hide<HudA>();
             await show;
@@ -368,8 +347,8 @@ namespace Rubickanov.UI.Tests
             var vmA = new FakeViewModel();
             var vmB = new FakeViewModel();
 
-            var showA = _ui.Show<ScreenA>(vmA);
-            var showB = _ui.Show<ScreenB>(vmB);
+            var showA = _ui.Show<ScreenA, FakeViewModel>(vmA);
+            var showB = _ui.Show<ScreenB, FakeViewModel>(vmB);
 
             Assert.AreSame(b, _ui.DebugActiveScreen);
             Assert.AreEqual(ViewState.Hiding, a.State);
@@ -398,9 +377,9 @@ namespace Rubickanov.UI.Tests
             var vmA2 = new FakeViewModel();
             var vmB = new FakeViewModel();
 
-            var showA1 = _ui.Show<ScreenA>(vmA1);
-            var showB = _ui.Show<ScreenB>(vmB);
-            var showA2 = _ui.Show<ScreenA>(vmA2);
+            var showA1 = _ui.Show<ScreenA, FakeViewModel>(vmA1);
+            var showB = _ui.Show<ScreenB, FakeViewModel>(vmB);
+            var showA2 = _ui.Show<ScreenA, FakeViewModel>(vmA2);
             animationA.CompleteShow();
             animationB.CompleteHide();
             await showA1;
@@ -422,7 +401,7 @@ namespace Rubickanov.UI.Tests
         {
             var hud = await Registered<HudA>();
 
-            await _ui.Show<HudA>(new FakeViewModel());
+            await _ui.Show<HudA, FakeViewModel>(new FakeViewModel());
 
             Assert.AreEqual(ViewState.Shown, hud.State);
             Assert.IsNull(_ui.DebugActiveScreen);
@@ -434,51 +413,79 @@ namespace Rubickanov.UI.Tests
         {
             var a = await Registered<ScreenA>();
 
-            await _ui.Show<ScreenA>(new FakeViewModel());
+            await _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
 
             Assert.AreEqual(PickingMode.Position, a.Root.pickingMode);
         }
 
         [Test]
-        public async Task HideScreen_HudShown_HidesScreenAndLeavesHud()
+        public async Task ShowOverlay_InterceptsInput_CapturesPointerAndAnswersBack()
         {
-            var hud = await Registered<HudA>();
-            var screen = await Registered<ScreenA>();
-            await _ui.Show<HudA>(new FakeViewModel());
-            await _ui.Show<ScreenA>(new FakeViewModel());
+            var overlay = await Registered<InputOverlay>();
 
-            _ui.HideScreen();
+            await _ui.Show<InputOverlay, FakeViewModel>(new FakeViewModel());
+            var consumed = _ui.Back();
 
-            Assert.AreEqual(ViewState.Shown, hud.State);
-            Assert.AreEqual(ViewState.Hidden, screen.State);
-            Assert.IsNull(_ui.DebugActiveScreen);
+            Assert.IsTrue(_ui.PointerCaptured.CurrentValue);
+            Assert.IsTrue(consumed);
+            Assert.AreEqual(1, overlay.BackCalls);
+            Assert.AreEqual(PickingMode.Position, overlay.Root.pickingMode);
+        }
+
+        [Test]
+        public async Task HideOverlay_InterceptsInput_ReleasesPointerAndBack()
+        {
+            var overlay = await Registered<InputOverlay>();
+            await _ui.Show<InputOverlay, FakeViewModel>(new FakeViewModel());
+
+            _ui.Hide<InputOverlay>();
+
             Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+            Assert.IsFalse(_ui.Back());
+            Assert.AreEqual(0, overlay.BackCalls);
         }
 
         [Test]
-        public async Task HideScreenAsync_ClearsAtOnceAndHidesAfterAnimation()
+        public async Task Back_OverlayOverScreen_OverlayAnswersFirst()
         {
-            var animation = new ControlledAnimation();
-            var a = await Registered<ScreenA>(animation);
-            var show = _ui.Show<ScreenA>(new FakeViewModel());
-            animation.CompleteShow();
-            await show;
+            var overlay = await Registered<InputOverlay>();
+            var screen = await Registered<ScreenA>();
+            await _ui.Show<InputOverlay, FakeViewModel>(new FakeViewModel());
+            await _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
 
-            var hide = _ui.HideScreenAsync();
+            _ui.Back();
 
-            Assert.IsNull(_ui.DebugActiveScreen);
-            Assert.AreEqual(ViewState.Hiding, a.State);
-            animation.CompleteHide();
-            await hide;
-            Assert.AreEqual(ViewState.Hidden, a.State);
+            Assert.AreEqual(1, overlay.BackCalls);
+            Assert.AreEqual(ViewState.Shown, screen.State);
         }
 
         [Test]
-        public async Task HideScreenAsync_NoScreen_NoOp()
+        public async Task ShowOverlayTwice_InterceptsInput_HoldsOneCapture()
         {
-            await _ui.HideScreenAsync();
+            await Registered<InputOverlay>();
+            await _ui.Show<InputOverlay, FakeViewModel>(new FakeViewModel());
 
-            Assert.IsNull(_ui.DebugActiveScreen);
+            await _ui.Show<InputOverlay, FakeViewModel>(new FakeViewModel());
+            _ui.Hide<InputOverlay>();
+
+            Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
+            Assert.AreEqual(0, _ui.DebugBackStackDepth);
+        }
+
+        // ── Animation target ─────────────────────────────────────
+
+        [Test]
+        public async Task Show_AnimationTargetOverridden_AnimationPlaysOnIt()
+        {
+            var animation = new RecordingAnimation();
+            var view = await Registered<StripHud>(animation);
+
+            await _ui.Show<StripHud, FakeViewModel>(new FakeViewModel());
+            await _ui.HideAsync<StripHud>();
+
+            CollectionAssert.AreEqual(new[] { view.Strip, view.Strip }, animation.Targets);
+            CollectionAssert.Contains(animation.Resets, view.Strip);
+            CollectionAssert.DoesNotContain(animation.Resets, view.Root);
         }
 
         // ── Hide ─────────────────────────────────────────────────
@@ -494,7 +501,7 @@ namespace Rubickanov.UI.Tests
         {
             var a = await Registered<ScreenA>();
             var vm = new FakeViewModel();
-            await _ui.Show<ScreenA>(vm);
+            await _ui.Show<ScreenA, FakeViewModel>(vm);
 
             _ui.Hide<ScreenA>();
 
@@ -513,7 +520,7 @@ namespace Rubickanov.UI.Tests
             var events = new List<bool>();
             using var subscription = _ui.PointerCaptured.Subscribe(events.Add);
 
-            await _ui.Show<ScreenA>(new FakeViewModel());
+            await _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
             var capturedWhileShown = _ui.PointerCaptured.CurrentValue;
             _ui.Hide<ScreenA>();
 
@@ -526,7 +533,7 @@ namespace Rubickanov.UI.Tests
         public async Task CapturePointer_ViewAndHandle_ReleasedOnlyWhenBothRelease()
         {
             await Registered<ScreenA>();
-            await _ui.Show<ScreenA>(new FakeViewModel());
+            await _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
             var handle = _ui.CapturePointer();
 
             _ui.Hide<ScreenA>();
@@ -543,7 +550,7 @@ namespace Rubickanov.UI.Tests
         {
             await Registered<HudA>();
 
-            await _ui.Show<HudA>(new FakeViewModel());
+            await _ui.Show<HudA, FakeViewModel>(new FakeViewModel());
 
             Assert.IsFalse(_ui.PointerCaptured.CurrentValue);
         }
@@ -553,7 +560,7 @@ namespace Rubickanov.UI.Tests
         {
             var animation = new ControlledAnimation();
             await Registered<ScreenA>(animation);
-            var show = _ui.Show<ScreenA>(new FakeViewModel());
+            var show = _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
             animation.CompleteShow();
             await show;
 
@@ -571,9 +578,9 @@ namespace Rubickanov.UI.Tests
         {
             await Registered<ScreenA>();
             await Registered<ScreenB>();
-            await _ui.Show<ScreenA>(new FakeViewModel());
+            await _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
 
-            await _ui.Show<ScreenB>(new FakeViewModel());
+            await _ui.Show<ScreenB, FakeViewModel>(new FakeViewModel());
             var capturedWithB = _ui.PointerCaptured.CurrentValue;
             _ui.Hide<ScreenB>();
 
@@ -593,7 +600,7 @@ namespace Rubickanov.UI.Tests
         public async Task Back_ScreenOnly_ReturnsFalseAndScreenStays()
         {
             var screen = await Registered<ScreenA>();
-            await _ui.Show<ScreenA>(new FakeViewModel());
+            await _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
 
             var consumed = _ui.Back();
 
@@ -634,7 +641,7 @@ namespace Rubickanov.UI.Tests
         {
             var a = await Registered<ScreenA>();
             var vm = new FakeViewModel();
-            await _ui.Show<ScreenA>(vm);
+            await _ui.Show<ScreenA, FakeViewModel>(vm);
 
             _ui.Unregister<ScreenA>();
 
@@ -667,7 +674,7 @@ namespace Rubickanov.UI.Tests
             var a = await Registered<ScreenA>();
             await _ui.Register<UxmlPopup>();
             var vm = new FakeViewModel();
-            await _ui.Show<ScreenA>(vm);
+            await _ui.Show<ScreenA, FakeViewModel>(vm);
 
             _ui.Dispose();
 
@@ -689,12 +696,12 @@ namespace Rubickanov.UI.Tests
         {
             var view = await Registered<ScreenA>();
             var vm = new FakeViewModel();
-            await _ui.Show<ScreenA>(vm);
+            await _ui.Show<ScreenA, FakeViewModel>(vm);
             view.ThrowOnUnbind = new InvalidOperationException("boom");
 
             Assert.Throws<InvalidOperationException>(() => _ui.Hide<ScreenA>());
             view.ThrowOnUnbind = null;
-            await _ui.Show<ScreenA>(new FakeViewModel());
+            await _ui.Show<ScreenA, FakeViewModel>(new FakeViewModel());
 
             Assert.AreEqual(1, vm.DisposeCalls);
             Assert.AreEqual(1, view.UnbindCalls);

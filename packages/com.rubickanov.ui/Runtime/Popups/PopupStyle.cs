@@ -1,42 +1,24 @@
 namespace Rubickanov.UI
 {
-    /// <summary>
-    /// USS class names used by the flexible popup system.
-    /// </summary>
+    /// <summary>USS class names of the popup elements. The package sets layout only; how a popup looks is the game's.</summary>
     public static class PopupStyle
     {
-        public const string Backdrop = "popup-backdrop";
-        public const string Panel = "popup-panel";
-        public const string Title = "popup-title";
-        public const string Icon = "popup-icon";
-        public const string Message = "popup-message";
-        public const string Content = "popup-content";
-        public const string Input = "popup-input";
-        public const string Buttons = "popup-buttons";
-        public const string Button = "popup-btn";
-        public const string ButtonPrimary = "popup-btn--primary";
-        public const string Close = "popup-close";
+        /// <summary>The element over the whole layer that holds the panel; the backdrop of a modal popup.</summary>
+        public const string Frame = "popup-frame";
 
-        // Modifiers
+        /// <summary>On the frame of a modal popup: the dim behind it.</summary>
+        public const string Backdrop = "popup-backdrop";
+
+        public const string Panel = "popup-panel";
+
+        /// <summary>On the content inside the panel: the built element or the view's root.</summary>
+        public const string Content = "popup-content";
+
+        // Modifiers on the panel
         public const string Modal = "popup--modal";
         public const string Passive = "popup--passive";
-        public const string Dialog = "popup--dialog";
-        public const string Tooltip = "popup--tooltip";
-        /// <summary>A popup view: no panel chrome, the view draws itself.</summary>
-        public const string View = "popup--view";
-        public const string SideTop = "popup--side-top";
-        public const string SideBottom = "popup--side-bottom";
-        public const string SideLeft = "popup--side-left";
-        public const string SideRight = "popup--side-right";
 
-        /// <summary>Maps a resolved side to its modifier class.</summary>
-        public static string SideClass(PopupSide side) => side switch
-        {
-            PopupSide.Top => SideTop,
-            PopupSide.Bottom => SideBottom,
-            PopupSide.Left => SideLeft,
-            PopupSide.Right => SideRight,
-            _ => SideBottom
-        };
+        /// <summary>A popup view (<c>ShowView</c>): stretched over the layer, the view draws itself.</summary>
+        public const string View = "popup--view";
     }
 }

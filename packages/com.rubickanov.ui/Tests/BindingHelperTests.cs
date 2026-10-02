@@ -22,7 +22,7 @@ namespace Rubickanov.UI.Tests
             _warning = new ReactiveProperty<bool>(false);
             _ui.Register<BindingView>().GetAwaiter().GetResult();
             _view = _ui.Get<BindingView>();
-            _ui.Show<BindingView>(new BindingViewModel(_speed, _visible, _warning)).GetAwaiter().GetResult();
+            _ui.Show<BindingView, BindingViewModel>(new BindingViewModel(_speed, _visible, _warning)).GetAwaiter().GetResult();
         }
 
         [TearDown]
@@ -87,7 +87,7 @@ namespace Rubickanov.UI.Tests
             vm.Name.Value = "Kestrel";
             vm.Volume.Value = 0.25f;
             vm.Invert.Value = true;
-            await _ui.Show<TwoWayView>(vm);
+            await _ui.Show<TwoWayView, TwoWayViewModel>(vm);
 
             var applied = (view.Name.value, view.Volume.value, view.Invert.value);
             vm.Name.Value = "Heron";
@@ -98,6 +98,39 @@ namespace Rubickanov.UI.Tests
             Assert.AreEqual("Heron", view.Name.value);
             Assert.AreEqual(0.75f, view.Volume.value);
             Assert.IsFalse(view.Invert.value);
+        }
+
+        public sealed class DropdownViewModel : ViewModelBase
+        {
+            public readonly System.Collections.Generic.List<int> Picked = new();
+            public ReactiveProperty<int> Quality { get; }
+
+            public DropdownViewModel(int quality) => Quality = CreateProperty(quality);
+        }
+
+        public sealed class DropdownView : View<DropdownViewModel>
+        {
+            public static readonly System.Collections.Generic.List<string> Choices = new() { "Low", "Medium", "High" };
+
+            public DropdownField Quality { get; } = new();
+            public DropdownField Language { get; } = new();
+
+            protected override string? UxmlName => null;
+            protected override UILayer Layer => UILayer.HUD;
+
+            protected override void OnInitialize()
+            {
+                Root.Add(Quality);
+                Root.Add(Language);
+            }
+
+            protected override void OnBind()
+            {
+                BindDropdown(Quality, ViewModel.Quality, Choices);
+                var picked = ViewModel.Picked;
+                BindDropdown(Language, new System.Collections.Generic.List<string> { "EN", "DE", "RU" }, 2,
+                    index => picked.Add(index));
+            }
         }
 
         public sealed class TwoWayViewModel : ViewModelBase

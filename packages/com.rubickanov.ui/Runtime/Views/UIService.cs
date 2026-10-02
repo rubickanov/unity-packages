@@ -6,7 +6,7 @@ using UnityEngine.UIElements;
 
 namespace Rubickanov.UI
 {
-    public class UIService : IUIService, IDisposable
+    public class UIService : IUIService, IDetachedViews, IDisposable
     {
         private readonly UxmlLoader _loadUxml;
         private readonly UILayerElements _layers;
@@ -20,6 +20,7 @@ namespace Rubickanov.UI
         private readonly ReactiveProperty<bool> _pointerCaptured = new(false);
         private int _captureCount;
         private readonly List<BackHandler> _backHandlers = new();
+        private bool _navigateBackPending;
         private bool _disposed;
 
         /// <param name="root">
@@ -71,16 +72,15 @@ namespace Rubickanov.UI
             _loading[type] = token;
 
             var view = Activator.CreateInstance<T>();
-            var cache = new UxmlCache();
+            UxmlCache cache;
             try
             {
-                await LoadUxml(cache, view, type);
+                cache = await LoadUxml(view.ResolveUxmlName(), type);
             }
             catch
             {
                 if (_loading.TryGetValue(type, out var current) && current == token)
                     _loading.Remove(type);
-                cache.Release();
                 throw;
             }
 
@@ -104,8 +104,7 @@ namespace Rubickanov.UI
 
             try
             {
-                cache.TryGet(type, out var asset);
-                view.Root = asset != null ? asset.CloneTree() : new VisualElement();
+                view.Root = cache.Asset != null ? cache.Asset.CloneTree() : new VisualElement();
                 view.Uxml = cache;
                 view.OwnsUxml = true;
                 view.Root.pickingMode = PickingMode.Ignore;
@@ -127,33 +126,17 @@ namespace Rubickanov.UI
             _viewLayers[type] = layer;
         }
 
-        private async UniTask LoadUxml(UxmlCache cache, View view, Type viewType)
+        private async UniTask<UxmlCache> LoadUxml(string? uxmlName, Type viewType)
         {
-            var uxmlName = view.ResolveUxmlName();
-            VisualTreeAsset? asset = null;
-            if (uxmlName != null)
-            {
-                var (loaded, handle) = await _loadUxml(uxmlName);
-                cache.AddHandle(handle);
-                if (loaded == null)
-                    throw new InvalidOperationException(
-                        $"Failed to load UXML '{uxmlName}' for view {viewType.Name}.");
-                asset = loaded;
-            }
-            cache.Add(viewType, asset);
+            if (uxmlName == null) return new UxmlCache(null, null);
 
-            var children = view.ResolveChildViews();
-            for (int i = 0; i < children.Count; i++)
+            var (asset, handle) = await _loadUxml(uxmlName);
+            if (asset == null)
             {
-                var childType = children[i];
-                if (cache.Contains(childType)) continue;
-                if (childType == null || childType.IsAbstract || !typeof(View).IsAssignableFrom(childType))
-                    throw new InvalidOperationException(
-                        $"View {viewType.Name} lists '{childType?.Name}' in ChildViews, which is not a concrete view type.");
-
-                var child = (View)Activator.CreateInstance(childType);
-                await LoadUxml(cache, child, childType);
+                handle?.Dispose();
+                throw new InvalidOperationException($"Failed to load UXML '{uxmlName}' for view {viewType.Name}.");
             }
+            return new UxmlCache(asset, handle);
         }
 
         public void Unregister<T>() where T : View
@@ -163,7 +146,7 @@ namespace Rubickanov.UI
             if (_popupViews.Remove(type, out var popupView))
             {
                 // Popups still showing it keep the UXML until they close.
-                ReleaseTemplate(popupView);
+                popupView.ReleaseUxml();
                 return;
             }
             if (!_views.TryGetValue(type, out var view)) return;
@@ -173,13 +156,6 @@ namespace Rubickanov.UI
             RemoveFromScreen(view);
             _history.RemoveAll(entry => entry.ViewType == type);
             view.Destroy();
-        }
-
-        private static void ReleaseTemplate(View template)
-        {
-            if (!template.OwnsUxml) return;
-            template.OwnsUxml = false;
-            template.Uxml?.Release();
         }
 
         /// <exception cref="InvalidOperationException">
@@ -196,13 +172,13 @@ namespace Rubickanov.UI
             throw new InvalidOperationException($"View {typeof(T).Name} is not registered in UIService.");
         }
 
-        public async UniTask Show<T>(ViewModelBase viewModel) where T : View
+        public async UniTask Show<TView, TViewModel>(TViewModel viewModel)
+            where TView : View<TViewModel>
+            where TViewModel : ViewModelBase
         {
             if (viewModel == null) throw new ArgumentNullException(nameof(viewModel));
 
-            var view = Get<T>();
-            EnsureViewModelType(view, viewModel);
-            await ShowView(view, viewModel, _history.Clear);
+            await ShowView(Get<TView>(), viewModel, _history.Clear);
         }
 
         /// <param name="onScreenShown">
@@ -230,8 +206,12 @@ namespace Rubickanov.UI
                     ReleaseInput(previous);
                     previous.HideAsync().Forget();
                 }
-                AcquireInput(view);
+                AcquireInput(view, bottom: true);
                 onScreenShown();
+            }
+            else if (view.ResolveInterceptsInput() && view.BackHandle == null)
+            {
+                AcquireInput(view, bottom: false);
             }
 
             try
@@ -249,38 +229,37 @@ namespace Rubickanov.UI
             }
         }
 
-        private static void EnsureViewModelType(View view, ViewModelBase viewModel)
-        {
-            if (!view.ViewModelType.IsInstanceOfType(viewModel))
-                throw new ArgumentException(
-                    $"View {view.GetType().Name} expects a view model of type {view.ViewModelType.Name}, " +
-                    $"got {viewModel.GetType().Name}.", nameof(viewModel));
-        }
-
         // ── Screen history ───────────────────────────────────────
 
         public bool CanNavigateBack => _history.Count > 1;
 
-        public async UniTask Navigate<T>(Func<ViewModelBase> createViewModel) where T : View
+        public async UniTask Navigate<TView, TViewModel>(Func<TViewModel> createViewModel)
+            where TView : View<TViewModel>
+            where TViewModel : ViewModelBase
         {
             if (createViewModel == null) throw new ArgumentNullException(nameof(createViewModel));
 
-            var type = typeof(T);
-            var view = Get<T>();
+            var type = typeof(TView);
+            var view = Get<TView>();
             if (_viewLayers[type] != UILayer.Screen)
                 throw new InvalidOperationException(
                     $"View {type.Name} is on the {_viewLayers[type]} layer: only screens are navigated to.");
 
-            var viewModel = CreateViewModel(view, createViewModel);
+            Func<ViewModelBase> create = createViewModel;
+            var viewModel = CreateViewModel(view, create);
             await ShowView(view, viewModel, () =>
             {
                 var existing = _history.FindIndex(entry => entry.ViewType == type);
                 if (existing >= 0) _history.RemoveRange(existing, _history.Count - existing);
-                _history.Add(new HistoryEntry(type, createViewModel));
+                _history.Add(new HistoryEntry(type, create));
             });
         }
 
-        public async UniTask<bool> NavigateBack()
+        /// <summary>
+        /// Shows the previous screen of the history with a new view model from its factory. Returns false, changing
+        /// nothing, when there is none.
+        /// </summary>
+        internal async UniTask<bool> NavigateBack()
         {
             if (!CanNavigateBack) return false;
 
@@ -291,30 +270,28 @@ namespace Rubickanov.UI
             return true;
         }
 
-        /// <summary>The default <c>OnBack</c> of a screen: goes back when the screen is the history's current one.</summary>
+        /// <summary>
+        /// The default <c>OnBack</c> of a screen: when the screen is the history's current one, goes back once the back
+        /// handler has returned, so the screen's override still has its view model after <c>base.OnBack()</c>.
+        /// </summary>
         internal bool NavigateBackFrom(View screen)
         {
             if (!CanNavigateBack || _activeScreen != screen) return false;
 
-            NavigateBack().Forget();
+            _navigateBackPending = true;
             return true;
         }
 
-        private static ViewModelBase CreateViewModel(View view, Func<ViewModelBase> createViewModel)
+        private void RunPendingNavigation()
         {
-            var viewModel = createViewModel()
-                ?? throw new InvalidOperationException($"The view model factory of {view.GetType().Name} returned null.");
-            try
-            {
-                EnsureViewModelType(view, viewModel);
-            }
-            catch
-            {
-                viewModel.Dispose();
-                throw;
-            }
-            return viewModel;
+            if (!_navigateBackPending) return;
+            _navigateBackPending = false;
+            NavigateBack().Forget();
         }
+
+        private static ViewModelBase CreateViewModel(View view, Func<ViewModelBase> createViewModel) =>
+            createViewModel()
+            ?? throw new InvalidOperationException($"The view model factory of {view.GetType().Name} returned null.");
 
         private readonly struct HistoryEntry
         {
@@ -335,14 +312,14 @@ namespace Rubickanov.UI
         /// layer and the screen, bound to <paramref name="viewModel"/> and shown. The caller adds its root and destroys
         /// it; until then it holds the UXML, even through <see cref="Unregister{T}"/>.
         /// </summary>
-        internal View CreateDetached(Type viewType, ViewModelBase viewModel)
+        View IDetachedViews.CreateDetached(Type viewType, ViewModelBase viewModel)
         {
             if (viewModel == null) throw new ArgumentNullException(nameof(viewModel));
+            if (_disposed) throw new ObjectDisposedException(nameof(UIService));
             if (!_views.TryGetValue(viewType, out var registered) && !_popupViews.TryGetValue(viewType, out registered))
                 throw new InvalidOperationException(
                     $"View {viewType.Name} is not registered in UIService: register it to load its UXML before " +
                     "showing it in a popup.");
-            EnsureViewModelType(registered, viewModel);
 
             var uxml = registered.Uxml!;
             uxml.Retain();
@@ -353,12 +330,12 @@ namespace Rubickanov.UI
             {
                 view.InitializeFrom(uxml, $"view {viewType.Name} is being unregistered");
                 view.Owner = this;
-                view.ShowAsChild(viewModel);
+                view.ShowDetached(viewModel);
             }
             catch
             {
                 if (view.Root != null) view.Destroy();
-                else ReleaseTemplate(view);
+                else view.ReleaseUxml();
                 throw;
             }
             return view;
@@ -380,20 +357,6 @@ namespace Rubickanov.UI
             return view.HideAsync();
         }
 
-        public void HideScreen() => TakeScreen()?.Hide();
-
-        public UniTask HideScreenAsync() => TakeScreen()?.HideAsync() ?? UniTask.CompletedTask;
-
-        /// <summary>Clears the active screen and the history, returning the screen.</summary>
-        private View? TakeScreen()
-        {
-            var screen = _activeScreen;
-            _activeScreen = null;
-            _history.Clear();
-            if (screen != null) ReleaseInput(screen);
-            return screen;
-        }
-
         private void RemoveFromScreen(View view)
         {
             if (_activeScreen == view)
@@ -404,17 +367,18 @@ namespace Rubickanov.UI
             ReleaseInput(view);
         }
 
-        // ── Input: pointer capture and back stack (D8, D9) ───────
+        // ── Input: pointer capture and back stack ────────────────
 
         /// <summary>
-        /// Takes a fresh capture and back handler for the visible screen. Its handler goes under all the others, so
-        /// whatever is open over the screen answers Back first, even when it opened before the screen was shown.
+        /// Takes a fresh capture and back handler for a view that takes input. The visible screen's handler goes under
+        /// all the others (<paramref name="bottom"/>), so whatever is open over the screen answers Back first, even when
+        /// it opened before the screen was shown.
         /// </summary>
-        private void AcquireInput(View screen)
+        private void AcquireInput(View view, bool bottom)
         {
-            ReleaseInput(screen);
-            screen.PointerCapture = CapturePointer();
-            screen.BackHandle = AddBackHandler(screen.HandleBack, bottom: true);
+            ReleaseInput(view);
+            view.PointerCapture = CapturePointer();
+            view.BackHandle = AddBackHandler(view.HandleBack, bottom);
         }
 
         private static void ReleaseInput(View view)
@@ -467,13 +431,20 @@ namespace Rubickanov.UI
 
             // Snapshot: a handler usually removes itself (a popup hides) or pushes another.
             var snapshot = _backHandlers.ToArray();
-            for (int i = snapshot.Length - 1; i >= 0; i--)
+            try
             {
-                var entry = snapshot[i];
-                if (entry.Removed) continue;
-                if (entry.Handler()) return true;
+                for (int i = snapshot.Length - 1; i >= 0; i--)
+                {
+                    var entry = snapshot[i];
+                    if (entry.Removed) continue;
+                    if (entry.Handler()) return true;
+                }
+                return false;
             }
-            return false;
+            finally
+            {
+                RunPendingNavigation();
+            }
         }
 
         private sealed class PointerCaptureHandle : IDisposable
@@ -515,6 +486,7 @@ namespace Rubickanov.UI
             if (_disposed) return;
 
             _loading.Clear();
+            _navigateBackPending = false;
             _activeScreen = null;
             _history.Clear();
             foreach (var view in _views.Values) ReleaseInput(view);
@@ -527,7 +499,7 @@ namespace Rubickanov.UI
             }
             foreach (var template in _popupViews.Values)
             {
-                try { ReleaseTemplate(template); }
+                try { template.ReleaseUxml(); }
                 catch (Exception ex) { (errors ??= new List<Exception>()).Add(ex); }
             }
 
