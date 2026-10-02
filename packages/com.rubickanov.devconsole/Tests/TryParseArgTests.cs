@@ -101,9 +101,71 @@ namespace Rubickanov.DevConsole.Tests
             Assert.AreEqual("hello", ((MyType)result!).Value);
         }
 
+        [TestCase("abc", typeof(int))]
+        [TestCase("99999999999", typeof(int))]
+        [TestCase("1.2.3", typeof(float))]
+        [TestCase("-1", typeof(ulong))]
+        [TestCase("x", typeof(long))]
+        [TestCase("yes", typeof(bool))]
+        [TestCase("Purple", typeof(KeyCode))]
+        [TestCase("1,x,3", typeof(Vector3))]
+        public void TryParseArg_InvalidInput_ReturnsFalse(string input, System.Type type)
+        {
+            Assert.IsFalse(_registry.TryParseArg(input, type, out _));
+        }
+
+        [TestCase("Space", KeyCode.Space)]
+        [TestCase("space", KeyCode.Space)]
+        [TestCase("32", KeyCode.Space)]
+        public void TryParseArg_EnumNameOrNumber_Parses(string input, KeyCode expected)
+        {
+            Assert.IsTrue(_registry.TryParseArg(input, typeof(KeyCode), out var result));
+            Assert.AreEqual(expected, result);
+        }
+
+        [Test]
+        public void TryParseArg_FlagsEnumCommaList_CombinesTheValues()
+        {
+            Assert.IsTrue(_registry.TryParseArg("ctrl,shift", typeof(KeyModifiers), out var result));
+            Assert.AreEqual(KeyModifiers.Ctrl | KeyModifiers.Shift, result);
+        }
+
+        [Test]
+        public void TryParseArg_FloatWithThousandsSeparator_ParsesAsBefore()
+        {
+            Assert.IsTrue(_registry.TryParseArg("1,000.5", typeof(float), out var result));
+            Assert.AreEqual(1000.5f, (float)result!, 1e-3f);
+        }
+
+        [Test]
+        public void TryParseArg_CustomParserThrows_ReturnsFalse()
+        {
+            _registry.RegisterParser<MyType>(_ => throw new System.InvalidOperationException("no players loaded"));
+
+            Assert.IsFalse(_registry.TryParseArg("bob", typeof(MyType), out _));
+        }
+
+        [Test]
+        public void Execute_CustomParserThrows_ReturnsAnErrorInsteadOfThrowing()
+        {
+            _registry.RegisterParser<MyType>(_ => throw new System.InvalidOperationException("no players loaded"));
+            _registry.RegisterTarget(new Kick());
+
+            var result = _registry.Execute("kick bob");
+
+            Assert.IsFalse(result.Success);
+            StringAssert.Contains("bob", result.Message ?? "");
+        }
+
         private class MyType
         {
             public string Value = "";
+        }
+
+        private class Kick
+        {
+            [ConsoleCommand("kick")]
+            public void Run(MyType player) { }
         }
     }
 }
