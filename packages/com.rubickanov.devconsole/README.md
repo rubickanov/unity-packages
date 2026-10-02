@@ -1,72 +1,72 @@
 # Dev Console
 
-In-game developer console with attribute-based command auto-discovery, autocomplete, subcommands, and persistent history.
-
-## Enabling
-
-Every assembly in this package is constrained to the `ENABLE_CONSOLE` scripting define.
-Without it nothing here compiles — not the runtime, not the editor window, not the tests —
-so a console cannot reach a player build by being forgotten. Add `ENABLE_CONSOLE` to the
-scripting defines of the build profiles that should have one (Project Settings → Player →
-Scripting Define Symbols, or per profile in Build Profiles).
-
-Two consequences worth knowing. Code that names types from this package has to live in an
-assembly carrying the same constraint, or it will fail to compile when the define is absent.
-And a console placed in a scene by hand becomes a missing script in builds without the
-define, because scene data is not gated by defines — create it from a constrained assembly
-instead.
+In-game developer console: an IMGUI window with attribute-discovered commands, word-by-word autocomplete, subcommand groups, aliases, key bindings and a history kept in plain files.
 
 ## Dependencies
 
 - `com.unity.inputsystem` — keyboard input for the toggle key and key bindings
+- `com.rubickanov.log` (optional) — when present, the `Rubickanov.DevConsole.Log` assembly adds `log channels` and `log level`
 
 Requires Unity 6000.0+.
 
 ## Architecture
 
 ```
-[ConsoleCommand] attribute (on static / instance methods)
-        │
-        ▼
-  CommandRegistry (singleton, reflection discovery + runtime registration)
-        │
-        ▼
-  RegisteredCommand (metadata + handler + per-arg autocomplete providers)
-        │
-        ▼
-  DevConsoleUIToolkit / DevConsoleIMGUI (MonoBehaviour frontends)
-        │
-        ▼
-  ConsoleLog (static ring buffer, 1000 entries)
+[ConsoleCommand] static methods ──► CommandRegistry.Instance ◄── Register / RegisterTarget / Group
+                                     ├── Aliases, Bindings   ── persistentDataPath/console/config.cfg
+                                     └── History             ── persistentDataPath/console/history.txt
+first frame (ConsoleStartup): discover ─► autoexec.cfg ─► -command lines
+DevConsoleWindow ──ExecuteAndLog──► CommandRegistry ──► ConsoleLog (ring buffer, 1000 entries)
+CommandBindings  ──ExecuteAndLog──┘          Unity log ──► ConsoleLog
 ```
 
-A frontend calls `CommandRegistry.Instance.Initialize()` on awake, which scans assemblies for `[ConsoleCommand]` static methods and registers the built-in commands. Commands write to the static `ConsoleLog`; frontends render it by subscribing to `OnLogAdded` / `OnCleared`.
+The package creates the window before the first scene loads and starts the console on the first frame. Commands
+write to the static `ConsoleLog`; the window draws it, and every Unity log message is copied into it.
 
 ## Assemblies
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **Rubickanov.DevConsole.Runtime** | Yes | Commands, registry, autocomplete, console log, UI frontends |
-| **Rubickanov.DevConsole.Editor** | Editor | Project Settings provider |
+| **Rubickanov.DevConsole.Runtime** | Yes | Registry, built-in commands, autocomplete, log, window, bindings |
+| **Rubickanov.DevConsole.Log** | Yes | `log channels` and `log level` over `com.rubickanov.log`; compiled only when that package is installed |
+| **Rubickanov.DevConsole.Editor** | Editor | Project Settings page, settings file |
+
+Every assembly, tests included, is constrained to the `ENABLE_CONSOLE` scripting define: without it nothing here
+compiles, so a console cannot reach a player build by being forgotten. Code that names types from this package has to
+live in an assembly with the same constraint.
 
 ## Core Concepts
 
-**CommandRegistry** — Singleton that discovers all `[ConsoleCommand]`-attributed static methods at startup via reflection, and supports runtime registration. Owns parsing, argument conversion, execution, and autocomplete.
+**CommandRegistry** — The console itself: the commands (discovered and registered), their parsing and execution,
+autocomplete, and the console's aliases, bindings and history. `CommandRegistry.Instance` is the one the window uses.
 
-**ConsoleLog** — Static ring buffer (1000 entries) with typed levels (`Info`, `Warning`, `Error`, `Success`, `Input`). Decoupled from any frontend; UIs subscribe to `OnLogAdded` / `OnCleared`.
+**ConsoleLog** — Static ring buffer (1000 entries) with typed levels (`Info`, `Warning`, `Error`, `Success`, `Input`).
+The window renders it; any other UI can subscribe to `OnLogAdded` / `OnCleared`.
 
-**IAutoCompleteProvider** — Per-argument suggestion source. Built-in providers handle `bool` and `enum` parameters automatically; custom providers implement `GetSuggestions(string partial, List<string> results)`.
+**IAutoCompleteProvider** — Per-argument suggestion source. `bool` and `enum` parameters get one automatically.
+
+**The first frame** — The console starts once per process on the first frame's Update, before any
+`MonoBehaviour.Update`: after every `Awake`, `OnEnable` and `Start` of the first scene and after VContainer's
+`IStartable` and `IPostStartable`, which run in EarlyUpdate. It discovers the commands, runs `autoexec.cfg`, then the
+`-command` lines. A discovered command replaces a same-named one registered before that.
 
 ## Quick Start
 
-1. Add a `UIDocument` component to a GameObject and assign the bundled `DevConsoleUI.uxml` (under the package's `Runtime/UI/`) as its source asset — or skip the UIDocument and use **DevConsoleIMGUI** for a zero-setup IMGUI console instead.
-2. Attach the **DevConsoleUIToolkit** component to the same GameObject.
-3. Press **`~`** (BackQuote) to toggle the console.
+1. Add `ENABLE_CONSOLE` to the scripting defines of the build profiles that should have a console (Project Settings →
+   Player → Scripting Define Symbols, or per profile in Build Profiles).
+2. Press **`~`** (BackQuote) in Play mode. The window exists already; nothing goes in a scene.
+3. Add a command:
+
+```csharp
+public static class CheatCommands
+{
+    [ConsoleCommand("heal", "Restore player health", "Cheats")]
+    public static string Heal(int amount = 100) => $"Healed for {amount}";
+}
+```
 
 In the input line, **Enter** runs the line as typed, **Tab** completes the highlighted suggestion, **Up** / **Down**
 move through the suggestions (or the history when there are none), and **Esc** hides the suggestions, then closes.
-
-Commands are auto-discovered at startup — no manual registration needed.
 
 ## Usage
 
@@ -105,8 +105,8 @@ public class InventoryCommands
 
     public InventoryCommands(IInventoryService inventory) => _inventory = inventory;
 
-    public void Bind() => CommandRegistry.Instance.RegisterTarget(this);
-    public void Unbind() => CommandRegistry.Instance.UnregisterTarget(this);
+    public void Initialize() => CommandRegistry.Instance.RegisterTarget(this);
+    public void Dispose() => CommandRegistry.Instance.UnregisterTarget(this);
 
     [ConsoleCommand("inv.add", "Add item to inventory", "Cheats")]
     public string Add(string itemId, int amount = 1)
@@ -230,8 +230,8 @@ with them is one of its subcommands, whichever assembly declared it:
 public static void Load(string name) { … }
 
 // In the game's own assembly: `log` also holds the package's `log unity` and `log save`
-[ConsoleCommand("log level", "Set a channel's level", "Logging")]
-public static void SetLevel(string channel, LogLevel level) { … }
+[ConsoleCommand("log upload", "Send the player log to the crash server", "Logging")]
+public static void Upload(string note = "") { … }
 ```
 
 - `scene load Arena` runs `scene load` with `Arena`: the command with the most words the line starts with wins, so
@@ -287,35 +287,29 @@ g.AddWithRest("say", 1, args => Chat.Send(args[0], args[1]), "Message a player",
     "<player> <message...>", playerProvider);
 ```
 
+### Opening and Closing the Window
+
+```csharp
+bool open = DevConsoleWindow.IsOpen;              // static: a window exists and is open
+DevConsoleWindow.Toggled += open => { };          // static event Action<bool>
+DevConsoleWindow.Instance?.Toggle();              // null until the window exists
+DevConsoleWindow.Instance?.SetOpen(false);
+```
+
+`Toggled` is raised with `false` also when the window is destroyed while open, so input blocked on it always comes
+back. With **Create Window** off in the settings, `DevConsoleWindow.Create()` creates it (once; later calls return it).
+
+The log is selectable with the mouse: drag to select, double-click for a word, triple-click for a whole entry,
+shift-click to extend. Ctrl+C (Cmd+C on macOS) copies the selection as plain text, without rich text tags. The log
+draws colour tags only, so bold and size tags in messages show as plain text there.
+
 ### Custom Frontends
 
 A UI of its own runs input through `CommandRegistry.Instance.ExecuteAndLog(line)`, which echoes the line, runs it
-and prints the result exactly as the bundled frontends do. For completion, `GetSuggestions(input, list)` suggests for
+and prints the result exactly as the window does. For completion, `GetSuggestions(input, list)` suggests for
 the last token of the last `;` statement, `DescribeSuggestion(input, suggestion)` gives the description of one that
 names a command or a group, and `CommandRegistry.ApplySuggestion(input, suggestion)` puts the chosen one in its place,
 quoting it when it contains spaces.
-
-### Console Frontends
-
-```csharp
-// UI Toolkit frontend (instance methods)
-DevConsoleUIToolkit.Instance.Show();
-DevConsoleUIToolkit.Instance.Hide();
-DevConsoleUIToolkit.Instance.Toggle();
-bool open = DevConsoleUIToolkit.Instance.IsVisible;
-
-// IMGUI frontend
-DevConsoleIMGUI.Instance.Toggle();        // instance
-DevConsoleIMGUI.Instance.SetOpen(true);   // instance
-bool isOpen = DevConsoleIMGUI.IsOpen;     // static
-DevConsoleIMGUI.Toggled += open => { };   // static event Action<bool>
-```
-
-`Instance` is null until the corresponding frontend exists in the scene.
-
-The IMGUI log is selectable with the mouse: drag to select, double-click for a word, triple-click for a whole entry,
-shift-click to extend. Ctrl+C (Cmd+C on macOS) copies the selection as plain text, without rich text tags. The log
-draws colour tags only, so bold and size tags in messages show as plain text there.
 
 ### Logging
 
@@ -365,7 +359,7 @@ CommandRegistry.Instance.PreExecuteFilter = (cmd, args) =>
 | `clear` | Clear console output |
 | `alias list` / `set <name> <command...>` / `remove <name>` / `clear` | Short names for commands |
 | `bind list` / `set <key> <command...>` / `remove <key>` / `clear` | Commands on key presses |
-| `history list [N]` / `history clear` | Persisted input history (capped at 100 entries) |
+| `history list [N]` / `history clear` | Input history (the last 100 lines) |
 | `exec <file>` | Run a file of commands, one per line; `#` starts a comment |
 | `repeat <n> <command...>` | Run a command N times (at most 1000) |
 | `toggle <command...> <a> <b> [c…]` | Run the command with the next of its values each call |
@@ -378,7 +372,7 @@ The rest, by category:
 - **Rendering** — `resolution [w h [mode]]`, `resolution list`, `fullscreen [mode]`, `quality [name|index]`.
 - **Scene** — `scene`, `scene list`, `scene load <name|index> [additive]`, `scene reload`, `inspect <name|path>` (every match, inactive ones too), `count [component] [includeInactive]`.
 - **System** — `quit`, `echo <text...>`, `sysinfo` (application and Unity version, platform, hardware).
-- **Logging** — `log unity [on]`, `log save`.
+- **Logging** — `log unity [on]`, `log save`; with `com.rubickanov.log`, `log channels` and `log level <channel|*> [level]`.
 
 Commands that get or set a value show it when called without an argument.
 
@@ -405,18 +399,22 @@ alias set reset "scene reload; wait 2; god true"
 Aliases complete like commands, and an alias without `$` or `;` completes its arguments like its target.
 
 `bind set <key> <command...>` runs a command line when a key is pressed. The key is an Input System `Key` name,
-optionally with modifiers that must match exactly: `bind set ctrl+shift+R scene reload`. Bindings do not fire while a
+optionally with modifiers that must match exactly: `bind set ctrl+shift+R scene reload`. Bindings do not fire while the
 console is open. To keep them quiet during text entry of your own, set `CommandBindings.Suppress = () => chatOpen;`.
 
 `toggle` cycles values on each call, which suits a binding: `bind set F1 toggle timescale 0 1`. Each distinct
 argument list keeps its own position, starting with the first value.
 
-### Config Files
+### Files of the Console
 
-Aliases and bindings are saved to `persistentDataPath/console/config.cfg` on every change and read back at startup.
-The file is plain console commands (`alias set …`, `bind set …`), so it can be edited or copied between machines. The
-console rewrites it, so lines of your own belong in `autoexec.cfg` beside it, which runs once when the console
-initializes. Saves from before 2.0, kept in PlayerPrefs, move into `config.cfg` on the first change.
+Everything the console keeps is in `persistentDataPath/console/`, as text:
+
+- `config.cfg` — aliases and bindings as console commands (`alias set …`, `bind set …`), rewritten on every change and
+  read back at startup, so it can be edited or copied between machines. Saves from before 2.0, in PlayerPrefs, move
+  into it on the first change.
+- `history.txt` — the last 100 lines typed, one per line. A 3.x history, in PlayerPrefs, moves into it on the first
+  new line.
+- `autoexec.cfg` — lines of your own, run on the first frame. The console never writes it.
 
 `exec <file>` looks in `persistentDataPath/console/` first, then `StreamingAssets/console/`; the `.cfg` extension may be
 left out. Files may `exec` other files up to 8 levels deep. On WebGL, StreamingAssets cannot be read synchronously, so
@@ -424,13 +422,44 @@ only `persistentDataPath` files work there.
 
 ### Settings
 
-**Project Settings > Dev Console** (persisted to `ProjectSettings/DevConsoleSettings.json`):
+**Project Settings > Dev Console**, saved to `Assets/Resources/DevConsoleSettings.json` (any `Resources` folder works),
+so builds carry them; without the file every setting has its default. A 3.x `ProjectSettings/DevConsoleSettings.json`
+is moved there when the editor first loads 4.0.
 
-- **Use Built-in Toggle** — enable the built-in key toggle (default: on). Disable to drive visibility yourself via `Toggle()` / `SetOpen()`.
+- **Use Built-in Toggle** — open and close with the toggle key (default: on). Off: call `Toggle()` / `SetOpen()`.
 - **Toggle Key** — key to open/close the console (default: BackQuote).
-- **Console Height** — fraction of screen height, range 0.1–0.9 (default: 0.4).
+- **Console Height** — fraction of screen height, 0.1–0.9 (default: 0.4).
+- **Create Window** — the package creates the window before the first scene loads (default: on).
+- **Run Startup Commands** — the package runs the `-command` lines on the first frame (default: on).
 
-Both frontends read these settings.
+### Startup Commands from the Command Line
+
+A build nobody can type into — a headless host, a machine started over ssh, a run that has to begin in a known
+state — reaches the console through `-command`:
+
+```text
+MyGame -batchmode -nographics -command "net host 7777"
+MyGame -command "net profile lan" -command "net join 192.168.1.25 7777"
+```
+
+The flag may be repeated and the commands run in the order given, on the first frame after `autoexec.cfg`. Each value
+is one console line, so the shell's quoting separates a command from the next flag; `-command 'say "hello world"'`
+arrives intact. A blank value is dropped.
+
+A game whose commands register later, with a scene it loads, turns **Run Startup Commands** off and runs them itself
+once they are there:
+
+```csharp
+public sealed class SessionStartupCommands : IPostStartable   // in the gameplay scene's scope
+{
+    public void PostStart() => StartupCommands.Run(CommandRegistry.Instance);
+}
+```
+
+The queue drains as it runs and resets once per process, so a scene reload that rebuilds the scope finds it empty.
+`StartupCommands.Enqueue` adds to it by hand. Every command is logged to `ConsoleLog` and also to the player log with a
+`[DevConsole]` prefix, failures as errors, since a log file on another machine is all there is to read.
+`StartupCommands.Parse` is pure, for testing argument handling.
 
 ### Stripping Commands from Release Builds
 
@@ -441,53 +470,63 @@ public static void GodMode() { }
 #endif
 ```
 
-## Startup commands from the command line
+## Integration
 
-A build nobody can type into — a headless host, a machine started over ssh, a run that has to begin in a known
-state — reaches the console through `-command`:
-
-```
-MyGame -batchmode -nographics -command "net host 7777"
-MyGame -command "net profile lan" -command "net join 192.168.1.25 7777"
-```
-
-The flag may be repeated and the commands run in the order given. Each value is one console line, so the shell's
-quoting is what separates a command from the next flag; the line itself is tokenized by the registry, which is why
-`-command 'say "hello world"'` arrives intact. A `-command` with a blank or missing value is dropped, the way `exec`
-drops a blank line in a file.
-
-**The game decides when they run**, because only the game knows when its own command groups have registered. Call
-`StartupCommands.Run(CommandRegistry.Instance)` from a hook that comes after everything has started — with VContainer
-that is an `IPostStartable`, which runs after every `IStartable.Start()` of the container:
+The game keeps only what is its own, such as blocking its input while the console is open. With VContainer:
 
 ```csharp
-public sealed class StartupCommandRunner : IPostStartable
+public sealed class ConsoleInputBlock : IInitializable, IDisposable
 {
-    public void PostStart() => StartupCommands.Run(CommandRegistry.Instance);
+    private readonly InputBlocker _blocker;
+
+    public ConsoleInputBlock(InputBlocker blocker) => _blocker = blocker;
+
+    public void Initialize() => DevConsoleWindow.Toggled += OnToggled;
+
+    public void Dispose()
+    {
+        DevConsoleWindow.Toggled -= OnToggled;
+        _blocker.Set(this, false);
+    }
+
+    private void OnToggled(bool open) => _blocker.Set(this, open);
 }
 ```
 
-The queue drains as it runs and resets once per process (`SubsystemRegistration`), so a scene reload that rebuilds
-the game's scopes finds it empty and cannot start a second session on top of the first. `StartupCommands.Enqueue`
-adds to the same queue by hand, for an intent formed while the game cannot act on it yet.
-
-Every command is logged to `ConsoleLog` and, unlike `exec`, also to the player log with a `[DevConsole]` prefix: this
-feature exists for a log file on another machine, and a command that is not registered is indistinguishable from a
-typo from here, so failures are `LogError`. `StartupCommands.Parse` is pure and takes the arguments as a parameter,
-so argument handling can be tested without starting a process.
+Command classes resolved by the container register themselves with `RegisterTarget(this)` in `Initialize` and
+`UnregisterTarget(this)` in `Dispose`; they are there for autoexec and `-command` as long as they register before the
+first frame.
 
 ## Design Decisions
 
-- **Two UI frontends** — **DevConsoleUIToolkit** (retained-mode, pooled elements) and **DevConsoleIMGUI** (immediate-mode, zero setup). Both honor `DevConsoleSettings`; pick whichever fits the project.
-- **Static ConsoleLog** — decoupled from UI. Commands log via `ConsoleLog`; any frontend subscribes to `OnLogAdded`. Custom UIs can consume the same buffer.
-- **Unity logs forwarded by default** — subscribed on `SubsystemRegistration` through `logMessageReceivedThreaded`, not by a frontend, so startup logs are not lost. `ConsoleLog` stays main-thread only: other threads' messages wait in a queue drained in `PreUpdate`.
-- **Reflection-based discovery** — scans non-system assemblies for `[ConsoleCommand]` at startup, skipping `System.*`, `Unity.*`, `Mono.*`, `Microsoft.*`, `mscorlib`, `netstandard` prefixes for speed. Instance methods are not auto-discovered; bind them with `RegisterTarget(this)`.
-- **Per-execution allocation in the reflection path** — `Execute` allocates a small `object?[]` for boxed arguments per call. Fine for a dev tool; not a per-frame hot path. Autocomplete (`GetSuggestions`) allocates only the typed words and the group path.
-- **Config file for aliases and bindings** — they are commands a person writes and wants to read, back up or share, so they live in `config.cfg` as console lines rather than JSON in PlayerPrefs. History stays in PlayerPrefs, capped at 100 entries.
-- **Bindings restored without the `bind` command** — an `AfterSceneLoad` hook creates the polling object when saved bindings exist. Before 2.0 they loaded only once `bind` had been typed in that session.
+- **One window, IMGUI** — zero setup and nothing in a scene. The UI Toolkit frontend was removed in 4.0: two frontends
+  meant two open states, and a game blocking its input on one missed the other.
+- **Created by the package** — a window placed in a scene becomes a missing script in a build without
+  `ENABLE_CONSOLE`; created from a constrained assembly at `BeforeSceneLoad`, it cannot.
+- **Started on the first frame** — late enough for a game's own registrations in `Awake`, `Start` and VContainer's
+  startables, early enough that nothing has been typed. Before 4.0, autoexec ran in the window's `Awake`, before them.
+- **Static ConsoleLog** — decoupled from the window; commands log through it, any UI can subscribe.
+- **Unity logs forwarded by default** — subscribed at `SubsystemRegistration` through `logMessageReceivedThreaded`, so
+  startup logs are not lost. `ConsoleLog` stays main-thread only: other threads' messages wait in a queue drained in
+  `PreUpdate`.
+- **Quiet in the game's log** — the console's routine news (commands registered, autoexec ran) goes to the console
+  only; only problems, and the `-command` lines, reach Unity's log.
+- **Discovery reads only assemblies that reference the console** — only they can carry `[ConsoleCommand]`, and
+  checking references loads no types (24 ms → 2 ms in the sandbox editor). Not `TypeCache`, which exists only in the
+  editor and would make the editor and builds find commands differently.
+- **Arguments parse with TryParse** — a typo is the common case; an exception per typo is slow and stops a debugger
+  that breaks on throw.
+- **Aliases, bindings and history belong to the registry** — not singletons of their own, so a fresh registry is a
+  fresh console and the history commands work without a window.
+- **Plain files in one folder** — aliases, bindings and history are text a person reads, backs up or shares, in
+  `persistentDataPath/console/`. Not PlayerPrefs: the registry on Windows, shared with the game's own prefs and wiped
+  by its `PlayerPrefs.DeleteAll`.
+- **Settings as JSON in Resources** — builds carry them; a TextAsset rather than a ScriptableObject, so a release build
+  without the console carries a few bytes of text and not an object with a missing script.
 - **Groups are name prefixes, not commands** — `scene load` is stored under its full name, and a group is only the
   words its commands share. So a package and a game can both add to `log`, and `PreExecuteFilter` sees the subcommand
-  that runs, not the group. Before 3.0 a group was one command, registered only in code, and a second `Group` call
-  with the same name replaced the first.
-- **`wait` is a command, not syntax** — so the same `PreExecuteFilter` that guards everything else decides whether a deferred rest may run.
-- **Singleton frontends** — both frontends are singleton MonoBehaviours. Statics reset on `SubsystemRegistration` so domain-reload-disabled play sessions start clean.
+  that runs, not the group.
+- **`wait` is a command, not syntax** — so the same `PreExecuteFilter` that guards everything else decides whether a
+  deferred rest may run.
+- **Per-execution allocation in the reflection path** — `Execute` allocates a small `object?[]` for boxed arguments per
+  call. Fine for a dev tool; not a per-frame hot path. Autocomplete allocates only the typed words and the group path.
