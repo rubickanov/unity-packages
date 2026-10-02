@@ -5,7 +5,7 @@ namespace Rubickanov.DevConsole.Tests
 {
     /// <summary>Names of several words: <c>scene load</c> is a subcommand of the <c>scene</c> group.</summary>
     [TestFixture]
-    public class CommandPathTests
+    public partial class CommandPathTests
     {
         private CommandRegistry _registry = null!;
         private readonly List<string> _results = new();
@@ -182,7 +182,7 @@ namespace Rubickanov.DevConsole.Tests
             }
         }
 
-        private class Service
+        private partial class Service
         {
             [ConsoleCommand("say loud")]
             public string SayLoud([Remainder] string text) => text;

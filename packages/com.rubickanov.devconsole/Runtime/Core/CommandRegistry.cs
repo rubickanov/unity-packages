@@ -2,14 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using UnityEngine;
 
 namespace Rubickanov.DevConsole
 {
     /// <summary>
-    /// Central registry for all console commands. Discovers attributed methods and allows runtime registration.
+    /// Central registry for all console commands: the <c>[ConsoleCommand]</c> methods the source generator found, and
+    /// those registered at runtime.
     /// A command name may be several words, <c>scene load</c>: the words before the last make a group, and every
     /// command that starts with them is one of its subcommands, whichever assembly registered it.
     /// </summary>
@@ -60,16 +60,16 @@ namespace Rubickanov.DevConsole
         public Func<RegisteredCommand, string[], ExecutionResult?>? PreExecuteFilter;
 
         /// <summary>
-        /// Discovers the <c>[ConsoleCommand]</c> static methods and registers the built-in commands. Safe to call more
-        /// than once (a no-op after the first). The package calls it on the first frame; a discovered command replaces
-        /// one of the same name registered before that.
+        /// Registers the <c>[ConsoleCommand]</c> static methods of every assembly and the built-in commands. Safe to call
+        /// more than once (a no-op after the first). The package calls it on the first frame; a command registered here
+        /// replaces one of the same name registered before that.
         /// </summary>
         public void Initialize()
         {
             if (_initialized) return;
             _initialized = true;
 
-            DiscoverCommands();
+            GeneratedCommands.RegisterStatic(this);
             RegisterBuiltInCommands();
 
             ConsoleDiagnostics.Info($"Registered {_commands.Count} commands.");
@@ -118,8 +118,6 @@ namespace Rubickanov.DevConsole
                 Name = key,
                 Description = description,
                 Category = category,
-                Method = null,
-                Parameters = Array.Empty<ParameterInfo>(),
                 ArgProviders = argProviders,
                 ManualHandler = handler
             };
@@ -178,20 +176,17 @@ namespace Rubickanov.DevConsole
             => RegisterGroup(name, description, category, configure);
 
         /// <summary>
-        /// Scans <paramref name="target"/>'s instance methods for [ConsoleCommand] attributes and registers them.
+        /// Registers <paramref name="target"/>'s instance <c>[ConsoleCommand]</c> methods, its base types' included.
         /// Returns this for chaining.
         /// </summary>
         public CommandRegistry RegisterTarget(object target)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
 
-            var type = target.GetType();
-            foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public |
-                                                   BindingFlags.NonPublic))
-            {
-                var attr = method.GetCustomAttribute<ConsoleCommandAttribute>();
-                if (attr != null) RegisterMethod(method, attr, target);
-            }
+            if (!GeneratedCommands.BindTarget(this, target))
+                ConsoleDiagnostics.Warning(
+                    $"{target.GetType().Name} has no instance [ConsoleCommand] methods: none in its class or base classes, " +
+                    "or its assembly does not reference Rubickanov.DevConsole.Runtime, so the source generator did not see them.");
             return this;
         }
 
@@ -359,93 +354,49 @@ namespace Rubickanov.DevConsole
             return _sortedKeys;
         }
 
-        private void DiscoverCommands()
-        {
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                if (!ShouldScan(assembly)) continue;
-                var asmName = assembly.GetName().Name;
-
-                try
-                {
-                    foreach (var type in assembly.GetTypes())
-                    foreach (var method in type.GetMethods(BindingFlags.Static | BindingFlags.Public |
-                                                           BindingFlags.NonPublic))
-                    {
-                        var attr = method.GetCustomAttribute<ConsoleCommandAttribute>();
-                        if (attr != null) RegisterMethod(method, attr, null);
-                    }
-                }
-                catch (ReflectionTypeLoadException e)
-                {
-                    var loaderMsg = e.LoaderExceptions.Length > 0 && e.LoaderExceptions[0] != null
-                        ? e.LoaderExceptions[0]!.Message
-                        : e.Message;
-                    ConsoleDiagnostics.Warning($"Skipped assembly '{asmName}': {loaderMsg}");
-                }
-            }
-        }
-
-        private static readonly Assembly ConsoleAssembly = typeof(CommandRegistry).Assembly;
-        private static readonly string ConsoleAssemblyName = ConsoleAssembly.GetName().Name;
-
         /// <summary>
-        /// Whether discovery looks into <paramref name="assembly"/>: this one and those that reference it, the only ones
-        /// that can carry <c>[ConsoleCommand]</c>. The rest of a game's domain (engine, packages, editor, test
-        /// framework) is skipped without loading its types.
+        /// Registers one <c>[ConsoleCommand]</c> method. Called by the code the source generator writes, with what it read
+        /// from the method; <paramref name="invoke"/> calls it with the parsed arguments.
         /// </summary>
-        internal static bool ShouldScan(Assembly assembly)
+        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+        public void AddGenerated(string name, string description, string category, CommandParameter[] parameters,
+            IAutoCompleteProvider?[] providers, bool hasRemainder, object? target, Func<object?[], object?> invoke)
         {
-            if (assembly == ConsoleAssembly) return true;
-            if (assembly.IsDynamic) return false;
-
-            foreach (var reference in assembly.GetReferencedAssemblies())
-            {
-                if (reference.Name == ConsoleAssemblyName) return true;
-            }
-
-            return false;
-        }
-
-        private void RegisterMethod(MethodInfo method, ConsoleCommandAttribute attr, object? target)
-        {
-            var parameters = method.GetParameters();
-            var autoCompleteAttrs = method.GetCustomAttributes<AutoCompleteAttribute>().ToArray();
-            var providers = new IAutoCompleteProvider?[parameters.Length];
-
-            foreach (var ac in autoCompleteAttrs)
-                if (ac.ArgumentIndex < providers.Length)
-                    providers[ac.ArgumentIndex] = GetOrCreateProvider(ac.ProviderType, ac.ProviderArgs);
-
+            var key = NormalizeName(name);
             for (int i = 0; i < parameters.Length; i++)
-                providers[i] ??= ResolveProviderForType(parameters[i].ParameterType);
+                providers[i] ??= ResolveProviderForType(parameters[i].Type);
 
-            if (_commands.TryGetValue(attr.Name, out _))
-                ConsoleDiagnostics.Warning($"Duplicate command '{attr.Name}', overwriting.");
+            if (_commands.ContainsKey(key))
+                ConsoleDiagnostics.Warning($"Duplicate command '{key}', overwriting.");
 
-            var hasRemainder = false;
-            for (int i = 0; i < parameters.Length; i++)
+            _commands[key] = new RegisteredCommand
             {
-                if (parameters[i].GetCustomAttribute<RemainderAttribute>() == null) continue;
-                if (i == parameters.Length - 1 && parameters[i].ParameterType == typeof(string))
-                    hasRemainder = true;
-                else
-                    ConsoleDiagnostics.Warning(
-                        $"[Remainder] on '{parameters[i].Name}' of '{attr.Name}' ignored: it must be the last parameter and a string.");
-            }
-
-            _commands[attr.Name] = new RegisteredCommand
-            {
-                Name = attr.Name,
-                Description = attr.Description,
-                Category = attr.Category,
-                Method = method,
+                Name = key,
+                Description = description,
+                Category = category,
+                Invoker = invoke,
                 Target = target,
                 Parameters = parameters,
                 ArgProviders = providers,
                 HasRemainder = hasRemainder
             };
             _sortedKeysDirty = true;
+        }
+
+        /// <summary>
+        /// The registry's one instance of a provider named in <c>[AutoComplete]</c> without arguments, shared by every
+        /// command that names it. Called by generated code.
+        /// </summary>
+        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+        public IAutoCompleteProvider SharedProvider(Type type, Func<IAutoCompleteProvider> create)
+        {
+            if (!_providerCache.TryGetValue(type, out var provider))
+            {
+                provider = create();
+                _providerCache[type] = provider;
+            }
+
+            return provider;
         }
 
         internal IAutoCompleteProvider? ResolveProviderForType(Type paramType)
@@ -458,49 +409,6 @@ namespace Rubickanov.DevConsole
             if (paramType == typeof(bool))
                 return BoolAutoCompleteProvider.Instance;
             return null;
-        }
-
-        private IAutoCompleteProvider? GetOrCreateProvider(Type providerType, params object[] args)
-        {
-            if (args.Length > 0)
-            {
-                try
-                {
-                    return (IAutoCompleteProvider?)Activator.CreateInstance(providerType, args);
-                }
-                catch (Exception e)
-                {
-                    ReportProviderFailure(providerType, e);
-                    return null;
-                }
-            }
-
-            if (!_providerCache.TryGetValue(providerType, out var provider))
-            {
-                try
-                {
-                    provider = (IAutoCompleteProvider?)Activator.CreateInstance(providerType, args);
-                    if (provider != null)
-                        _providerCache[providerType] = provider;
-                }
-                catch (Exception e)
-                {
-                    ReportProviderFailure(providerType, e);
-                    return null;
-                }
-            }
-
-            return provider;
-        }
-
-        // A constructor only reflection reaches is what code stripping removes first, so a missing one names the fix.
-        private static void ReportProviderFailure(Type providerType, Exception e)
-        {
-            string hint = e is MissingMethodException
-                ? " Give it the constructor its [AutoComplete] arguments need, and mark the provider [Preserve] so " +
-                  "code stripping keeps that constructor."
-                : string.Empty;
-            ConsoleDiagnostics.Error($"Failed to create provider {providerType.Name}: {e.Message}{hint}");
         }
 
         public struct ExecutionResult
@@ -639,10 +547,10 @@ namespace Rubickanov.DevConsole
                 }
             }
 
-            return ExecuteReflection(cmd, line, nameWords, args);
+            return ExecuteAttributeCommand(cmd, line, nameWords, args);
         }
 
-        private ExecutionResult ExecuteReflection(RegisteredCommand cmd, CommandLine line, int nameWords, string[] args)
+        private ExecutionResult ExecuteAttributeCommand(RegisteredCommand cmd, CommandLine line, int nameWords, string[] args)
         {
             var parameters = cmd.Parameters;
             var parsedArgs = new object?[parameters.Length];
@@ -658,9 +566,9 @@ namespace Rubickanov.DevConsole
                     parsedArgs[i] = line.Remainder(nameWords + i);
                 else if (i < args.Length)
                 {
-                    if (!TryParseArg(args[i], parameters[i].ParameterType, out parsedArgs[i]))
+                    if (!TryParseArg(args[i], parameters[i].Type, out parsedArgs[i]))
                         return ExecutionResult.Error(
-                            $"Cannot parse '{args[i]}' as {parameters[i].ParameterType.Name} for '{parameters[i].Name}'.\nUsage: {cmd.GetUsageString()}");
+                            $"Cannot parse '{args[i]}' as {parameters[i].Type.Name} for '{parameters[i].Name}'.\nUsage: {cmd.GetUsageString()}");
                 }
                 else if (parameters[i].HasDefaultValue)
                     parsedArgs[i] = parameters[i].DefaultValue!;
@@ -671,20 +579,16 @@ namespace Rubickanov.DevConsole
 
             try
             {
-                var result = cmd.Method!.Invoke(cmd.Target, parsedArgs);
+                var result = cmd.Invoker!(parsedArgs);
                 return result != null ? ExecutionResult.Ok(result.ToString()) : ExecutionResult.Ok();
             }
-            catch (TargetInvocationException e) when (e.InnerException is CommandException)
+            catch (CommandException e)
             {
-                return ExecutionResult.Error(e.InnerException.Message);
-            }
-            catch (TargetInvocationException e)
-            {
-                return ExecutionResult.Error($"Command error: {e.InnerException?.Message ?? e.Message}");
+                return ExecutionResult.Error(e.Message);
             }
             catch (Exception e)
             {
-                return ExecutionResult.Error($"Execution error: {e.Message}");
+                return ExecutionResult.Error($"Command error: {e.Message}");
             }
         }
 

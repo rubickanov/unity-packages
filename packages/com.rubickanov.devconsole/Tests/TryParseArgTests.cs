@@ -6,7 +6,7 @@ using UnityEngine;
 namespace Rubickanov.DevConsole.Tests
 {
     [TestFixture]
-    public class TryParseArgTests
+    public partial class TryParseArgTests
     {
         private CommandRegistry _registry = null!;
 
@@ -162,7 +162,7 @@ namespace Rubickanov.DevConsole.Tests
             public string Value = "";
         }
 
-        private class Kick
+        private partial class Kick
         {
             [ConsoleCommand("kick")]
             public void Run(MyType player) { }

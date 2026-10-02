@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Text;
 
 namespace Rubickanov.DevConsole
@@ -10,12 +9,17 @@ namespace Rubickanov.DevConsole
         public string Name = "";
         public string Description = "";
         public string Category = "";
-        public MethodInfo? Method;
 
-        /// <summary>Instance target for method invocation. Null for static methods and manually registered commands.</summary>
+        /// <summary>
+        /// Calls the <c>[ConsoleCommand]</c> method with its parsed arguments and returns what it returned. Written by the
+        /// source generator; null for commands registered with a handler.
+        /// </summary>
+        public Func<object?[], object?>? Invoker;
+
+        /// <summary>Instance target of an attribute command. Null for static methods and manually registered commands.</summary>
         public object? Target;
 
-        public ParameterInfo[] Parameters = Array.Empty<ParameterInfo>();
+        public CommandParameter[] Parameters = Array.Empty<CommandParameter>();
         public IAutoCompleteProvider?[]? ArgProviders;
 
         /// <summary>Whether the last parameter takes the rest of the line (<see cref="RemainderAttribute"/>).</summary>
@@ -45,7 +49,7 @@ namespace Rubickanov.DevConsole
                 return _usageSb.Append(' ').Append(Usage).ToString();
 
             // A command registered with a handler has no parameters to name, only its providers' hints
-            if (Method == null && ArgProviders != null)
+            if (Invoker == null && ArgProviders != null)
             {
                 for (int i = 0; i < ArgProviders.Length; i++)
                     _usageSb.Append(' ').Append(ArgProviders[i]?.Hint ?? $"<arg{i}>");

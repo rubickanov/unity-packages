@@ -1,18 +1,15 @@
 using System;
-using UnityEngine.Scripting;
 
 namespace Rubickanov.DevConsole
 {
     /// <summary>
-    /// Marks a method as a console command. Static methods are discovered automatically at startup;
-    /// instance methods must be registered explicitly via <see cref="CommandRegistry.RegisterTarget(object)"/>.
-    /// A <see cref="PreserveAttribute"/>, so code stripping keeps every command though only reflection reaches it.
-    /// The linker drops Preserve attributes once it has used them; <see cref="RequireAttributeUsagesAttribute"/> keeps
-    /// this one on its methods, or discovery would find none.
+    /// Marks a method as a console command. The package's source generator reads it at compile time and writes the
+    /// code that registers the method and calls it, so nothing reaches commands through reflection. Static methods are
+    /// registered on the console's start; instance methods when their object is passed to
+    /// <see cref="CommandRegistry.RegisterTarget(object)"/>.
     /// </summary>
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
-    [RequireAttributeUsages]
-    public class ConsoleCommandAttribute : PreserveAttribute
+    public sealed class ConsoleCommandAttribute : Attribute
     {
         public string Name { get; }
         public string Description { get; }
@@ -26,7 +23,7 @@ namespace Rubickanov.DevConsole
         /// <param name="category">Category for grouping in help output.</param>
         public ConsoleCommandAttribute(string name, string description = "", string category = "General")
         {
-            Name = CommandRegistry.NormalizeName(name);
+            Name = name;
             Description = description;
             Category = category;
         }

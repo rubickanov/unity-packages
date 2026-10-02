@@ -1,12 +1,10 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Scripting;
 
 namespace Rubickanov.DevConsole
 {
     /// <summary>Autocomplete provider that suggests quality level names from QualitySettings.</summary>
-    [Preserve]
     public class QualityLevelProvider : IAutoCompleteProvider
     {
         public string Hint => "<quality>";

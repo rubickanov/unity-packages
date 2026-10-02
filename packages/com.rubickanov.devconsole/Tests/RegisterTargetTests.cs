@@ -1,9 +1,12 @@
+using System.Text.RegularExpressions;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace Rubickanov.DevConsole.Tests
 {
     [TestFixture]
-    public class RegisterTargetTests
+    public partial class RegisterTargetTests
     {
         private CommandRegistry _registry = null!;
 
@@ -61,12 +64,32 @@ namespace Rubickanov.DevConsole.Tests
         }
 
         [Test]
+        public void RegisterTarget_DerivedType_GetsItsBaseTypesCommandsToo()
+        {
+            _registry.RegisterTarget(new DerivedService());
+
+            Assert.AreEqual("pong", _registry.Execute("ping").Message);
+            Assert.AreEqual("derived", _registry.Execute("derived").Message);
+        }
+
+        [Test]
+        public void RegisterTarget_ObjectWithoutCommands_WarnsAndRegistersNothing()
+        {
+            var before = _registry.Commands.Count;
+            LogAssert.Expect(LogType.Warning, new Regex(@"NoCommands has no instance \[ConsoleCommand\] methods"));
+
+            _registry.RegisterTarget(new NoCommands());
+
+            Assert.AreEqual(before, _registry.Commands.Count);
+        }
+
+        [Test]
         public void RegisterTarget_NullTarget_Throws()
         {
             Assert.Throws<System.ArgumentNullException>(() => _registry.RegisterTarget(null!));
         }
 
-        private class Service
+        private partial class Service
         {
             public string Greeting = "";
 
@@ -74,10 +97,20 @@ namespace Rubickanov.DevConsole.Tests
             public string Greet(string name) => $"{Greeting}, {name}";
         }
 
-        private class OtherService
+        private partial class OtherService
         {
             [ConsoleCommand("ping", "Ping")]
             public string Ping() => "pong";
+        }
+
+        private partial class DerivedService : OtherService
+        {
+            [ConsoleCommand("derived", "Declared by the derived type")]
+            public string Derived() => "derived";
+        }
+
+        private sealed class NoCommands
+        {
         }
     }
 }
