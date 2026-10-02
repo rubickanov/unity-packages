@@ -1,0 +1,26 @@
+{
+    "name": "Rubickanov.DevConsole.Log",
+    "rootNamespace": "Rubickanov.DevConsole.Log",
+    "references": [
+        "Rubickanov.DevConsole.Runtime",
+        "Rubickanov.Log.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "ENABLE_CONSOLE",
+        "RUBICKANOV_LOG"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.rubickanov.log",
+            "expression": "1.0.0",
+            "define": "RUBICKANOV_LOG"
+        }
+    ],
+    "noEngineReferences": false
+}
