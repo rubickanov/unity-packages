@@ -348,12 +348,8 @@ namespace Rubickanov.DevConsole
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
+                if (!ShouldScan(assembly)) continue;
                 var asmName = assembly.GetName().Name;
-                if (asmName == null) continue;
-                if (asmName.StartsWith("System") || asmName.StartsWith("Unity") ||
-                    asmName.StartsWith("mscorlib") || asmName.StartsWith("Mono") ||
-                    asmName.StartsWith("Microsoft") || asmName.StartsWith("netstandard"))
-                    continue;
 
                 try
                 {
@@ -373,6 +369,27 @@ namespace Rubickanov.DevConsole
                     Debug.LogWarning($"[DevConsole] Skipped assembly '{asmName}': {loaderMsg}");
                 }
             }
+        }
+
+        private static readonly Assembly ConsoleAssembly = typeof(CommandRegistry).Assembly;
+        private static readonly string ConsoleAssemblyName = ConsoleAssembly.GetName().Name;
+
+        /// <summary>
+        /// Whether discovery looks into <paramref name="assembly"/>: this one and those that reference it, the only ones
+        /// that can carry <c>[ConsoleCommand]</c>. The rest of a game's domain (engine, packages, editor, test
+        /// framework) is skipped without loading its types.
+        /// </summary>
+        internal static bool ShouldScan(Assembly assembly)
+        {
+            if (assembly == ConsoleAssembly) return true;
+            if (assembly.IsDynamic) return false;
+
+            foreach (var reference in assembly.GetReferencedAssemblies())
+            {
+                if (reference.Name == ConsoleAssemblyName) return true;
+            }
+
+            return false;
         }
 
         private void RegisterMethod(MethodInfo method, ConsoleCommandAttribute attr, object? target)
