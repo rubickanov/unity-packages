@@ -69,6 +69,19 @@ namespace Rubickanov.Input.Tests
                 Is.EqualTo("{ \"format\": 1, \"keys\": "));
         }
 
+        [Test]
+        public void For_SecondSeat_KeepsItsKeysBesideTheFirsts()
+        {
+            using var saved = new SavedControlBindings(_bindings, _store, SavedControlBindings.For(1));
+
+            _bindings.Set(_bindings.Find("jump"), "<Keyboard>/f");
+
+            Assert.That(SavedControlBindings.For(0), Is.EqualTo(SavedControlBindings.Key));
+            Assert.That(SavedControlBindings.For(1).Name, Is.EqualTo("controls.p2.json"));
+            StringAssert.Contains("\"jump\": \"<Keyboard>/f\"", Read(SavedControlBindings.For(1)));
+            Assert.That(Read(SavedControlBindings.Key), Is.Null);
+        }
+
         private string Read(SaveKey key) => _store.ReadTextAsync(key).GetAwaiter().GetResult();
 
         private static (InputActionAsset, InputBlocker, ControlBindings) Create()
