@@ -106,7 +106,7 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Alias_QuotedArgument_StaysOneArgument()
         {
-            AliasRegistry.Instance.Set("p", "pair");
+            _registry.Aliases.Set("p", "pair");
 
             var result = _registry.Execute("p \"a b\" c");
 

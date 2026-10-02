@@ -1,34 +1,42 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 namespace Rubickanov.DevConsole
 {
-    public class CommandHistory
+    /// <summary>
+    /// The lines typed into the console, oldest first, at most <see cref="MaxEntries"/>, with the Up/Down cursor that
+    /// walks them. Kept in <c>history.txt</c> beside <c>config.cfg</c>, one line each, rewritten on every new line.
+    /// One per <see cref="CommandRegistry"/>, as its <see cref="CommandRegistry.History"/>.
+    /// </summary>
+    public sealed class CommandHistory
     {
+        public const string FileName = "history.txt";
+
+        /// <summary>How many lines are kept; the oldest goes past it.</summary>
+        public const int MaxEntries = 100;
+
+        private const string LegacyPrefsKey = "DevConsole_History";
+
         private readonly List<string> _history = new();
         private int _cursor = -1;
         private string? _savedInput;
-        private const int MaxHistory = 100;
-        private const string PrefsKey = "DevConsole_History";
 
-        /// <summary>The most recently created CommandHistory instance.</summary>
-        public static CommandHistory? Current { get; private set; }
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStatics() => Current = null;
+        /// <summary>Full path of <c>history.txt</c>.</summary>
+        public static string FilePath => Path.Combine(ConsoleConfig.Directory, FileName);
 
         /// <summary>Read-only view of all history entries (oldest first).</summary>
         public IReadOnlyList<string> Entries => _history;
 
-        public CommandHistory() { Load(); Current = this; }
+        internal CommandHistory() => Load();
 
         public void Add(string command)
         {
             if (string.IsNullOrWhiteSpace(command)) return;
             if (_history.Count > 0 && _history[^1] == command) { ResetCursor(); return; }
             _history.Add(command);
-            if (_history.Count > MaxHistory) _history.RemoveAt(0);
+            if (_history.Count > MaxEntries) _history.RemoveAt(0);
             ResetCursor();
             Save();
         }
@@ -51,33 +59,81 @@ namespace Rubickanov.DevConsole
 
         public void ResetCursor() { _cursor = -1; _savedInput = null; }
 
-        /// <summary>Removes all history entries and clears persisted storage.</summary>
+        /// <summary>Removes all history entries and the file.</summary>
         public void Clear()
         {
             _history.Clear();
             ResetCursor();
-            PlayerPrefs.DeleteKey(PrefsKey);
-            PlayerPrefs.Save();
+            try
+            {
+                if (File.Exists(FilePath)) File.Delete(FilePath);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ConsoleDiagnostics.Warning($"Failed to delete {FilePath}: {e.Message}");
+            }
+
+            DeleteLegacy();
         }
 
         private void Save()
         {
-            var json = JsonUtility.ToJson(new HistoryData { commands = _history });
-            PlayerPrefs.SetString(PrefsKey, json);
+            try
+            {
+                Directory.CreateDirectory(ConsoleConfig.Directory);
+                File.WriteAllLines(FilePath, _history);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ConsoleDiagnostics.Warning($"Failed to write {FilePath}: {e.Message}");
+                return;
+            }
+
+            // The file holds everything now, so the pre-4.0 copy must not come back if it is ever deleted
+            DeleteLegacy();
         }
 
         private void Load()
         {
-            if (!PlayerPrefs.HasKey(PrefsKey)) return;
-            try
+            if (File.Exists(FilePath))
             {
-                var data = JsonUtility.FromJson<HistoryData>(PlayerPrefs.GetString(PrefsKey));
-                if (data?.commands != null) _history.AddRange(data.commands);
+                try
+                {
+                    foreach (var line in File.ReadAllLines(FilePath))
+                    {
+                        if (!string.IsNullOrWhiteSpace(line)) _history.Add(line);
+                    }
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                {
+                    ConsoleDiagnostics.Warning($"Failed to read {FilePath}: {e.Message}");
+                }
             }
-            catch (Exception e) { ConsoleDiagnostics.Warning($"Failed to load command history: {e.Message}"); }
+            else if (PlayerPrefs.HasKey(LegacyPrefsKey))
+            {
+                // Before 4.0 the history was JSON in PlayerPrefs; it moves into the file on the next new line
+                try
+                {
+                    var data = JsonUtility.FromJson<LegacyData>(PlayerPrefs.GetString(LegacyPrefsKey));
+                    if (data?.commands != null) _history.AddRange(data.commands);
+                }
+                catch (ArgumentException e)
+                {
+                    ConsoleDiagnostics.Warning($"Failed to read the saved command history: {e.Message}");
+                }
+            }
+
+            if (_history.Count > MaxEntries) _history.RemoveRange(0, _history.Count - MaxEntries);
+        }
+
+        private static void DeleteLegacy()
+        {
+            if (!PlayerPrefs.HasKey(LegacyPrefsKey)) return;
+            PlayerPrefs.DeleteKey(LegacyPrefsKey);
+            PlayerPrefs.Save();
         }
 
         [Serializable]
-        private class HistoryData { public List<string> commands = new(); }
+        private class LegacyData { public List<string> commands = new(); }
     }
 }

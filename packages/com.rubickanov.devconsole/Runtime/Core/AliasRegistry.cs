@@ -6,16 +6,14 @@ using UnityEngine;
 
 namespace Rubickanov.DevConsole
 {
-    /// <summary>Manages command aliases. Aliases map a short name to a full command string.</summary>
-    public class AliasRegistry
+    /// <summary>
+    /// Command aliases: a short name for a command line. One per <see cref="CommandRegistry"/>, as its
+    /// <see cref="CommandRegistry.Aliases"/>, saved with the bindings in <c>config.cfg</c>.
+    /// </summary>
+    public sealed class AliasRegistry
     {
-        private static AliasRegistry? _instance;
-        public static AliasRegistry Instance => _instance ??= new AliasRegistry();
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        internal static void ResetStatics() => _instance = null;
-
         private readonly Dictionary<string, string> _aliases = new();
+        private readonly Action _save;
         private string[]? _sortedNames;
 
         /// <summary>All registered aliases.</summary>
@@ -37,7 +35,11 @@ namespace Rubickanov.DevConsole
             }
         }
 
-        private AliasRegistry() => ConsoleConfig.ReadAliases(_aliases);
+        internal AliasRegistry(Action save)
+        {
+            _save = save;
+            ConsoleConfig.ReadAliases(_aliases);
+        }
 
         /// <summary>Returns true if the name is a registered alias and outputs the command it maps to.</summary>
         public bool TryResolve(string name, [NotNullWhen(true)] out string? command)
@@ -126,6 +128,6 @@ namespace Rubickanov.DevConsole
             return tail.Length > 0 ? template + " " + tail : template;
         }
 
-        private void Save() => ConsoleConfig.Write(this, BindingRegistry.Instance);
+        private void Save() => _save();
     }
 }

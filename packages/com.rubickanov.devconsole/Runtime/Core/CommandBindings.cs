@@ -40,7 +40,7 @@ namespace Rubickanov.DevConsole
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void RestoreSaved()
         {
-            if (BindingRegistry.Instance.Bindings.Count > 0)
+            if (CommandRegistry.Instance.Bindings.Bindings.Count > 0)
                 EnsureExists();
         }
 
@@ -61,11 +61,13 @@ namespace Rubickanov.DevConsole
                 _instance = null;
         }
 
-        private void Update()
+        private void Update() => Tick(CommandRegistry.Instance, Keyboard.current);
+
+        /// <summary>One frame's work: runs the commands whose chords went down this frame. Update's, apart for tests.</summary>
+        internal void Tick(CommandRegistry registry, Keyboard? keyboard)
         {
-            var bindings = BindingRegistry.Instance.Bindings;
+            var bindings = registry.Bindings.Bindings;
             if (bindings.Count == 0) return;
-            var keyboard = Keyboard.current;
             if (keyboard == null) return;
 
             // Keys typed into the console are text, not bindings
@@ -83,7 +85,7 @@ namespace Rubickanov.DevConsole
 
             // Logged like typed input: a bound command that fails would otherwise do nothing, visibly or otherwise
             for (int i = 0; i < _pendingExecute.Count; i++)
-                CommandRegistry.Instance.ExecuteAndLog(_pendingExecute[i]);
+                registry.ExecuteAndLog(_pendingExecute[i]);
         }
     }
 }

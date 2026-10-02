@@ -6,22 +6,22 @@ namespace Rubickanov.DevConsole
 {
     /// <summary>
     /// Key chords bound to console commands. Only the data: <see cref="CommandBindings"/> watches the keyboard and runs
-    /// them, so the bindings can be read and changed without a scene.
+    /// them, so the bindings can be read and changed without a scene. One per <see cref="CommandRegistry"/>, as its
+    /// <see cref="CommandRegistry.Bindings"/>, saved with the aliases in <c>config.cfg</c>.
     /// </summary>
-    public class BindingRegistry
+    public sealed class BindingRegistry
     {
-        private static BindingRegistry? _instance;
-        public static BindingRegistry Instance => _instance ??= new BindingRegistry();
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        internal static void ResetStatics() => _instance = null;
-
         private readonly Dictionary<KeyChord, string> _bindings = new();
+        private readonly Action _save;
 
         /// <summary>All bindings.</summary>
         public IReadOnlyDictionary<KeyChord, string> Bindings => _bindings;
 
-        private BindingRegistry() => ConsoleConfig.ReadBindings(_bindings);
+        internal BindingRegistry(Action save)
+        {
+            _save = save;
+            ConsoleConfig.ReadBindings(_bindings);
+        }
 
         /// <summary>Binds <paramref name="chord"/> to <paramref name="command"/>, replacing what it was bound to.</summary>
         public void Set(KeyChord chord, string command)
@@ -45,6 +45,6 @@ namespace Rubickanov.DevConsole
             Save();
         }
 
-        private void Save() => ConsoleConfig.Write(AliasRegistry.Instance, this);
+        private void Save() => _save();
     }
 }

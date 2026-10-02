@@ -10,9 +10,14 @@ namespace Rubickanov.DevConsole.Tests
     public class ConsoleConfigTests
     {
         private string _config = null!;
+        private CommandRegistry _registry = null!;
 
         [SetUp]
-        public void SetUp() => _config = TestConfig.Use();
+        public void SetUp()
+        {
+            _config = TestConfig.Use();
+            _registry = new CommandRegistry();
+        }
 
         [TearDown]
         public void TearDown()
@@ -25,9 +30,9 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Changes_AreWrittenAsConsoleCommands()
         {
-            AliasRegistry.Instance.Set("slow", "timescale 0.2");
-            BindingRegistry.Instance.Set(new KeyChord(Key.F5, KeyModifiers.Ctrl), "echo \"a b\"");
-            BindingRegistry.Instance.Set(new KeyChord(Key.F6), "timescale 1; clear");
+            _registry.Aliases.Set("slow", "timescale 0.2");
+            _registry.Bindings.Set(new KeyChord(Key.F5, KeyModifiers.Ctrl), "echo \"a b\"");
+            _registry.Bindings.Set(new KeyChord(Key.F6), "timescale 1; clear");
 
             var text = File.ReadAllText(ConsoleConfig.ConfigPath);
 
@@ -39,16 +44,15 @@ namespace Rubickanov.DevConsole.Tests
         [Test]
         public void Config_ReadsBackTheSameValues()
         {
-            AliasRegistry.Instance.Set("slow", "timescale 0.2");
-            AliasRegistry.Instance.Set("reset", "timescale 1; clear");
-            BindingRegistry.Instance.Set(new KeyChord(Key.F5, KeyModifiers.Ctrl), "echo \"a b\" c");
+            _registry.Aliases.Set("slow", "timescale 0.2");
+            _registry.Aliases.Set("reset", "timescale 1; clear");
+            _registry.Bindings.Set(new KeyChord(Key.F5, KeyModifiers.Ctrl), "echo \"a b\" c");
 
-            AliasRegistry.ResetStatics();
-            BindingRegistry.ResetStatics();
+            _registry = new CommandRegistry();
 
-            AliasRegistry.Instance.TryResolve("slow", out var slow);
-            AliasRegistry.Instance.TryResolve("reset", out var reset);
-            BindingRegistry.Instance.Bindings.TryGetValue(new KeyChord(Key.F5, KeyModifiers.Ctrl), out var bound);
+            _registry.Aliases.TryResolve("slow", out var slow);
+            _registry.Aliases.TryResolve("reset", out var reset);
+            _registry.Bindings.Bindings.TryGetValue(new KeyChord(Key.F5, KeyModifiers.Ctrl), out var bound);
             Assert.AreEqual("timescale 0.2", slow);
             Assert.AreEqual("timescale 1; clear", reset);
             Assert.AreEqual("echo \"a b\" c", bound);
@@ -60,10 +64,10 @@ namespace Rubickanov.DevConsole.Tests
             File.WriteAllText(ConsoleConfig.ConfigPath,
                 "# mine\n\nalias set tp teleport $1\nbind set shift+K tp home\nsomething else\nbind set NotAKey x\n");
 
-            AliasRegistry.Instance.TryResolve("tp", out var tp);
+            _registry.Aliases.TryResolve("tp", out var tp);
             Assert.AreEqual("teleport $1", tp);
-            Assert.AreEqual(1, BindingRegistry.Instance.Bindings.Count);
-            Assert.AreEqual("tp home", BindingRegistry.Instance.Bindings[new KeyChord(Key.K, KeyModifiers.Shift)]);
+            Assert.AreEqual(1, _registry.Bindings.Bindings.Count);
+            Assert.AreEqual("tp home", _registry.Bindings.Bindings[new KeyChord(Key.K, KeyModifiers.Shift)]);
         }
 
         [Test]
@@ -73,10 +77,10 @@ namespace Rubickanov.DevConsole.Tests
             PlayerPrefs.SetString("DevConsole_Aliases", "{\"keys\":[\"g\"],\"values\":[\"give\"]}");
             PlayerPrefs.SetString("DevConsole_Bindings", "{\"keys\":[\"F5\"],\"values\":[\"timescale 0.5\"]}");
 
-            Assert.IsTrue(AliasRegistry.Instance.TryResolve("g", out _));
-            Assert.AreEqual("timescale 0.5", BindingRegistry.Instance.Bindings[new KeyChord(Key.F5)]);
+            Assert.IsTrue(_registry.Aliases.TryResolve("g", out _));
+            Assert.AreEqual("timescale 0.5", _registry.Bindings.Bindings[new KeyChord(Key.F5)]);
 
-            AliasRegistry.Instance.Set("x", "y");
+            _registry.Aliases.Set("x", "y");
 
             var text = File.ReadAllText(ConsoleConfig.ConfigPath);
             StringAssert.Contains("alias set g give", text);
