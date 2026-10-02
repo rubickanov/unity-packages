@@ -1,15 +1,19 @@
 using System;
+using System.Collections;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Audio;
+using UnityEngine.TestTools;
 
 namespace Rubickanov.Audio.Tests
 {
     [TestFixture]
     public class UnityAudioServiceTests
     {
+        private const string TestMixerPath = "Packages/com.rubickanov.audio/Tests/TestMixer.mixer";
+
         private AudioServiceConfig _config = null!;
         private UnityAudioService _service = null!;
         private readonly System.Collections.Generic.List<GameObject> _targets = new();
@@ -46,23 +50,55 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
-        public void PlaySFX_PoolEmptyAndAllSourcesFadingOut_GrowsFreshSourceInsteadOfThrowing()
+        public void PlaySFX_PoolEmptyAndAllSourcesFadingOut_TakesFadingSource()
         {
-            // Regression: with the single pooled source rented and then pushed into fade-out
-            // limbo by StopSound (removed from _activeSources but not yet reclaimed by the fade
-            // task), the next RentSource saw an empty pool AND an empty active list and NRE'd on
-            // _activeSources.First!. It must instead grow a fresh source so the sound still plays.
-            SetMaxSfxSources(_config, 1);
-            using var service = new UnityAudioService(_config);
+            using var service = ServiceWithPool(1);
             var sound = MakeValidSound();
-
-            var first = service.PlaySFX(sound);          // rents the only pooled source
-            service.StopSound(first, fadeOut: 10f);      // pool + active list now both empty
+            var first = service.PlaySFX(sound);
+            service.StopSound(first, fadeOut: 10f);
 
             SoundHandle second = default;
             Assert.DoesNotThrow(() => second = service.PlaySFX(sound),
                 "RentSource must not dereference an empty active list when every source is fading out");
-            Assert.IsTrue(second.IsValid, "a fresh source must be created when nothing is available");
+
+            Assert.IsTrue(second.IsValid);
+            Assert.AreEqual(1, SfxSources(service).Length, "the pool must not grow past its cap");
+        }
+
+        [Test]
+        public void PlaySFX_AfterStopAllSFXWithFadeOut_StaysWithinCapAndEvictsAsUsual()
+        {
+            using var service = ServiceWithPool(2);
+            service.PlaySFX(MakeSound(NewClip()));
+            service.PlaySFX(MakeSound(NewClip()));
+            service.StopAllSFX(fadeOut: 1000f);
+            var first = MakeSound(NewClip());
+            var second = MakeSound(NewClip());
+            var third = MakeSound(NewClip());
+
+            service.PlaySFX(first);
+            service.PlaySFX(second);
+            service.PlaySFX(third);
+
+            Assert.AreEqual(2, SfxSources(service).Length);
+            CollectionAssert.AreEqual(new[] { second.Resource, third.Resource }, PlayingResources(service));
+        }
+
+        [Test]
+        public void PlaySFX_SeveralSourcesFadingOut_TakesQuietest()
+        {
+            using var service = ServiceWithPool(2);
+            var loud = MakeSound(NewClip());
+            var quiet = MakeSound(NewClip());
+            service.PlaySFX(loud, volumeScale: 1f);
+            service.PlaySFX(quiet, volumeScale: 0.2f);
+            service.StopAllSFX(fadeOut: 1000f);
+
+            service.PlaySFX(MakeSound(NewClip()));
+
+            var held = SfxSources(service).Select(source => source.resource).ToArray();
+            CollectionAssert.Contains(held, loud.Resource, "the louder fade must go on");
+            CollectionAssert.DoesNotContain(held, quiet.Resource);
         }
 
         [Test]
@@ -139,6 +175,28 @@ namespace Rubickanov.Audio.Tests
         public void GetVolume_UnknownParam_ReturnsFullVolume()
         {
             Assert.AreEqual(1f, _service.GetVolume("Unknown"));
+        }
+
+        [Test]
+        public void GetVolume_NeverSetButExposedOnMixer_ReturnsMixerValue()
+        {
+            var mixer = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioMixer>(TestMixerPath);
+            Assume.That(mixer, Is.Not.Null, "the test mixer asset must load");
+            SetBackingField(_config, "Mixer", mixer);
+            using var service = new UnityAudioService(_config);
+
+            float volume = service.GetVolume("HalfVolume");
+
+            Assert.AreEqual(0.5f, volume, 1e-3f);
+        }
+
+        [Test]
+        public void GetVolume_NotExposedOnMixer_ReturnsFullVolume()
+        {
+            SetBackingField(_config, "Mixer", UnityEditor.AssetDatabase.LoadAssetAtPath<AudioMixer>(TestMixerPath));
+            using var service = new UnityAudioService(_config);
+
+            Assert.AreEqual(1f, service.GetVolume("Unknown"));
         }
 
         [Test]
@@ -235,11 +293,49 @@ namespace Rubickanov.Audio.Tests
         public void SetLoopVolume_StoppedLoop_NoOp()
         {
             _service.PlayLoop("crowd", MakeValidSound(), volumeScale: 0.5f);
+            var source = LoopSource("crowd");
             _service.StopLoop("crowd");
 
             _service.SetLoopVolume("crowd", 1f);
 
-            Assert.AreEqual(0.5f, LoopSource("crowd").volume, 1e-5f);
+            Assert.AreEqual(0.5f, source.volume, 1e-5f);
+        }
+
+        [Test]
+        public void StopLoop_NoFade_FreesSlot()
+        {
+            _service.PlayLoop("crowd", MakeValidSound());
+
+            _service.StopLoop("crowd");
+
+            Assert.IsFalse(LoopSlots(_service).ContainsKey("crowd"));
+        }
+
+        [Test]
+        public void PlayLoop_AfterOtherSlotStopped_ReusesItsSource()
+        {
+            _service.PlayLoop("piston-1", MakeValidSound());
+            var first = LoopSource("piston-1");
+            _service.StopLoop("piston-1");
+
+            _service.PlayLoop("piston-2", MakeValidSound());
+
+            Assert.AreSame(first, LoopSource("piston-2"));
+            Assert.AreEqual(1, LoopSourceCount(_service));
+        }
+
+        [Test]
+        public void PlayLoop_ReusedSourceAfterPitchRamp_StartsClean()
+        {
+            _service.PlayLoop("piston-1", MakeValidSound());
+            _service.SetLoopPitch("piston-1", 2f, duration: 1000f);
+            _service.StopLoop("piston-1");
+
+            _service.PlayLoop("piston-2", MakeValidSound());
+
+            Assert.AreEqual(1f, LoopSource("piston-2").pitch, 1e-5f);
+            Assert.AreEqual(0, GetField<System.Collections.ICollection>(_service, "_loopPitchWatchers").Count,
+                "a ramp of a freed slot must not keep writing to the reused source");
         }
 
         [Test]
@@ -513,11 +609,13 @@ namespace Rubickanov.Audio.Tests
             using var service = new UnityAudioService(_config);
             var piston = NewTarget(Vector3.zero);
             service.PlayLoopAttached("motor", MakeValidSound(), piston);
+            var source = LoopSource(service, "motor");
             UnityEngine.Object.DestroyImmediate(piston.gameObject);
 
             StepLoopFollows(service);
 
-            Assert.IsNull(LoopSource(service, "motor").resource);
+            Assert.IsNull(source.resource);
+            Assert.IsFalse(service.IsLoopPlaying("motor"));
         }
 
         [Test]
@@ -623,6 +721,95 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
+        public void PlayMusic_SwitchedMidCrossfade_OldTrackKeepsFading()
+        {
+            var opening = MakeMusic();
+            _service.PlayMusic(opening, crossfadeDuration: 0f);
+            _service.PlayMusic(MakeMusic(), crossfadeDuration: 1000f);
+            float openingVolume = MusicSourceOf(_service, opening).volume;
+
+            _service.PlayMusic(MakeMusic(), crossfadeDuration: 1000f);
+
+            var source = MusicSourceOf(_service, opening);
+            Assert.IsNotNull(source, "the fading track must not lose its source");
+            Assert.AreEqual(openingVolume, source!.volume, 0.01f);
+        }
+
+        [Test]
+        public void PlayMusic_SwitchedMidCrossfade_NewTrackFadesIn()
+        {
+            _service.PlayMusic(MakeMusic(), crossfadeDuration: 0f);
+            _service.PlayMusic(MakeMusic(), crossfadeDuration: 1000f);
+            var next = MakeMusic();
+
+            _service.PlayMusic(next, crossfadeDuration: 1000f);
+
+            var source = MusicSourceOf(_service, next);
+            Assert.IsNotNull(source);
+            Assert.IsTrue(source!.isPlaying);
+            Assert.Less(source.volume, 0.01f);
+        }
+
+        [Test]
+        public void PlayMusic_TrackAlreadyPlaying_KeepsPlaying()
+        {
+            var run = MakeMusic();
+            _service.PlayMusic(run, crossfadeDuration: 0f);
+            var source = MusicSourceOf(_service, run);
+
+            _service.PlayMusic(run, crossfadeDuration: 1000f);
+
+            Assert.AreEqual(1, MusicSources(_service).Count(music => music.resource == run.Resource),
+                "the playing track must not start again on another source");
+            Assert.AreSame(source, MusicSourceOf(_service, run));
+            Assert.AreEqual(1f, source!.volume, 1e-5f);
+        }
+
+        [Test]
+        public void PlayMusic_TrackFadingOut_FadesBackWithoutRestart()
+        {
+            var run = MakeMusic();
+            _service.PlayMusic(run, crossfadeDuration: 0f);
+            _service.PlayMusic(MakeMusic(), crossfadeDuration: 1000f);
+            var source = MusicSourceOf(_service, run);
+
+            _service.PlayMusic(run, crossfadeDuration: 1000f);
+
+            Assert.AreEqual(1, MusicSources(_service).Count(music => music.resource == run.Resource));
+            Assert.AreSame(source, MusicSourceOf(_service, run));
+            Assert.Greater(source!.volume, 0.9f, "the track goes on from where its fade was, not from silence");
+        }
+
+        [Test]
+        public void PlayMusic_SameTrackAfterStopMusic_PlaysAgain()
+        {
+            var run = MakeMusic();
+            _service.PlayMusic(run, crossfadeDuration: 0f);
+            _service.StopMusic();
+
+            _service.PlayMusic(run, crossfadeDuration: 0f);
+
+            var source = MusicSourceOf(_service, run);
+            Assert.IsNotNull(source);
+            Assert.IsTrue(source!.isPlaying);
+            Assert.AreEqual(1f, source.volume, 1e-5f);
+        }
+
+        [UnityTest]
+        public IEnumerator StopSound_AttachedWithFadeOut_KeepsFollowing()
+        {
+            var target = NewTarget(Vector3.zero);
+            var handle = _service.PlaySFXAttached(MakeValidSound(), target);
+            var source = HandleSource(_service, handle);
+            _service.StopSound(handle, fadeOut: 1000f);
+
+            target.position = new Vector3(0f, 0f, 5f);
+            for (int i = 0; i < 5; i++) yield return null;
+
+            Assert.AreEqual(target.position, source.transform.position);
+        }
+
+        [Test]
         public void PlayMusic_PlaysOnPause_SetsIgnoreListenerPause()
         {
             _service.PlayMusic(MakeMusic(playsOnPause: true), crossfadeDuration: 0f);
@@ -634,7 +821,24 @@ namespace Rubickanov.Audio.Tests
             GetField<System.Collections.IEnumerable>(service, "_activeSources").Cast<AudioSource>().Single();
 
         private static AudioSource[] MusicSources(UnityAudioService service) =>
-            new[] { GetField<AudioSource>(service, "_musicSourceA"), GetField<AudioSource>(service, "_musicSourceB") };
+            Root(service).GetComponentsInChildren<AudioSource>()
+                .Where(source => source.name.StartsWith("Music_", StringComparison.Ordinal)).ToArray();
+
+        private static AudioSource? MusicSourceOf(UnityAudioService service, MusicConfig music) =>
+            MusicSources(service).SingleOrDefault(source => source.resource == music.Resource);
+
+        private static AudioSource[] SfxSources(UnityAudioService service) =>
+            Root(service).GetComponentsInChildren<AudioSource>().Where(source => source.name == "SFX_Source").ToArray();
+
+        private static int LoopSourceCount(UnityAudioService service) =>
+            Root(service).GetComponentsInChildren<AudioSource>()
+                .Count(source => source.name.StartsWith("Loop_", StringComparison.Ordinal));
+
+        private static GameObject Root(UnityAudioService service) => GetField<GameObject>(service, "_root");
+
+        private static AudioSource HandleSource(UnityAudioService service, SoundHandle handle) =>
+            GetField<System.Collections.Generic.Dictionary<long, AudioSource>>(service, "_handleSources")[
+                (long)typeof(SoundHandle).GetField("_id", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(handle)];
 
         private Transform NewTarget(Vector3 position)
         {
@@ -692,7 +896,7 @@ namespace Rubickanov.Audio.Tests
             return (SoundConfig)boxed;
         }
 
-        private static MusicConfig MakeMusic(bool playsOnPause)
+        private static MusicConfig MakeMusic(bool playsOnPause = false)
         {
             object boxed = default(MusicConfig);
             typeof(MusicConfig).GetField("_resource", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(boxed, NewClip());
@@ -706,8 +910,10 @@ namespace Rubickanov.Audio.Tests
 
         private AudioSource LoopSource(string slot) => LoopSource(_service, slot);
 
-        private static AudioSource LoopSource(UnityAudioService service, string slot) =>
-            GetField<System.Collections.Generic.Dictionary<string, AudioSource>>(service, "_loopSources")[slot];
+        private static AudioSource LoopSource(UnityAudioService service, string slot) => LoopSlots(service)[slot];
+
+        private static System.Collections.Generic.Dictionary<string, AudioSource> LoopSlots(UnityAudioService service) =>
+            GetField<System.Collections.Generic.Dictionary<string, AudioSource>>(service, "_loopSources");
 
         private static T GetField<T>(object target, string name) =>
             (T)target.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(target);

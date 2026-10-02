@@ -1,6 +1,6 @@
 {
   "name": "com.rubickanov.audio",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "license": "MIT",
   "displayName": "Audio",
   "description": "Audio service with SFX pooling, loops in 2D, at a point or attached to a transform, music playback, sounds that play on a paused listener, and AudioMixer-based volume control.",
