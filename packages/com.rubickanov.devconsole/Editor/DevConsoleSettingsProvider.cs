@@ -36,7 +36,7 @@ namespace Rubickanov.DevConsole.Editor
             EditorGUILayout.PropertyField(
                 _serializedSettings.FindProperty("useBuiltInToggle"),
                 new GUIContent("Use Built-in Toggle",
-                    "Enable to use a keyboard key. Disable to control via DevConsoleUI.Instance.Toggle()."));
+                    "Enable to use a keyboard key. Disable to open and close it yourself with DevConsoleWindow.Instance.Toggle()."));
 
             if (_serializedSettings.FindProperty("useBuiltInToggle").boolValue)
             {
@@ -49,7 +49,7 @@ namespace Rubickanov.DevConsole.Editor
             else
             {
                 EditorGUILayout.HelpBox(
-                    "Call DevConsoleUI.Instance.Toggle() or .Show(bool) from your input system.",
+                    "Call DevConsoleWindow.Instance.Toggle() or SetOpen(bool) from your input system.",
                     MessageType.Info);
             }
 

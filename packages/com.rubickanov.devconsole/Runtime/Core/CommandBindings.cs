@@ -68,9 +68,8 @@ namespace Rubickanov.DevConsole
             var keyboard = Keyboard.current;
             if (keyboard == null) return;
 
-            // Don't execute binds while console is open
-            if (DevConsoleIMGUI.IsOpen) return;
-            if (DevConsoleUIToolkit.Instance != null && DevConsoleUIToolkit.Instance.IsVisible) return;
+            // Keys typed into the console are text, not bindings
+            if (DevConsoleWindow.IsOpen) return;
             if (Suppress != null && Suppress()) return;
 
             // Collect first, then execute. A bound command may be `bind`/`unbind`, which mutates the
