@@ -43,7 +43,11 @@ namespace Rubickanov.DevConsole
         /// <summary>Optional filter invoked before command execution. Return non-null to override.</summary>
         public Func<RegisteredCommand, string[], ExecutionResult?>? PreExecuteFilter;
 
-        /// <summary>Discovers and registers all commands. Safe to call multiple times (no-op after first).</summary>
+        /// <summary>
+        /// Discovers the <c>[ConsoleCommand]</c> static methods and registers the built-in commands. Safe to call more
+        /// than once (a no-op after the first). The package calls it on the first frame; a discovered command replaces
+        /// one of the same name registered before that.
+        /// </summary>
         public void Initialize()
         {
             if (_initialized) return;
@@ -54,8 +58,6 @@ namespace Rubickanov.DevConsole
 
             Debug.Log($"[DevConsole] Registered {_commands.Count} commands.");
             ConsoleLog.LogSuccess($"Initialization complete. Registered {_commands.Count} commands.");
-
-            DevConsole.Commands.ConsoleCommands.RunAutoexec(this);
         }
 
         /// <summary>Registers a custom parser for type <typeparamref name="T"/>. Returns this for chaining.</summary>

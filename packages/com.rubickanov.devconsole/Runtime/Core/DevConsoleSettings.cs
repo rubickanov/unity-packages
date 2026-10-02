@@ -18,10 +18,21 @@ namespace Rubickanov.DevConsole
         [SerializeField] private Key toggleKey = Key.Backquote;
         [Range(0.1f, 0.9f)]
         [SerializeField] private float consoleHeight = 0.4f;
+        [SerializeField] private bool createWindow = true;
+        [SerializeField] private bool runStartupCommands = true;
 
         public bool UseBuiltInToggle => useBuiltInToggle;
         public Key ToggleKey => toggleKey;
         public float ConsoleHeight => consoleHeight;
+
+        /// <summary>Whether the package creates the console window before the first scene loads.</summary>
+        public bool CreateWindow => createWindow;
+
+        /// <summary>
+        /// Whether the package runs the <c>-command</c> lines on the first frame. Off for a game that has to run them
+        /// later itself, with <see cref="StartupCommands.Run(CommandRegistry)"/>.
+        /// </summary>
+        public bool RunStartupCommands => runStartupCommands;
 
         private static DevConsoleSettings? _instance;
 
