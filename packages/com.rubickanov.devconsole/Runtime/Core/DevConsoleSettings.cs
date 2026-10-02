@@ -1,12 +1,18 @@
-using System.IO;
+using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
 namespace Rubickanov.DevConsole
 {
-    public class DevConsoleSettings : ScriptableObject
+    /// <summary>
+    /// Project-wide console settings, edited in Project Settings > Dev Console. They are kept as JSON in a
+    /// <c>Resources</c> folder (<c>Assets/Resources/DevConsoleSettings.json</c> unless moved), so a player build carries
+    /// them; without the file every setting has its default.
+    /// </summary>
+    public sealed class DevConsoleSettings : ScriptableObject
     {
-        private const string SettingsPath = "ProjectSettings/DevConsoleSettings.json";
+        /// <summary>The name the settings file is loaded by from any <c>Resources</c> folder.</summary>
+        public const string ResourceName = "DevConsoleSettings";
 
         [SerializeField] private bool useBuiltInToggle = true;
         [SerializeField] private Key toggleKey = Key.Backquote;
@@ -20,21 +26,39 @@ namespace Rubickanov.DevConsole
         private static DevConsoleSettings? _instance;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStatics() => _instance = null;
+        internal static void ResetStatics() => _instance = null;
 
+        /// <summary>The settings, read from <c>Resources</c> the first time they are asked for.</summary>
         public static DevConsoleSettings GetOrCreate()
         {
             if (_instance != null) return _instance;
-            _instance = CreateInstance<DevConsoleSettings>();
-            if (File.Exists(SettingsPath))
-                JsonUtility.FromJsonOverwrite(File.ReadAllText(SettingsPath), _instance);
-            _instance.hideFlags = HideFlags.HideAndDontSave;
+
+            var file = Resources.Load<TextAsset>(ResourceName);
+            _instance = FromJson(file != null ? file.text : null);
+            if (file != null) Resources.UnloadAsset(file);
             return _instance;
         }
 
-        public void Save()
+        /// <summary>Settings with the values <paramref name="json"/> gives and defaults for the rest.</summary>
+        internal static DevConsoleSettings FromJson(string? json)
         {
-            File.WriteAllText(SettingsPath, JsonUtility.ToJson(this, true));
+            var settings = CreateInstance<DevConsoleSettings>();
+            settings.hideFlags = HideFlags.HideAndDontSave;
+            if (string.IsNullOrWhiteSpace(json)) return settings;
+
+            try
+            {
+                JsonUtility.FromJsonOverwrite(json, settings);
+            }
+            catch (ArgumentException e)
+            {
+                Debug.LogWarning($"[DevConsole] {ResourceName}.json could not be read, using the defaults: {e.Message}");
+            }
+
+            return settings;
         }
+
+        /// <summary>The settings as the JSON they are stored as.</summary>
+        public string ToJson() => JsonUtility.ToJson(this, true);
     }
 }
