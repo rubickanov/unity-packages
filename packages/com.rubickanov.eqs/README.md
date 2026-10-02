@@ -8,9 +8,7 @@ Data-driven spatial query system for AI. Generates candidate positions or actors
 
 None.
 
-Optional assemblies depend on:
-- `UniTask` — async `RunAsync()` extension (EQS.UniTask)
-- `com.rubickanov.behaviortree` — BT leaf node (EQS.BehaviorTree)
+The optional EQS.UniTask assembly depends on `UniTask` (async `RunAsync()` extension).
 
 ## Architecture
 
@@ -39,7 +37,6 @@ EQSQuery  ──  Start(context) → Tick(budgetMs) → GetResult()
 | **EQS.Runtime** | Yes | Core query engine, generators, tests, debugger |
 | **EQS.Editor** | Editor | Custom inspectors for EQSQueryConfig and EQSQueryDebugger |
 | **EQS.UniTask** | Yes | Async `RunAsync()` extension method |
-| **EQS.BehaviorTree** | Yes | `BTRunEQSQuery` leaf node for behavior trees |
 
 ## Core Concepts
 
@@ -137,19 +134,6 @@ result.TopN(3, topItems, minScore: 0.2f);
 
 foreach (var item in topItems)
     Debug.Log($"Position: {item.Position}, Score: {item.Score}");
-```
-
-### Behavior Tree Integration
-
-Requires the **EQS.BehaviorTree** assembly. **BTRunEQSQuery** runs the query over multiple ticks and stores the best position in the blackboard:
-
-```csharp
-// Set reference position before running the query
-ctx.Blackboard.Set(EQSBlackboardKeys.ReferencePosition, enemyPosition);
-
-// After BTRunEQSQuery succeeds:
-if (ctx.Blackboard.TryGet(EQSBlackboardKeys.BestPosition, out Vector3 pos))
-    agent.SetDestination(pos);
 ```
 
 ### Custom Generator

@@ -38,18 +38,18 @@ Install these first:
 |---|---|---|
 | `R3` | NuGet | [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity) → install `R3` |
 | `ObservableCollections`, `ObservableCollections.R3` | NuGet | NuGetForUnity → install `ObservableCollections.R3` (pulls the base package) |
+| `Microsoft.Extensions.Logging.Abstractions` | NuGet | NuGetForUnity → install `Microsoft.Extensions.Logging.Abstractions` |
 | `UniTask` | git URL | `https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask` |
-| `ZLogger` | git URL | `https://github.com/Cysharp/ZLogger.git?path=src/ZLogger.Unity/Assets/ZLogger.Unity` |
 | `LitMotion` | git URL | `https://github.com/annulusgames/LitMotion.git?path=src/LitMotion/Assets/LitMotion` |
 
 Which package needs what:
 
 | Needs | Packages |
 |---|---|
-| `R3` | `acs`, `acs.debug`, `acs.netcode`, `acs.persistence`, `acs.reactive`, `ui`, `ui.localization` |
-| `ObservableCollections` | `acs`, `acs.debug`, `acs.netcode`, `acs.persistence`, `ui` |
-| `UniTask` | `audio`, `config`, `eqs` (optional asm), `loading`, `statemachine` (async asm), `storage`, `ui`, `ui.animations`, `ui.loading` |
-| `ZLogger` | `logging` |
+| `R3` | `ui` |
+| `ObservableCollections` | `ui` |
+| `Microsoft.Extensions.Logging.Abstractions` | `config` |
+| `UniTask` | `audio`, `config`, `eqs` (optional asm), `statemachine` (async asm), `ui`, `ui.animations` |
 | `LitMotion` | `ui.animations` |
 
 `unity-project-pckgs/Packages/manifest.json` is the reference — it has every one
@@ -82,7 +82,7 @@ Example:
 
 Package test assemblies in this repo are gated by a `UNITY_INCLUDE_TESTS`
 define constraint and `includePlatforms: [Editor]` (see for example
-`packages/com.rubickanov.acs/Tests/ACS.Tests.asmdef`). Unity only compiles
+`packages/com.rubickanov.ui/Tests/UI.Tests.asmdef`). Unity only compiles
 those tests — and only shows them in **Window → General → Test Runner** — when
 the package is both:
 
@@ -96,18 +96,18 @@ Add the packages you want to test to `testables` manually, alongside
 ```json
 {
   "dependencies": {
-    "com.rubickanov.acs": "file:../../unity-packages/packages/com.rubickanov.acs",
+    "com.rubickanov.ui": "file:../../unity-packages/packages/com.rubickanov.ui",
     "com.rubickanov.utils": "file:../../unity-packages/packages/com.rubickanov.utils"
   },
   "testables": [
-    "com.rubickanov.acs",
+    "com.rubickanov.ui",
     "com.rubickanov.utils"
   ]
 }
 ```
 
 Then in Unity: **Window → General → Test Runner → EditMode** — the package's
-tests will appear under its assembly name (e.g. `ACS.Tests`). Reimport the
+tests will appear under its assembly name (e.g. `Rubickanov.UI.Tests`). Reimport the
 package (right-click in Project → Reimport) if the tests don't show up after
 editing the manifest.
 

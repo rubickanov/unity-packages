@@ -203,7 +203,7 @@ Pair it with a default provider so every command using that type gets suggestion
 CommandRegistry.Instance.RegisterDefaultProvider<Player>(new PlayerNameProvider());
 ```
 
-`RegisterParser` and `RegisterDefaultProvider` return the registry for chaining. For ScriptableObject databases, the [`com.rubickanov.devconsole.config`](../com.rubickanov.devconsole.config/) extension registers parser and provider in a single call.
+`RegisterParser` and `RegisterDefaultProvider` return the registry for chaining.
 
 ### Runtime Registration
 
@@ -389,8 +389,8 @@ inside quotes is text.
 
 `wait <frames>` stops a chain and runs what follows it that many frames later (counted at the start of `Update`):
 `scene reload; wait 2; teleport spawn`. In an `exec` file it defers the rest of the file the same way. A
-`PreExecuteFilter` that refuses `wait` makes the rest run at once instead, which is what the netcode bridge does for a
-client's command.
+`PreExecuteFilter` that refuses `wait` makes the rest run at once instead, as a
+networked console would for a client's command.
 
 An alias is a short name for a command line. Arguments given to the alias are appended, or placed with `$1`…`$9` (one
 argument each, as typed) and `$*` (all of them). Quote the command when it contains `;`, so the whole chain becomes the
@@ -491,10 +491,3 @@ so argument handling can be tested without starting a process.
   with the same name replaced the first.
 - **`wait` is a command, not syntax** — so the same `PreExecuteFilter` that guards everything else decides whether a deferred rest may run.
 - **Singleton frontends** — both frontends are singleton MonoBehaviours. Statics reset on `SubsystemRegistration` so domain-reload-disabled play sessions start clean.
-
-## Related Packages
-
-- [`com.rubickanov.devconsole.config`](../com.rubickanov.devconsole.config/) — auto-resolve `ConfigDatabase<T>` items by `Id` in command arguments.
-- [`com.rubickanov.devconsole.netcode`](../com.rubickanov.devconsole.netcode/) — CS:GO-style command domains (Client / Server / Shared) and cheat protection.
-</content>
-</invoke>
