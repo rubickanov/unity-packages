@@ -454,7 +454,7 @@ namespace Rubickanov.DevConsole
             if (_defaultProviders.TryGetValue(paramType, out var defaultProvider))
                 return defaultProvider;
             if (paramType.IsEnum)
-                return GetOrCreateProvider(typeof(EnumAutoCompleteProvider), paramType);
+                return new EnumAutoCompleteProvider(paramType);
             if (paramType == typeof(bool))
                 return BoolAutoCompleteProvider.Instance;
             return null;
@@ -470,7 +470,7 @@ namespace Rubickanov.DevConsole
                 }
                 catch (Exception e)
                 {
-                    ConsoleDiagnostics.Error($"Failed to create provider {providerType.Name}: {e.Message}");
+                    ReportProviderFailure(providerType, e);
                     return null;
                 }
             }
@@ -485,12 +485,22 @@ namespace Rubickanov.DevConsole
                 }
                 catch (Exception e)
                 {
-                    ConsoleDiagnostics.Error($"Failed to create provider {providerType.Name}: {e.Message}");
+                    ReportProviderFailure(providerType, e);
                     return null;
                 }
             }
 
             return provider;
+        }
+
+        // A constructor only reflection reaches is what code stripping removes first, so a missing one names the fix.
+        private static void ReportProviderFailure(Type providerType, Exception e)
+        {
+            string hint = e is MissingMethodException
+                ? " Give it the constructor its [AutoComplete] arguments need, and mark the provider [Preserve] so " +
+                  "code stripping keeps that constructor."
+                : string.Empty;
+            ConsoleDiagnostics.Error($"Failed to create provider {providerType.Name}: {e.Message}{hint}");
         }
 
         public struct ExecutionResult
