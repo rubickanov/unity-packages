@@ -163,9 +163,10 @@ Built-in providers:
 
 ### Custom Autocomplete Provider
 
-Implement **IAutoCompleteProvider**. `GetSuggestions` must append to the supplied list without allocating:
+Implement **IAutoCompleteProvider** and mark it `[Preserve]` (see Code Stripping). `GetSuggestions` must append to the supplied list without allocating:
 
 ```csharp
+[Preserve]
 public class PlayerNameProvider : IAutoCompleteProvider
 {
     public string Hint => "<player>";
@@ -496,6 +497,19 @@ public sealed class ConsoleInputBlock : IInitializable, IDisposable
 Command classes resolved by the container register themselves with `RegisterTarget(this)` in `Initialize` and
 `UnregisterTarget(this)` in `Dispose`; they are there for autoexec and `-command` as long as they register before the
 first frame.
+
+## Code Stripping
+
+Commands and autocomplete providers are reached only through reflection, which the IL2CPP linker cannot see. At the
+Minimal stripping level nothing of the game or the packages is stripped; at Low and above:
+
+- `[ConsoleCommand]` derives from `UnityEngine.Scripting.PreserveAttribute`, so every command is kept with its class,
+  static or registered with `RegisterTarget`. Nothing to do.
+- A provider named in `[AutoComplete]` is created with `Activator.CreateInstance`, and only its type is referenced.
+  Mark your providers `[Preserve]`, and the constructor too when it takes arguments; the package's own are marked.
+  A provider whose constructor was stripped fails at registration with an error that says so.
+- `Rubickanov.DevConsole.Log` is referenced by nothing and carries `[assembly: AlwaysLinkAssembly]`, so the linker
+  still looks into it.
 
 ## Design Decisions
 

@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine.Scripting;
 
 namespace Rubickanov.DevConsole
 {
     /// <summary>Autocomplete provider that suggests enum value names. Auto-applied to enum parameters.</summary>
+    [Preserve]
     public class EnumAutoCompleteProvider : IAutoCompleteProvider
     {
         private readonly string[] _values;
@@ -29,11 +31,13 @@ namespace Rubickanov.DevConsole
     }
 
     /// <summary>Autocomplete provider that suggests from a fixed list of strings.</summary>
+    [Preserve]
     public class StaticListProvider : IAutoCompleteProvider
     {
         private readonly string[] _options;
         public string Hint => "<option>";
 
+        [Preserve]
         public StaticListProvider(params string[] options) => _options = options;
 
         public void GetSuggestions(string partial, List<string> results)
@@ -48,6 +52,7 @@ namespace Rubickanov.DevConsole
     }
 
     /// <summary>Autocomplete provider for boolean parameters. Auto-applied to bool parameters.</summary>
+    [Preserve]
     public class BoolAutoCompleteProvider : IAutoCompleteProvider
     {
         public static readonly BoolAutoCompleteProvider Instance = new();
@@ -69,6 +74,7 @@ namespace Rubickanov.DevConsole
     /// Marks an argument that is itself a command line, like the command of <c>bind</c> or <c>repeat</c>: the registry
     /// completes it as a command, its arguments included. Must be the last argument's provider.
     /// </summary>
+    [Preserve]
     public class CommandLineProvider : IAutoCompleteProvider
     {
         public static readonly CommandLineProvider Instance = new();

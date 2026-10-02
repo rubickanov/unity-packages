@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine.InputSystem;
+using UnityEngine.Scripting;
 
 namespace Rubickanov.DevConsole
 {
@@ -8,6 +9,7 @@ namespace Rubickanov.DevConsole
     /// Suggests InputSystem key names for a <see cref="KeyChord"/> argument, after any modifiers already typed:
     /// <c>ctrl+F</c> suggests <c>ctrl+F1</c>, <c>ctrl+F2</c>…
     /// </summary>
+    [Preserve]
     public class KeyChordProvider : IAutoCompleteProvider
     {
         private static string[]? _keyNames;
