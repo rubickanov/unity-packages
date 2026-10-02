@@ -1,59 +1,56 @@
 # UI Framework
 
-UI Toolkit framework: views with view models on four layers, popups, dialogs, tooltips and a spinner, with one pointer-capture signal and one back stack for the game's cursor and Escape key.
+UI Toolkit framework: views with view models on four layers, a screen history, popups, unscaled-time animations, and one pointer capture, back stack and menu navigation for the game's cursor, Escape key and pad.
 
 ## Dependencies
 
 > `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
 - `UniTask` — async register / show / hide and animations
-- `R3` — reactive properties, commands and bindings in `ViewModelBase` and `View<TViewModel>`
-- `ObservableCollections` — the source of `BindList` (NuGet, like `R3`)
+- `R3` — reactive properties, commands and bindings in `ViewModelBase` and `View<TViewModel>`, the menu's focus and cues (NuGet)
 
-Show/hide animations live in the `com.rubickanov.ui.animations` extension; this package ships only `NoneAnimation`. Unity `6000.0+`.
+Unity `6000.0+`. The package reads no input device: the game reads its own actions and feeds them in.
 
 ## Architecture
 
 ```text
 IUIService ── UIService(root, UxmlLoader)
-  ├── screen-layer   Screen views: one active, a history to go back through
+  ├── screen-layer   Screen views: one active, a history Back returns through
   ├── hud-layer      HUD views: independent
   ├── popup-layer    popups (PopupHost)
-  └── overlay-layer  Overlay views: independent; modal popups, dialogs, tooltips
+  └── overlay-layer  Overlay views: independent; modal popups
         View ── View<TViewModel> ◄── binds ── ViewModelBase
 
-IPopupService ── PopupHost(root, UIService)    code-built panels, placement, close rules
-  ├── ShowView<T>()          popup views: a registered view in its own popup
-  ├── CreateDialog() ...     confirm / alert / modal / custom dialogs
-  └── AttachTooltip()        hover tooltips
-SpinnerHost(root)            busy indicator on the overlay layer
+IPopupService ── PopupHost(root, IUIService)   content, placement, close rules
+MenuNavigation ── MenuModel                    claim stack for keyboard and pad menus
+CursorLock(IUIService)                         the hardware cursor from PointerCaptured
 UxmlLoader ◄── UxmlLoaders.FromCatalog(UxmlCatalog)
 ```
 
-`PopupHost` reports its popups to `IUIService`, so `PointerCaptured` and `Back()` cover views and popups alike.
+Every view that takes input, every interactive popup and every input scope holds a pointer capture and a back handler on `IUIService`, so `PointerCaptured` and `Back()` cover all of them.
 
 ## Assemblies
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **Rubickanov.UI** | Yes | Views, service, popups, dialogs, tooltips, spinner, UXML catalog, default stylesheet |
+| **Rubickanov.UI** | Yes | Views, service, popups, animations, navigation, UXML catalog |
 | **Rubickanov.UI.Editor** | Editor | `Rubickanov/UI Debug` window |
 
 ## Core Concepts
 
-**View** — authored UXML plus a view model, one instance per view type, registered once and shown many times. Repeated elements (list rows, markers) are child views, kept in step with an `ObservableList<T>` by `BindList`, or popups.
-
-**Popup** — a transient panel described with a `PopupBuilder`: placement, modal or passive, close rules. Its content may be a registered view with its own view model. Popup views, dialogs and tooltips are popup presets.
+**View** — authored UXML (or a tree built in code) plus a view model, one instance per view type, registered once and shown many times. How a game lays out lists inside a view is its own business.
 
 **Layer** — declared by the view, not by whoever registers it:
 
 | Layer | Behaviour |
 |---|---|
-| `Screen` | At most one visible. Showing a screen hides the current one; `Navigate` records it in a history that `Back()` returns through. Intercepts input, captures the pointer, pushes a back handler. |
-| `Popup` | A popup view. Registering only loads its UXML; `popups.ShowView<T>(viewModel)` opens a popup with a new instance of it, as many at once as you like. `ui.Show` and `ui.Get` throw for it. |
-| `HUD`, `Overlay` | Independent. `Show`/`Hide` only; no pointer capture, no back handler, untouched by `HideScreen`. Do not intercept input. |
+| `Screen` | At most one visible. Showing a screen hides the current one; `Navigate` records it in a history that `Back()` returns through. Takes input. |
+| `Popup` | A popup view. Registering only loads its UXML; `popups.ShowView<TView, TViewModel>(viewModel)` opens a popup with a new instance of it, as many at once as you like. `ui.Show` and `ui.Get` throw for it. |
+| `HUD`, `Overlay` | Independent. `Show`/`Hide` only. Take input only when `InterceptsInput` says so. |
 
-**View model lifetime** — the view model passed to `Show` belongs to that show. When the view unbinds it (hide finished, another `Show` replaced it, `Unregister`, service disposed) the service disposes it, together with everything it made through `CreateProperty`, `CreateCommand`, `CreateSubject` and `TrackDisposable`. `Show` with the instance already bound keeps the binding: `OnBind` does not run again and nothing is disposed. Never reuse a view model after its view hid: build a new one per show.
+**Taking input** — a visible view with `InterceptsInput` (screens by default) blocks pointer events, holds a pointer capture and answers `Back()` with its `OnBack()`.
+
+**View model lifetime** — the view model passed to `Show` belongs to that show. When the view unbinds it (hide finished, another `Show` replaced it, `Unregister`, service disposed) the service disposes it, together with everything it made through `CreateProperty`, `CreateCommand`, `CreateSubject` and `TrackDisposable`. Build a new one per show.
 
 **ViewState** — `Hidden`, `Showing`, `Shown`, `Hiding`; `IsVisible` is `Showing` or `Shown`. A new transition cancels the running one, so show and hide can be called in any order at any time.
 
@@ -61,7 +58,7 @@ UxmlLoader ◄── UxmlLoaders.FromCatalog(UxmlCatalog)
 
 1. The `UIDocument` root holds four elements named `screen-layer`, `hud-layer`, `popup-layer`, `overlay-layer`.
 2. Create a catalog (**Create → Rubickanov → UI → UXML Catalog**) and add each view's UXML, named after the view type.
-3. Build the service, register views, show them.
+3. Build the services, register views, show them.
 
 ```csharp
 var root = uiDocument.rootVisualElement;
@@ -69,10 +66,10 @@ var ui = new UIService(root, UxmlLoaders.FromCatalog(uxmlCatalog));
 var popups = new PopupHost(root, ui);
 
 await ui.Register<HudView>();
-await ui.Show<HudView>(new HudViewModel(ship));
+await ui.Show<HudView, HudViewModel>(new HudViewModel(ship));
 ```
 
-With VContainer, register `UIService` as itself and as `IUIService`, and `PopupHost` as `IPopupService`; both are `IDisposable`. Dialogs are extension methods on `IPopupService` and need no registration.
+With VContainer, register `UIService` as `IUIService`, `PopupHost` as `IPopupService` (it takes `IUIService`), and `MenuNavigation` and `CursorLock` as singletons; all are `IDisposable`.
 
 ## Usage
 
@@ -103,7 +100,7 @@ public sealed class PauseView : View<PauseViewModel>
 }
 ```
 
-`OnBind` is synchronous: load icons or await requests before `Show`, in whoever builds the view model. Everything bound in `OnBind` is cleared on unbind; `OnUnbind()` and `TrackUnbind(action)` cover the rest.
+`OnBind` is synchronous: load icons or await requests before `Show`. Everything bound in `OnBind` is cleared on unbind; `OnUnbind()` and `TrackUnbind(action)` cover the rest. `OnInitialize()` runs once, when the tree is built: a code-only view (`UxmlName => null`) builds its tree there.
 
 ### Binding helpers
 
@@ -119,137 +116,191 @@ BindDropdown(Root.Q<DropdownField>("quality"), ViewModel.Quality, qualityNames);
 BindValueChanged<Slider, float>(Root.Q<Slider>("fov"), fov => ViewModel.SetFov(fov));
 ```
 
-`BindSlider`, `BindToggle` and `BindDropdown` also have one-way overloads taking an initial value and a callback. A two-way binding ends its own round trip: setting a field to the value it holds sends no `ChangeEvent`, and a `ReactiveProperty` does not emit an equal value. `BindTextField` still skips an equal value, because `TextField` rewrites its text on every set and would drop an IME composition.
+`BindSlider`, `BindToggle` and `BindDropdown` also have one-way overloads taking an initial value and a callback. A two-way binding ends its own round trip; `BindTextField` skips an equal value, so an IME composition survives.
 
 ### View options
 
 ```csharp
-public sealed class ScoreboardView : View<ScoreboardViewModel>
+public sealed class HintsView : View<HintsViewModel>
 {
-    protected override UILayer Layer => UILayer.HUD;
-    protected override bool InterceptsInput => true;                   // a HUD element with buttons
-    protected override IViewAnimation Animation => ViewAnimations.Fade; // from ui.animations
-    protected override string? UxmlName => "Scoreboard";               // default: the type name
+    private VisualElement _line = null!;
 
-    protected override bool OnBack() => false; // screens: default goes back in the history; popup views: true keeps the popup open
+    protected override UILayer Layer => UILayer.HUD;
+    protected override IViewAnimation Animation => ViewAnimations.Fade;
+    protected override VisualElement AnimationTarget => _line;  // the root covers the screen; the line moves
+    protected override bool InterceptsInput => false;           // true: blocks clicks, frees the pointer, answers Back
+    protected override string? UxmlName => "Hints";             // default: the type name
+
+    protected override void OnInitialize() => _line = Root.Q("line");
     protected override void OnBind() { }
 }
 ```
 
-A code-only view returns `null` from `UxmlName` and builds its tree on the empty `Root` in `OnInitialize()`, which runs once at registration.
-
-### Child views
-
-```csharp
-public sealed class CrewListView : View<CrewListViewModel>
-{
-    protected override UILayer Layer => UILayer.Screen;
-    protected override IReadOnlyList<Type> ChildViews => new[] { typeof(CrewRowView) };
-
-    protected override void OnBind()
-    {
-        var list = Root.Q("rows");
-        foreach (var member in ViewModel.Crew)
-            CreateChild<CrewRowView, CrewRowViewModel>(new CrewRowViewModel(member), list);
-    }
-}
-```
-
-The UXML of every type in `ChildViews` loads when the parent registers, so `CreateChild` is synchronous. Children are destroyed, and their view models disposed, when the parent unbinds; `DestroyChildren()` does it earlier. Creating a type not listed throws.
-
-### Lists
-
-```csharp
-public sealed class LobbyViewModel : ViewModelBase
-{
-    public ObservableList<LobbyMember> Members { get; }
-    public LobbyViewModel(Lobby lobby) => Members = lobby.Members;
-}
-
-public sealed class LobbyView : View<LobbyViewModel>
-{
-    protected override UILayer Layer => UILayer.Screen;
-    protected override IReadOnlyList<Type> ChildViews => new[] { typeof(MemberRowView) };
-
-    protected override void OnBind()
-    {
-        BindList<LobbyMember, MemberRowView, MemberRowViewModel>(
-            ViewModel.Members, Root.Q("members"), member => new MemberRowViewModel(member));
-    }
-}
-```
-
-One child view per item, in the list's order. An added item gets a row with a new view model; a removed or replaced one loses its row, and the row's view model is disposed; a moved, sorted or reversed item keeps its row. `Clear` removes every row. Rows stay together after whatever else the container holds, such as a header or an "empty" label; put anything that goes below them in another element. The source is any `IObservableCollection<T>`: a collection without indices (`ObservableHashSet<T>`) finds rows by equality and appends. Change the source on the main thread. The binding ends when the view unbinds, like every other binding.
-
 ### Showing and hiding
 
 ```csharp
-await ui.Show<PauseView>(new PauseViewModel(audio)); // completes when the show animation ends
-ui.Hide<PauseView>();          // instant
-await ui.HideAsync<PauseView>(); // animated
-
-ui.HideScreen();               // the active screen, whichever it is; HideScreenAsync() animates
+await ui.Show<PauseView, PauseViewModel>(new PauseViewModel(audio)); // completes when the show animation ends
+ui.Hide<PauseView>();             // instant
+await ui.HideAsync<PauseView>();  // animated
 var hud = ui.Get<HudView>();
-ui.Unregister<HudView>();      // destroys the view, or cancels a registration still loading
+ui.Unregister<HudView>();         // destroys the view, or cancels a registration still loading
 ```
 
-`Show` with a view model of the wrong type throws `ArgumentException` before anything changes. The service updates its bookkeeping (active screen, capture, back handlers) at the call, not after the animation.
-
-### Cursor: pointer capture
-
-```csharp
-ui.PointerCaptured.Subscribe(captured =>
-{
-    Cursor.lockState = captured ? CursorLockMode.None : CursorLockMode.Locked;
-    Cursor.visible = captured;
-});
-
-using (ui.CapturePointer())   // free the cursor without opening UI
-    await PickTargetAsync();
-```
-
-Captures are counted. A screen holds one while showing or shown, `PopupHost` holds one for every modal or interactive popup (buttons, input, a view, close button, hover-close).
-
-### Escape: the back stack
-
-```csharp
-if (Keyboard.current.escapeKey.wasPressedThisFrame && !ui.Back())
-    await ui.Show<PauseView>(new PauseViewModel(audio));
-
-using var back = ui.PushBackHandler(() => { targeting.Cancel(); return true; });
-```
-
-The package does not read the keyboard. `Back()` runs handlers last-pushed first until one returns `true`. The visible screen pushes `OnBack()`; popups with `PopupCloseTriggers.Escape` close on `Back()`, after asking their view's `OnBack()`. The visible screen's handler always runs last, so anything open over a screen answers first even if it opened before the screen was shown.
+A view model of the wrong type does not compile: `TView` must be a `View<TViewModel>`. The service updates its bookkeeping (active screen, captures, back handlers) at the call, not after the animation. Shown again while hiding, a view keeps its place in the animation (see Animations).
 
 ### Screen history
 
 ```csharp
-await ui.Navigate<MainMenuView>(() => new MainMenuViewModel(session));
-await ui.Navigate<HostView>(() => new HostViewModel(session));
-await ui.Navigate<LobbyView>(() => new LobbyViewModel(session.Lobby));
+await ui.Navigate<MainMenuView, MainMenuViewModel>(() => new MainMenuViewModel(session));
+await ui.Navigate<LobbyView, LobbyViewModel>(() => new LobbyViewModel(session.Lobby));
 
-ui.Back();                // lobby → host; again → main menu; then false: the game's own Escape
-await ui.NavigateBack();  // the same from a "Back" button; false when there is nowhere to go
+ui.Back();   // lobby → main menu; then false: the game's own Escape
 
-// A screen already in the history is returned to: the screens above it are dropped.
-await ui.Navigate<MainMenuView>(() => new MainMenuViewModel(session));
-
-// Show of a screen is a jump, not a step: it clears the history.
-await ui.Show<ShipScreen>(new ShipScreenViewModel(ship));
+protected override bool OnBack()   // in EpisodesView
+{
+    var model = ViewModel;
+    if (model.CloseDetails()) return true;
+    var back = base.OnBack();      // goes back once this returns: ViewModel is still bound here
+    if (back) ViewModel.CueBack();
+    return back;
+}
 ```
 
-`Navigate` takes a factory, not a view model: a view model lives for one show, so every return builds a new one. A screen's default `OnBack()` goes back while its screen is the current one of the history; its handler runs after every other one, so a popup over it still closes first. `Show` of a screen, `Hide` of the current screen and `HideScreen` clear the history; `Unregister` drops the screen from it. `CanNavigateBack` says whether there is a screen to return to. `Navigate` to a view on another layer throws.
+`Navigate` takes a factory: a view model lives for one show, so every return builds a new one. A screen already in the history is returned to and the screens above it are dropped. `Show` of a screen, `Hide` of the current screen and `Unregister` change the history; `CanNavigateBack` tells whether there is a screen to return to. A Back button on a screen calls `ui.Back()`, the same path as Escape.
+
+### Escape and pause: the back stack
+
+```csharp
+// Each frame, from the game's own actions: Escape is back and pause, a pad's B only back, its Start only pause.
+ui.BackOrPause(input.Cancel.WasPressedThisFrame(), input.Pause.WasPressedThisFrame(), OpenPauseMenu);
+
+using var back = ui.PushBackHandler(() => { targeting.Cancel(); return true; });
+```
+
+`Back()` runs handlers last-pushed first until one returns `true`. Views that take input push `OnBack()`; the visible screen's handler always runs last, so anything open over a screen answers first. A modal popup stops `Back()` whether or not it closes on it.
+
+### Cursor: pointer capture
+
+```csharp
+var cursor = new CursorLock(ui);       // the one writer of Cursor.lockState and Cursor.visible
+using (cursor.Lock())                  // the camera looks with the mouse: locked while nothing captures
+    await RunCourseAsync();
+
+using (ui.CapturePointer())            // free the cursor without opening UI: a console, a debug toggle
+    await PickTargetAsync();
+```
+
+Captures are counted. The cursor is locked while at least one `Lock()` is held and `PointerCaptured` is false, and written again when the window gets its focus back.
+
+### Input scope
+
+```csharp
+// A panel of the game's own, not a view: Back, the pointer and the menu keys in one handle.
+_scope = ui.OpenInputScope(OnBack, navigation, settingsMenu);
+_scope.Dispose();
+```
+
+Without a back handler Back stops at the scope unanswered, as at a modal popup.
+
+### Menus: keyboard and pad
+
+```csharp
+// Each frame, from the game's own actions; while its menu input is off: navigation.WaitForRelease().
+navigation.Update(new MenuInput
+{
+    Navigate = input.Navigate.ReadValue<Vector2>(),
+    Page = input.Page.ReadValue<float>(),
+    Tab = input.Tab.WasPressedThisFrame() ? Math.Sign(input.Tab.ReadValue<float>()) : 0,
+    Submit = input.Submit.WasPressedThisFrame(),
+}, Time.unscaledTime);
+
+Menu = new MenuModel(new[]
+{
+    new MenuEntry("RESUME", Resume),
+    new MenuEntry("RESTART", Restart, enabled: canRestart),
+    new MenuEntry("STAY", Close).WithCue(MenuCue.Back),
+}, navigation);
+TrackDisposable(Menu);
+
+navigation.Cues.Subscribe(cue => audio.Play(SoundOf(cue)));
+```
+
+Only the last claim hears the keys: a `MenuModel` claims while it lives, `navigation.Claim(target)` claims for any `IMenuTarget`. A direction steps once on a press and again while held (after 0.4 s, every 0.1 s, on the time passed in); one already held when a menu claims waits for its release. `MenuModel` focuses over the entries that are on, without wrapping; `Point(i)` and `Click(i)` take the mouse; `Focus` and `Pressed` are for the view. Cues `Focus`, `Select`, `Back` and `Denied` come from the package; a game adds its own as `new MenuCue("tape")`. For a wheel, `WheelSteps.Take(evt.delta.y, out var direction)` steps once per notch however many events a touchpad sends.
+
+### Animations
+
+```csharp
+public sealed class Squeeze : IViewAnimation
+{
+    public UniTask PlayShowAsync(VisualElement target, CancellationToken ct) =>
+        Tween.Run(0.25f, t => target.style.scale = new Scale(new Vector2(1f, BackOut(t))), ct);
+
+    public UniTask PlayHideAsync(VisualElement target, CancellationToken ct) =>
+        Tween.Run(0.2f, t => target.style.scale = new Scale(new Vector2(1f, 1f - t * t)), ct);
+
+    public void Reset(VisualElement target) => target.style.scale = StyleKeyword.Null;
+}
+```
+
+`Tween.Run(seconds, apply, ct)` calls `apply` once a frame with 0..1 on unscaled time and last with 1, so a pause menu at `Time.timeScale` 0 still opens and closes. `ViewAnimations.Fade` (`new FadeAnimation(seconds)` for another length) fades from wherever the opacity is: a view shown again mid-hide fades back in instead of flickering from zero. A show may start mid-hide and a hide mid-show; an animation should start from where the target is.
+
+### Popups
+
+```csharp
+var toast = popups.Create()
+    .Content(() => new Label("Autosaved"))
+    .At(PopupPlacement.Screen(PopupAnchorCorner.TopRight, new Vector2(16, 16)))
+    .PassThrough()                                  // clicks go through, no pointer capture
+    .Open();
+toast.Close();
+
+var result = await popups.Create()
+    .Content<InviteFriendsView, InviteFriendsViewModel>(new InviteFriendsViewModel(friends))
+    .Modal()
+    .CloseOn(PopupCloseTriggers.Escape | PopupCloseTriggers.ClickOutside)
+    .OpenAsync();                                   // result.Id, result.Reason
+```
+
+A popup is a frame over its layer holding a panel with one content: a built element or a new instance of a registered view (any layer), bound to its view model. Without `PassThrough()` the panel takes clicks and captures the pointer. `Modal()` makes the frame a backdrop that blocks input below and stops `Back()`, and puts the popup on the overlay layer unless `OnLayer(...)` names another. Close triggers: `Escape` (on `Back()`, after asking the content view's `OnBack()`), `ClickOutside` (modal). `Close(id)` completes `Result` at once, then plays the hide animation (`.Animation(...)`, else the content view's own on its `AnimationTarget`, else the `PopupHost` default) and removes the elements, destroying the content view and disposing its view model. A builder with a view model opens once. `CloseAll()` closes every popup; `DismissOthers()` closes them with `PopupCloseReason.Replaced`. `Class`, `Style` and the `PopupStyle` class names are for the game's stylesheet: the package sets layout only.
+
+### Popup views
+
+```csharp
+public sealed class ConfirmView : View<ConfirmViewModel>
+{
+    protected override UILayer Layer => UILayer.Popup;
+
+    protected override void OnBind() =>
+        Bind(ViewModel.Answered, answer => Popup!.Close(answer));        // the view reaches its popup
+
+    protected override bool OnBack() => ViewModel.CloseDetails();        // true: Back handled, popup stays
+}
+
+await ui.Register<ConfirmView>();
+var answer = await popups.ShowView<ConfirmView, ConfirmViewModel>(new ConfirmViewModel("Quit?")).Result;
+if (answer.Id == "yes") Quit();
+```
+
+`ShowView` opens a popup on the popup layer stretched over it (`popup--view`), with a new instance of the view playing its own animation. It captures the pointer and closes on `Back()` unless the view's `OnBack()` returns `true`.
+
+### Placement
+
+```csharp
+PopupPlacement.ScreenCenter(new Vector2(0, -40));           // the default
+PopupPlacement.Screen(PopupAnchorCorner.BottomLeft, new Vector2(24, 24));
+PopupPlacement.Fill();                                       // stretched over the whole layer
+```
+
+Placement is flex alignment of the panel in its frame, not a measured position: a panel that grows stays in place.
 
 ### Scene-scoped registration
 
 ```csharp
-var scope = sceneScopes.Begin();   // SceneViewScopeService: disposes the previous scope
+var scope = new ScopedViewRegistration(ui);   // one per scene entry point
 await scope.Register<HangarView>();
 await scope.Register<LoadoutView>();
-// scene unload: sceneScopes.Begin() for the next scene, or scope.Dispose()
+scope.Dispose();                              // unregisters them; a view still loading is cancelled
 ```
-
-`ScopedViewRegistration` unregisters its views on dispose; disposing it while a view still loads cancels that registration.
 
 ### UXML catalog
 
@@ -266,147 +317,16 @@ public void UxmlCatalog_AllGameViews_HaveUxml()
 
 The loader looks up assets by name, throws naming the catalog when one is missing, and throws on two assets with the same name. Any other source (Addressables) plugs in as a `UxmlLoader` delegate returning the asset and a release handle.
 
-### Popups
-
-```csharp
-var handle = popups.Create()
-    .Title("Docking request")
-    .Message("Freighter Kestrel asks to dock at bay 2.")
-    .Button("Accept", "accept", isPrimary: true)
-    .Button("Deny", "deny")
-    .At(PopupPlacement.Screen(PopupAnchorCorner.TopRight, new Vector2(16, 16)))   // 16 px in from the corner
-    .CloseOn(PopupCloseTriggers.Escape)
-    .Open();
-
-handle.SetMessage("Kestrel is waiting.");        // SetTitle, SetIcon; handle.Panel for anything else
-var result = await handle.Result;               // ButtonId, Reason, InputText
-
-popups.Create().Message("Autosaved").Timeout(2f).Open(); // passive, clicks pass through
-```
-
-A button closes the popup with its id. `Modal()` adds a backdrop and puts the popup on the overlay layer, unless `OnLayer(...)` names another. Close triggers: `Escape` (on `Back()`), `CloseButton`, `ClickOutside` (modal), `PointerLeave`; `Timeout(seconds)` closes it by itself. Disposing the handle closes the popup. `Close()` completes `Result` at once, then plays the hide animation (`.Animation(...)` or the `PopupHost` default) and removes the elements. `CloseAll()` closes every popup; `DismissOthers()` closes them with `PopupCloseReason.Replaced`.
-
-### Popup views
-
-```csharp
-public sealed class InventoryView : View<InventoryViewModel>
-{
-    protected override UILayer Layer => UILayer.Popup;
-    protected override IViewAnimation Animation => ViewAnimations.Fade;   // from ui.animations
-
-    protected override void OnBind() =>
-        BindButton(Root.Q<Button>("close"), () => Popup!.Close());       // the view reaches its popup
-
-    protected override bool OnBack() => ViewModel.CloseDetails();        // true: Back handled, popup stays
-}
-
-await ui.Register<InventoryView>();                                      // loads its UXML
-var inventory = popups.ShowView<InventoryView>(new InventoryViewModel(ship));
-```
-
-`ShowView` opens a popup on the popup layer with a new instance of the view, stretched over the layer with no panel chrome (`popup--view`), playing the view's own animation. It captures the pointer and closes on `Back()` unless the view's `OnBack()` returns `true`. Several can be open at once, each with its own instance and view model. `Popup` is the view's handle to close it or read `IsOpen`.
-
-### A view as popup content
-
-```csharp
-await ui.Register<InviteFriendsView>();   // once, like any view: loads its UXML
-
-var picked = new InviteFriendsViewModel(friends);
-var handle = popups.Create()
-    .Title("Invite a friend")
-    .Content<InviteFriendsView>(picked)
-    .CloseOn(PopupCloseTriggers.CloseButton | PopupCloseTriggers.Escape)
-    .Modal()
-    .Open();
-picked.Invited.Subscribe(_ => handle.Close("invited"));
-
-await popups.CreateDialog("Crew").Content<CrewListView>(new CrewListViewModel(ship))
-    .Button("Close", "close").OpenAsync();
-```
-
-The popup builds a new instance of the registered view from its UXML, below the title and message, binds the view model and owns both: the view is destroyed and the view model disposed when the popup's elements are removed, after the hide animation; if `Open` throws, the view model is disposed at once. The view may be on any layer: a screen's registered instance stays where it is, so one view can be a screen and popup content at the same time. Its child views and lists work as anywhere else, and its UXML stays loaded until the popup closes, even if the view is unregistered meanwhile. A popup with a view is interactive: it captures the pointer.
-
-### Placement
-
-```csharp
-PopupPlacement.ScreenCenter();
-PopupPlacement.ScreenPoint(panelPoint);
-PopupPlacement.Fill();                                       // stretched over the whole layer
-PopupPlacement.AtElement(button, PopupSide.Right);           // flips at screen edges
-PopupPlacement.Cursor(new Vector2(12, 12));
-PopupPlacement.AtWorld(crewMember.Head, worldOffset: Vector3.up * 0.3f,
-    screenOffset: new Vector2(0, -8), clampToScreen: false);  // marker may leave the screen
-```
-
-World and cursor popups follow every frame. The camera is the placement's own, else the `camera` provider given to `PopupHost`, else `Camera.main` looked up once per frame. A world popup hides while its anchor is behind the camera, and lets go of the pointer, its back handler and its backdrop until the anchor is back in view; it closes with `PopupCloseReason.AnchorDestroyed` once the anchor is destroyed. `SetPlacement` on a closed popup does nothing. Pass `pointerScreenPosition` to `PopupHost` for cursor popups; without it the position only updates over pickable elements.
-
-### Dialogs
-
-```csharp
-if (await popups.ShowConfirm("Abandon ship?", "The crew will eject.", "Abandon", "Stay"))
-    ship.Abandon();
-
-await popups.ShowAlert("Connection lost", "Host closed the session.");
-
-using (popups.ShowModal("Joining", "Waiting for host..."))
-    await session.JoinAsync(address);
-
-var named = await popups.CreateDialog("Rename ship").Input("Name", ship.Name)
-    .Button("Save", "save", isPrimary: true).Button("Cancel", "cancel").OpenAsync();
-if (named.ButtonId == "save") ship.Rename(named.InputText!);
-```
-
-Dialogs are extension methods on `IPopupService`. `CreateDialog` returns a `PopupBuilder` for a modal popup centered on the overlay layer with the `popup--dialog` class, closing on `Back()`; a dialog closed by `Back()` has no `ButtonId`. `ShowConfirm` is `true` only for its confirm button. `ShowModal` cannot be closed but by its handle.
-
-### Tooltips
-
-```csharp
-fuelGauge.AttachTooltip(popups, "Reaction mass left");
-thrustLabel.AttachTooltip(popups, () => $"Thrust {ship.Thrust:0} kN");
-var manipulator = moduleIcon.AttachTooltip(popups, () => BuildModuleCard(module), delay: 0.5f);
-moduleIcon.RemoveManipulator(manipulator);
-
-slot.AttachPopup(popups, popup => popup.Content(() => BuildItemCard(item))
-    .At(PopupPlacement.AtElement(slot, PopupSide.Right)));
-```
-
-A tooltip is a passive popup with the `popup--tooltip` class below the element, closed when the pointer leaves it or the element leaves the panel (a rebuilt list row). It sits on the overlay layer, so it shows over dialogs too. For a 3D object open a popup with `PopupPlacement.Cursor()` or `AtWorld` and close its handle. `AttachPopup` describes a custom hover popup on a fresh `PopupBuilder` each time it opens.
-
-### Spinner
-
-```csharp
-var spinner = new SpinnerHost(root);
-using (spinner.Show("Loading sector..."))
-    await sector.LoadAsync();
-```
-
-Handles are counted; the latest label shows.
-
-### Styles
-
-```css
-@import url("/Packages/com.rubickanov.ui/Runtime/Styles/Default.uss");
-
-:root {
-    --ui-popup-bg: rgb(12, 18, 28);
-    --ui-button-primary-bg: rgb(230, 120, 30);
-    --ui-tooltip-font-size: 12px;
-}
-```
-
-Every rule reads a `--ui-*` variable with a fallback. Class names are constants on `PopupStyle` (`popup-panel`, `popup--dialog`, `popup--tooltip`, `popup--view`, ...) and `SpinnerHost` (`spinner`, `spinner__icon`, `spinner__label`).
-
 ### Debug window
 
-**Rubickanov → UI Debug** lists, per `UIService` in Play Mode: pointer capture count, back stack depth, the active screen, the screen history, the registered popup views, and the other registered views by layer with their `ViewState`. **Hide Screen** hides the active screen.
+**Rubickanov → UI Debug** lists, per `UIService` in Play Mode: pointer capture count, back stack depth, the active screen, the screen history, the registered popup views, and the other registered views by layer with their `ViewState`.
 
 ## Design Decisions
 
 - **Layer on the view** — a view's layer is a fact about the view; registration sites cannot disagree about it.
-- **One popup system** — `PopupHost` alone owns what is open over the screens: placement, close rules, pointer capture and Back. A popup view is not a second stack in `UIService`; it is a registered UXML that `ShowView` puts in a popup of its own, a fresh instance per popup. Binding stays with the view, everything about being open with the popup.
-- **A builder, not a public config** — `PopupBuilder` is the one way to describe a popup; presets (dialogs, tooltips, popup views) are extension methods returning or opening one.
-- **History of factories, not of view models** — a view model belongs to one show, so the history keeps how to build one. A screen returned to starts fresh; state that must survive a round trip lives in the model the factory reads.
-- **Rows are child views** — `BindList` creates and destroys child views; UI Toolkit's `ListView` virtualizes rows for thousands of items, which lobby and crew lists do not have.
-- **Catalog, not `Resources`** — `Resources` ships every asset in the folder and finds views by strings that break silently on rename; Addressables adds a build step for a few kilobytes of UXML. The loader stays a delegate, so a project can still use Addressables.
-- **No keyboard input in the package** — the game owns its input bindings and calls `Back()`; the package owns the order.
-- **The animation belongs to the view** — callers never pass durations; `Animation` decides how a view shows and hides.
+- **One popup system** — `PopupHost` alone owns what is open over the screens: placement, close rules, pointer capture and Back. A popup view is a registered UXML that `ShowView` puts in a popup of its own, a fresh instance per popup.
+- **No chrome, no presets** — popups carry no title, buttons, dialogs or tooltips and the package ships no stylesheet: what a question or a spinner looks like is the game's, and the games built their own on `ShowView`. The package keeps the mechanics: layers, input, close rules, ownership.
+- **History of factories, not of view models** — a view model belongs to one show, so the history keeps how to build one.
+- **No device input in the package** — the game owns its bindings and feeds `Back()`, `BackOrPause` and `MenuNavigation.Update`; the package owns the order: who hears a key, what Back reaches.
+- **Unscaled time for animations** — a UI animation that runs on scaled time never finishes on a pause menu.
+- **Catalog, not `Resources`** — `Resources` ships every asset in the folder and finds views by strings that break silently on rename; the loader stays a delegate, so a project can still use Addressables.
