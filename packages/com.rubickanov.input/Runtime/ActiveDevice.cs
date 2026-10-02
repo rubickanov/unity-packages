@@ -4,6 +4,7 @@ using R3;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.LowLevel;
+using UnityEngine.InputSystem.Utilities;
 
 namespace Rubickanov.Input
 {
@@ -22,7 +23,8 @@ namespace Rubickanov.Input
     /// the keys, any pad control past <see cref="Actuation"/> to that pad; the mouse moving does not count, the mouse on a
     /// menu item does (<see cref="Pointed"/>). Watches every device's input, not an action map, so it follows the player
     /// whatever maps are on. A pad that presses together with the pad in hand is one pad seen twice (Steam Input's Xbox
-    /// copy of the pad it reads, beside the pad itself) and never takes the hand. One per app.
+    /// copy of the pad it reads, beside the pad itself) and never takes the hand. One per app, or one per local player
+    /// with <c>owns</c> naming that player's devices.
     /// </summary>
     public sealed class ActiveDevice : IDisposable
     {
@@ -36,6 +38,7 @@ namespace Rubickanov.Input
         private readonly Subject<Unit> _changed = new();
         private readonly List<Gamepad> _echoes = new();
         private readonly Dictionary<InputDevice, PadFamily> _layoutFamilies = new();
+        private readonly Func<InputDevice, bool>? _owns;
         private InputDevice? _last;
         private Gamepad? _pad;
         private double _padAt = double.NegativeInfinity;
@@ -47,8 +50,13 @@ namespace Rubickanov.Input
         /// Asked in turn for a pad's family before its layout; none or null goes by the layout alone. A container hands
         /// every registered source, or an empty list.
         /// </param>
-        public ActiveDevice(IEnumerable<IPadFamilySource>? families = null)
+        /// <param name="owns">
+        /// The devices this player's hand follows, asked again on every event as the player's devices change; null for
+        /// every device, one player on the whole machine.
+        /// </param>
+        public ActiveDevice(IEnumerable<IPadFamilySource>? families = null, Func<InputDevice, bool>? owns = null)
         {
+            _owns = owns;
             if (families != null)
             {
                 foreach (IPadFamilySource source in families)
@@ -66,11 +74,19 @@ namespace Rubickanov.Input
 
         public ControlScheme Scheme { get; private set; } = ControlScheme.Keys;
 
-        /// <summary>The pad in hand, else the last one connected; null without a pad.</summary>
-        public Gamepad? Pad => _pad ?? Gamepad.current;
+        /// <summary>
+        /// The pad in hand, else the last one connected (the player's first one, with <c>owns</c>); null without a pad.
+        /// </summary>
+        public Gamepad? Pad => _pad ?? FallbackPad();
+
+        /// <summary>The keyboard the player types on: their own with <c>owns</c>, else the last one used.</summary>
+        public Keyboard? Keyboard => _owns == null ? Keyboard.current : Owned<Keyboard>();
+
+        /// <summary>The player's mouse with <c>owns</c>, else the last one used; null without one.</summary>
+        public Mouse? Mouse => _owns == null ? Mouse.current : Owned<Mouse>();
 
         /// <summary>Whose buttons <see cref="Pad"/> has.</summary>
-        public PadFamily Family => _forced ?? (_pad != null ? _family : FamilyOf(Gamepad.current));
+        public PadFamily Family => _forced ?? (_pad != null ? _family : FamilyOf(FallbackPad()));
 
         /// <summary>The family <see cref="Force"/> holds; null while the device follows the player.</summary>
         public PadFamily? Forced => _forced;
@@ -94,7 +110,7 @@ namespace Rubickanov.Input
         }
 
         /// <summary>The keyboard layout the system has on, for a console; null without a keyboard.</summary>
-        public string? KeyboardLayout => Keyboard.current?.keyboardLayout;
+        public string? KeyboardLayout => Keyboard?.keyboardLayout;
 
         /// <summary>The scheme, the pad or its family changed, or the player switched keyboard layouts.</summary>
         public Observable<Unit> Changed => _changed;
@@ -125,6 +141,24 @@ namespace Rubickanov.Input
             _changed.OnNext(Unit.Default);
         }
 
+        /// <summary>Puts <paramref name="device"/> in hand without waiting for its next press: the one that joined it.</summary>
+        internal void Hold(InputDevice device)
+        {
+            if (_forced != null)
+            {
+                return;
+            }
+
+            if (device is Gamepad pad)
+            {
+                UsePad(pad, InputState.currentTime);
+            }
+            else
+            {
+                UseKeys(device);
+            }
+        }
+
         public void Dispose()
         {
             if (_disposed)
@@ -144,15 +178,16 @@ namespace Rubickanov.Input
             // Only state carries presses; the other events (a device's configuration, text) cannot be enumerated. A pad
             // is read even in hand, for when it last pressed.
             if (_forced != null || (device == _last && device is not Gamepad) ||
-                device is not (Keyboard or Mouse or Gamepad) ||
-                !(eventPtr.IsA<StateEvent>() || eventPtr.IsA<DeltaStateEvent>()))
+                device is not (UnityEngine.InputSystem.Keyboard or UnityEngine.InputSystem.Mouse or Gamepad) ||
+                !(eventPtr.IsA<StateEvent>() || eventPtr.IsA<DeltaStateEvent>()) || (_owns != null && !_owns(device)))
             {
                 return;
             }
 
             foreach (InputControl control in eventPtr.EnumerateChangedControls(device, Actuation))
             {
-                if (device is Mouse mouse && control is not ButtonControl && control.parent != mouse.scroll)
+                if (device is UnityEngine.InputSystem.Mouse mouse && control is not ButtonControl &&
+                    control.parent != mouse.scroll)
                 {
                     continue;
                 }
@@ -192,7 +227,8 @@ namespace Rubickanov.Input
                     Scheme = _forced != null ? ControlScheme.Pad : ControlScheme.Keys;
                     _changed.OnNext(Unit.Default);
                     break;
-                case InputDeviceChange.ConfigurationChanged when device is Keyboard:
+                case InputDeviceChange.ConfigurationChanged when device is UnityEngine.InputSystem.Keyboard &&
+                                                                 (_owns == null || _owns(device)):
                     _changed.OnNext(Unit.Default);
                     break;
             }
@@ -242,6 +278,23 @@ namespace Rubickanov.Input
 
             Scheme = ControlScheme.Keys;
             _changed.OnNext(Unit.Default);
+        }
+
+        private Gamepad? FallbackPad() => _owns == null ? Gamepad.current : Owned<Gamepad>();
+
+        // The player's first connected device of a kind; the owner is asked, not kept, as its devices change.
+        private T? Owned<T>() where T : InputDevice
+        {
+            ReadOnlyArray<InputDevice> devices = InputSystem.devices;
+            for (int i = 0; i < devices.Count; i++)
+            {
+                if (devices[i] is T device && _owns!(device))
+                {
+                    return device;
+                }
+            }
+
+            return null;
         }
 
         // Steam hands its copy over as an Xbox pad, so of two pads pressing as one an Xbox pad beside another family's is

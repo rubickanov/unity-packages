@@ -117,7 +117,7 @@ namespace Rubickanov.Input
             KeyNames.Join(Keys(Action(action), scheme, part));
 
         /// <summary>The key at binding path <paramref name="path"/>, named for the player's keyboard and pad.</summary>
-        public KeyName Name(string path) => KeyNames.Name(path, Keyboard.current, Device.Family);
+        public KeyName Name(string path) => KeyNames.Name(path, Device.Keyboard, Device.Family);
 
         /// <summary>
         /// The name of a key that is not an action's (a text field's Enter), for the device in hand: "" while the player is
@@ -134,15 +134,15 @@ namespace Rubickanov.Input
         }
 
         /// <summary>
-        /// Whether the player holds <paramref name="key"/> now on the keyboard, the mouse or the pad in hand: a button down, a
+        /// Whether the player holds <paramref name="key"/> now on their keyboard, mouse or the pad in hand: a button down, a
         /// stick or trigger past <see cref="ActiveDevice.Actuation"/>, the wheel turning, the mouse moving.
         /// </summary>
         public bool IsDown(KeyName key)
         {
             InputDevice? device = key.Device switch
             {
-                KeyDevice.Keyboard => Keyboard.current,
-                KeyDevice.Mouse => Mouse.current,
+                KeyDevice.Keyboard => Device.Keyboard,
+                KeyDevice.Mouse => Device.Mouse,
                 KeyDevice.Pad => Device.Pad,
                 _ => null,
             };
