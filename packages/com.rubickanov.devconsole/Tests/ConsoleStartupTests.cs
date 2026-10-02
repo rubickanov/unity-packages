@@ -1,6 +1,9 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace Rubickanov.DevConsole.Tests
 {
@@ -77,6 +80,20 @@ namespace Rubickanov.DevConsole.Tests
             ConsoleStartup.Run(_registry, commandLine: true);
 
             CollectionAssert.AreEqual(new[] { "crate" }, spawned);
+        }
+
+        [Test]
+        public void Run_AutoexecUnreadable_WarnsAndStillRunsTheCommandLine()
+        {
+            var path = Path.Combine(_config, ConsoleConfig.AutoexecFileName);
+            File.WriteAllText(path, "probe autoexec\n");
+            StartupCommands.Enqueue("probe command");
+            LogAssert.Expect(LogType.Warning, new Regex("autoexec.cfg could not be read"));
+
+            using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                ConsoleStartup.Run(_registry, commandLine: true);
+
+            CollectionAssert.AreEqual(new[] { "command" }, _ran);
         }
 
         [Test]

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
@@ -245,6 +246,11 @@ namespace Rubickanov.DevConsole.Commands
             catch (CommandException e)
             {
                 ConsoleDiagnostics.Warning($"{ConsoleConfig.AutoexecFileName}: {e.Message}");
+            }
+            // An unreadable file must not take the -command lines that run after it down with it
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                ConsoleDiagnostics.Warning($"{ConsoleConfig.AutoexecFileName} could not be read: {e.Message}");
             }
         }
 
