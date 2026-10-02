@@ -22,7 +22,12 @@ namespace Rubickanov.Log
                 Load();
             }
 
-            if (Levels.TryGetValue(channel, out LogLevel level) || Levels.TryGetValue(Everything, out level))
+            return LevelFor(channel, Levels);
+        }
+
+        internal static LogLevel LevelFor(string channel, IReadOnlyDictionary<string, LogLevel> levels)
+        {
+            if (levels.TryGetValue(channel, out LogLevel level) || levels.TryGetValue(Everything, out level))
             {
                 return level;
             }

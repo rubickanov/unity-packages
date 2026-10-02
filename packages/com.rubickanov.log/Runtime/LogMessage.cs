@@ -56,6 +56,52 @@ namespace Rubickanov.Log
         public string ToStringAndClear() => _builder.ToStringAndClear();
     }
 
+    /// <summary><c>$"..."</c> passed to <see cref="LogChannel.Warn(ref WarnMessage, Object)"/>, as <see cref="InfoMessage"/>.</summary>
+    [InterpolatedStringHandler]
+    public ref struct WarnMessage
+    {
+        private MessageBuilder _builder;
+
+        public WarnMessage(int literalLength, int formattedCount, LogChannel channel, out bool enabled)
+        {
+            enabled = channel.Writes(LogLevel.Warn);
+            _builder = new MessageBuilder(enabled);
+        }
+
+        public bool Enabled => _builder.Enabled;
+
+        public void AppendLiteral(string value) => _builder.AppendLiteral(value);
+
+        public void AppendFormatted<T>(T value) => _builder.AppendFormatted(value, null);
+
+        public void AppendFormatted<T>(T value, string format) => _builder.AppendFormatted(value, format);
+
+        public string ToStringAndClear() => _builder.ToStringAndClear();
+    }
+
+    /// <summary><c>$"..."</c> passed to <see cref="LogChannel.Error(ref ErrorMessage, Object)"/>, as <see cref="InfoMessage"/>.</summary>
+    [InterpolatedStringHandler]
+    public ref struct ErrorMessage
+    {
+        private MessageBuilder _builder;
+
+        public ErrorMessage(int literalLength, int formattedCount, LogChannel channel, out bool enabled)
+        {
+            enabled = channel.Writes(LogLevel.Error);
+            _builder = new MessageBuilder(enabled);
+        }
+
+        public bool Enabled => _builder.Enabled;
+
+        public void AppendLiteral(string value) => _builder.AppendLiteral(value);
+
+        public void AppendFormatted<T>(T value) => _builder.AppendFormatted(value, null);
+
+        public void AppendFormatted<T>(T value, string format) => _builder.AppendFormatted(value, format);
+
+        public string ToStringAndClear() => _builder.ToStringAndClear();
+    }
+
     /// <summary>
     /// The text of one message, written into a StringBuilder the thread reuses. Holes read as a person would
     /// want them: numbers the same in every locale and Unity objects by name.
