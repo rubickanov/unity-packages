@@ -280,13 +280,23 @@ namespace Rubickanov.Log.Tests
         }
 
         [Test]
-        public void PlayerLine_NoScopeAndLongName_HasNoBracketsAndKeepsName()
+        public void PlayerLine_NoScopeAndLongName_HasNoBracketsAndKeepsNameApartFromMessage()
         {
             var time = new DateTime(2026, 10, 2, 14, 3, 9, 7);
 
             string line = LogWriter.PlayerLine(time, "-", "Matchmaking-Service", LogLevel.Verbose, null, "Joined");
 
-            Assert.AreEqual("14:03:09.007 f-      V Matchmaking-ServiceJoined", line);
+            Assert.AreEqual("14:03:09.007 f-      V Matchmaking-Service Joined", line);
+        }
+
+        [Test]
+        public void PlayerLine_NameAsWideAsTheColumn_KeepsASpaceBeforeMessage()
+        {
+            var time = new DateTime(2026, 10, 2, 14, 3, 9, 7);
+
+            string line = LogWriter.PlayerLine(time, "-", "Elevenchars", LogLevel.Info, null, "Up");
+
+            Assert.AreEqual("14:03:09.007 f-      I Elevenchars Up", line);
         }
 
         private static Exception Throw()

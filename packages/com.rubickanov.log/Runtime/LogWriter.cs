@@ -65,7 +65,8 @@ namespace Rubickanov.Log
         internal static string PlayerLine(DateTime time, string frame, string channel, LogLevel level, string scope, string message)
         {
             string speaker = scope == null ? string.Empty : $"[{scope}] ";
-            return $"{time:HH:mm:ss.fff} f{frame,-6} {LetterOf(level)} {channel.PadRight(NameWidth)}{speaker}{message}";
+            // A name as wide as the column or wider still gets one space before the message.
+            return $"{time:HH:mm:ss.fff} f{frame,-6} {LetterOf(level)} {channel.PadRight(NameWidth - 1)} {speaker}{message}";
         }
 
         private static char LetterOf(LogLevel level)
