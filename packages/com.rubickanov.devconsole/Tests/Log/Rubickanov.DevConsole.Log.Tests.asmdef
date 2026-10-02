@@ -1,0 +1,34 @@
+{
+    "name": "Rubickanov.DevConsole.Log.Tests",
+    "rootNamespace": "Rubickanov.DevConsole.Log.Tests",
+    "references": [
+        "Rubickanov.DevConsole.Runtime",
+        "Rubickanov.DevConsole.Log",
+        "Rubickanov.Log.Runtime",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "ENABLE_CONSOLE",
+        "RUBICKANOV_LOG"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.rubickanov.log",
+            "expression": "1.0.0",
+            "define": "RUBICKANOV_LOG"
+        }
+    ],
+    "noEngineReferences": false
+}
