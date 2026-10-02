@@ -12,7 +12,7 @@ namespace Rubickanov.Log
     /// by name, so two files that ask for "Course" write to the same channel:
     /// <code>private static readonly LogChannel Log = LogChannel.Get("Course");</code>
     /// Everything ends up in Unity's log, so the Console, clicking through to the caller, pinging the context
-    /// object and Player.log work as with Debug.Log. Info and Verbose messages are built only when the
+    /// object and Player.log work as with Debug.Log. Info, Warn, Error and Verbose messages are built only when the
     /// channel writes them; Verbose calls are compiled out of release builds altogether.
     /// </summary>
     public sealed class LogChannel
@@ -57,7 +57,17 @@ namespace Rubickanov.Log
         public static string Scope { get; set; }
 
         /// <summary>Every channel so far. A channel appears once the class that declares it is first used.</summary>
-        public static IReadOnlyList<LogChannel> All => Channels;
+        public static IReadOnlyList<LogChannel> All
+        {
+            get
+            {
+                // A copy: channels can be made on another thread while the caller walks the list.
+                lock (ByName)
+                {
+                    return Channels.ToArray();
+                }
+            }
+        }
 
         public static LogChannel Get(string name)
         {
@@ -104,20 +114,35 @@ namespace Rubickanov.Log
         public void Info(string message, Object context = null) => Write(LogLevel.Info, message, context);
 
         [HideInCallstack]
+        public void Warn([InterpolatedStringHandlerArgument("")] ref WarnMessage message, Object context = null)
+        {
+            if (message.Enabled)
+            {
+                LogWriter.Write(this, LogLevel.Warn, message.ToStringAndClear(), context);
+            }
+        }
+
+        [HideInCallstack]
         public void Warn(string message, Object context = null) => Write(LogLevel.Warn, message, context);
+
+        [HideInCallstack]
+        public void Error([InterpolatedStringHandlerArgument("")] ref ErrorMessage message, Object context = null)
+        {
+            if (message.Enabled)
+            {
+                LogWriter.Write(this, LogLevel.Error, message.ToStringAndClear(), context);
+            }
+        }
 
         [HideInCallstack]
         public void Error(string message, Object context = null) => Write(LogLevel.Error, message, context);
 
-        /// <summary>Logs the exception with its own stack trace, as Debug.LogException does.</summary>
+        /// <summary>
+        /// Logs the exception with its own stack trace and the channel's tag and scope in front. Always written,
+        /// whatever the channel's level: an exception is never something to hide.
+        /// </summary>
         [HideInCallstack]
-        public void Exception(System.Exception exception, Object context = null)
-        {
-            if (Writes(LogLevel.Error))
-            {
-                LogWriter.WriteException(exception, context);
-            }
-        }
+        public void Exception(System.Exception exception, Object context = null) => LogWriter.WriteException(this, exception, context);
 
         public override string ToString() => Name;
 
@@ -133,11 +158,11 @@ namespace Rubickanov.Log
         // Without a domain reload the last play session's levels would still be set; the channels
         // themselves stay, since the static fields that hold them are not made again.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetLevels()
+        internal static void ResetLevels()
         {
             LogSettings.Load();
             Scope = null;
-            foreach (LogChannel channel in Channels)
+            foreach (LogChannel channel in All)
             {
                 channel.Level = LogSettings.LevelFor(channel.Name);
             }

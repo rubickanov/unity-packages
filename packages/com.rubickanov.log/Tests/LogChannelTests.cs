@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -117,6 +118,201 @@ namespace Rubickanov.Log.Tests
             LogAssert.Expect(LogType.Warning, new Regex("Player fell out of the course"));
 
             course.Warn("Player fell out of the course");
+        }
+
+        [Test]
+        public void Warn_ChannelOff_SkipsInterpolationHoles()
+        {
+            LogChannel course = NewChannel();
+            course.Level = LogLevel.Off;
+            int evaluated = 0;
+
+            course.Warn($"Checkpoint {++evaluated}");
+
+            Assert.AreEqual(0, evaluated);
+        }
+
+        [Test]
+        public void Error_ChannelOff_SkipsInterpolationHoles()
+        {
+            LogChannel course = NewChannel();
+            course.Level = LogLevel.Off;
+            int evaluated = 0;
+
+            course.Error($"Checkpoint {++evaluated}");
+
+            Assert.AreEqual(0, evaluated);
+        }
+
+        [Test]
+        public void Warn_ChannelWrites_FormatsNumbersInvariantly()
+        {
+            LogChannel course = NewChannel();
+            LogAssert.Expect(LogType.Warning, new Regex(Regex.Escape(course.Name) + @".*Run time 12\.5s"));
+
+            WithCulture("de-DE", () => course.Warn($"Run time {12.5f:F1}s"));
+        }
+
+        [Test]
+        public void Error_ChannelWrites_FormatsNumbersInvariantly()
+        {
+            LogChannel course = NewChannel();
+            LogAssert.Expect(LogType.Error, new Regex(Regex.Escape(course.Name) + @".*Run time 12\.5s"));
+
+            WithCulture("de-DE", () => course.Error($"Run time {12.5f:F1}s"));
+        }
+
+        [Test]
+        public void Error_ChannelWrites_LogsError()
+        {
+            LogChannel course = NewChannel();
+            LogAssert.Expect(LogType.Error, new Regex("Finish line not found"));
+
+            course.Error("Finish line not found");
+        }
+
+        [Test]
+        public void Exception_ChannelWrites_CarriesChannelTagAndScope()
+        {
+            LogChannel course = NewChannel();
+            LogAssert.Expect(LogType.Exception, new Regex(Regex.Escape(course.Name) + @".*\[Host\] .*InvalidOperationException.*Piston stuck"));
+            LogChannel.Scope = "Host";
+
+            try
+            {
+                course.Exception(new InvalidOperationException("Piston stuck"));
+            }
+            finally
+            {
+                LogChannel.Scope = null;
+            }
+        }
+
+        [Test]
+        public void Exception_ChannelOff_StillWrites()
+        {
+            LogChannel course = NewChannel();
+            course.Level = LogLevel.Off;
+            LogAssert.Expect(LogType.Exception, new Regex(Regex.Escape(course.Name) + @".*Piston stuck"));
+
+            course.Exception(new InvalidOperationException("Piston stuck"));
+        }
+
+        [Test]
+        public void Exception_ThrownException_KeepsItsStackTrace()
+        {
+            LogChannel course = NewChannel();
+            LogAssert.Expect(LogType.Exception, new Regex(nameof(Throw)));
+
+            course.Exception(Throw());
+        }
+
+        [Test]
+        public void All_ChannelsCreatedWhileEnumerating_DoesNotThrow()
+        {
+            Task creator = Task.Run(() =>
+            {
+                for (int i = 0; i < 2000; i++)
+                {
+                    NewChannel();
+                }
+            });
+
+            Assert.DoesNotThrow(() =>
+            {
+                while (!creator.IsCompleted)
+                {
+                    foreach (LogChannel _ in LogChannel.All)
+                    {
+                    }
+                }
+            });
+            creator.Wait();
+        }
+
+        [Test]
+        public void LevelFor_ChannelNotNamed_FallsBackToStar()
+        {
+            var levels = new Dictionary<string, LogLevel>(StringComparer.OrdinalIgnoreCase);
+            LogSettings.Parse("Course=Verbose,*=Warn", levels);
+
+            Assert.AreEqual(LogLevel.Verbose, LogSettings.LevelFor("course", levels));
+            Assert.AreEqual(LogLevel.Warn, LogSettings.LevelFor("UI", levels));
+        }
+
+        [Test]
+        public void LevelFor_NoStarAndNotNamed_IsInfo()
+        {
+            var levels = new Dictionary<string, LogLevel> { ["Course"] = LogLevel.Verbose };
+
+            Assert.AreEqual(LogLevel.Info, LogSettings.LevelFor("UI", levels));
+        }
+
+        [Test]
+        public void ResetLevels_LevelAndScopeChangedInCode_RestoresThem()
+        {
+            LogChannel course = NewChannel();
+            LogLevel fromCommandLine = course.Level;
+            course.Level = fromCommandLine == LogLevel.Error ? LogLevel.Warn : LogLevel.Error;
+            LogChannel.Scope = "Host";
+
+            try
+            {
+                LogChannel.ResetLevels();
+
+                Assert.AreEqual(fromCommandLine, course.Level);
+                Assert.IsNull(LogChannel.Scope);
+            }
+            finally
+            {
+                LogChannel.Scope = null;
+            }
+        }
+
+        [Test]
+        public void PlayerLine_ChannelAndScope_HasTimeFrameLetterNameAndScope()
+        {
+            var time = new DateTime(2026, 10, 2, 14, 3, 9, 7);
+
+            string line = LogWriter.PlayerLine(time, "42", "Course", LogLevel.Warn, "Host", "Piston stuck");
+
+            Assert.AreEqual("14:03:09.007 f42     W Course     [Host] Piston stuck", line);
+        }
+
+        [Test]
+        public void PlayerLine_NoScopeAndLongName_HasNoBracketsAndKeepsName()
+        {
+            var time = new DateTime(2026, 10, 2, 14, 3, 9, 7);
+
+            string line = LogWriter.PlayerLine(time, "-", "Matchmaking-Service", LogLevel.Verbose, null, "Joined");
+
+            Assert.AreEqual("14:03:09.007 f-      V Matchmaking-ServiceJoined", line);
+        }
+
+        private static Exception Throw()
+        {
+            try
+            {
+                throw new InvalidOperationException("Piston stuck");
+            }
+            catch (Exception exception)
+            {
+                return exception;
+            }
+        }
+
+        private static void WithCulture(string name, Action action)
+        {
+            CultureInfo previous = CultureInfo.CurrentCulture;
+            CultureInfo.CurrentCulture = new CultureInfo(name);
+            try
+            {
+                action();
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = previous;
+            }
         }
 
         [Test]

@@ -48,14 +48,16 @@ private static readonly LogChannel Log = LogChannel.Get("Course");
 
 Log.Verbose($"Piston phase {phase:F3}");
 Log.Info($"Player respawned at {checkpoint}");
-Log.Warn("Checkpoint list is empty");
-Log.Error("Finish line not found", this);
+Log.Warn($"Checkpoint list is empty after {reloads} reloads");
+Log.Error($"Finish line not found in {level.Name}", this);
 Log.Exception(exception, this);
 ```
 
 `Verbose` calls are compiled out unless `UNITY_EDITOR`, `DEBUG` or `LOG_VERBOSE` is defined. A channel writes `Info` and up by default.
 
-Interpolation holes format numbers with the invariant culture and Unity objects by name (`null` if destroyed). When the channel would not write the message, holes are not evaluated at all.
+`Verbose`, `Info`, `Warn` and `Error` take interpolated strings (a plain `string` works too). Holes format numbers with the invariant culture and Unity objects by name (`null` if destroyed). When the channel would not write the message, holes are not evaluated at all.
+
+`Exception` writes the exception as Unity prints it (type, message, clickable stack trace, still an exception for `Application.logMessageReceived`) behind the channel's tag and scope. It is written whatever the channel's level, `Off` included: an exception is never hidden.
 
 ### Levels
 
@@ -76,7 +78,7 @@ foreach (LogChannel channel in LogChannel.All)
 }
 ```
 
-`LogChannel.All` lists channels created so far. A channel appears once the class declaring it is first used. Levels reset from the command line on each play session, including with domain reload off.
+`LogChannel.All` is a snapshot of the channels created so far, safe to read from any thread. A channel appears once the class declaring it is first used. Levels reset from the command line on each play session, including with domain reload off.
 
 ### Scope
 

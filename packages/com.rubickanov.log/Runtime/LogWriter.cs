@@ -24,9 +24,16 @@ namespace Rubickanov.Log
             Debug.unityLogger.Log(TypeOf(level), (object)Format(channel, level, message), context);
         }
 
-        /// <summary>As Unity prints it, with a stack trace to click through; the channel only decides whether.</summary>
+        /// <summary>
+        /// The exception as Unity prints it, type, message and a stack trace to click through, behind the
+        /// channel's tag and scope; still an exception to anything listening to Application.logMessageReceived.
+        /// </summary>
         [HideInCallstack]
-        public static void WriteException(Exception exception, Object context) => Debug.LogException(exception, context);
+        public static void WriteException(LogChannel channel, Exception exception, Object context)
+        {
+            string text = StackTraceUtility.ExtractStringFromException(exception);
+            Debug.unityLogger.Log(LogType.Exception, (object)Format(channel, LogLevel.Error, text), context);
+        }
 
         private static LogType TypeOf(LogLevel level)
         {
@@ -40,8 +47,8 @@ namespace Rubickanov.Log
 
         private static string Format(LogChannel channel, LogLevel level, string message)
         {
-            string scope = LogChannel.Scope == null ? string.Empty : $"[{LogChannel.Scope}] ";
 #if UNITY_EDITOR
+            string scope = LogChannel.Scope == null ? string.Empty : $"[{LogChannel.Scope}] ";
             // Brackets inside the colour, so searching the Console for [Course] finds the channel and not the word.
             channel.Tag ??= $"<b><color=#{ColorOf(channel.Name)}>[{channel.Name}]</color></b> ";
             return level == LogLevel.Verbose
@@ -50,8 +57,15 @@ namespace Rubickanov.Log
 #else
             // Time.frameCount is for the main thread only.
             string frame = Thread.CurrentThread.ManagedThreadId == _mainThread ? Time.frameCount.ToString() : "-";
-            return $"{DateTime.Now:HH:mm:ss.fff} f{frame,-6} {LetterOf(level)} {channel.Name.PadRight(NameWidth)}{scope}{message}";
+            return PlayerLine(DateTime.Now, frame, channel.Name, level, LogChannel.Scope, message);
 #endif
+        }
+
+        // The line of Player.log; kept out of the Editor-only branch so it can be tested there.
+        internal static string PlayerLine(DateTime time, string frame, string channel, LogLevel level, string scope, string message)
+        {
+            string speaker = scope == null ? string.Empty : $"[{scope}] ";
+            return $"{time:HH:mm:ss.fff} f{frame,-6} {LetterOf(level)} {channel.PadRight(NameWidth)}{speaker}{message}";
         }
 
         private static char LetterOf(LogLevel level)
