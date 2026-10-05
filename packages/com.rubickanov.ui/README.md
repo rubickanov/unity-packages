@@ -1,6 +1,6 @@
 # UI Framework
 
-UI Toolkit framework: views with view models on four layers, a screen history, popups, unscaled-time animations, and one pointer capture, back stack and menu navigation for the game's cursor, Escape key and pad.
+UI Toolkit framework: views with view models on four layers, a screen history, popups, unscaled-time animations, and one pointer capture, back stack and menu navigation for the game's cursor, Escape key and pad. A stat panel shows the build's version, frames a second, ping or any number the game reads, coloured by its limits.
 
 ## Dependencies
 
@@ -25,6 +25,7 @@ IPopupService ── PopupHost(root, IUIService)   content, placement, close rul
 MenuNavigation ── MenuModel                    claim stack for keyboard and pad menus
 CursorLock(IUIService)                         the hardware cursor from PointerCaptured
 UxmlLoader ◄── UxmlLoaders.FromCatalog(UxmlCatalog)
+StatPanel(host) ── StatRow                     stats in a corner, coloured by StatLimits
 ```
 
 Every view that takes input, every interactive popup and every input scope holds a pointer capture and a back handler on `IUIService`, so `PointerCaptured` and `Back()` cover all of them.
@@ -33,7 +34,7 @@ Every view that takes input, every interactive popup and every input scope holds
 
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
-| **Rubickanov.UI** | Yes | Views, service, popups, animations, navigation, UXML catalog |
+| **Rubickanov.UI** | Yes | Views, service, popups, animations, navigation, UXML catalog, stat panel |
 | **Rubickanov.UI.Editor** | Editor | `Rubickanov/UI Debug` window |
 
 ## Core Concepts
@@ -317,6 +318,31 @@ public void UxmlCatalog_AllGameViews_HaveUxml()
 
 The loader looks up assets by name, throws naming the catalog when one is missing, and throws on two assets with the same name. Any other source (Addressables) plugs in as a `UxmlLoader` delegate returning the asset and a release handle.
 
+### Stat panel
+
+A column of stats in a corner of any element: the build's version, frames a second, ping, loss. The panel knows no stat; the game adds each row with the function that reads it, and decides which rows a player may turn on and where that choice is kept.
+
+```csharp
+var frames = new FrameTimes();                                  // fed Time.unscaledDeltaTime each frame
+var stats = new StatPanel(statsDocument.rootVisualElement, new StatPanelOptions { FontSize = 19f });
+
+stats.AddFixed("version", "", Application.version);            // a text that does not change
+StatRow fps = stats.Add("fps", "FPS", () => frames.PerSecond, limits: StatLimits.HigherIsBetter(warn: 55, bad: 30));
+stats.Add("ping", "PING", () => link.RttMs, "0", " ms", StatLimits.LowerIsBetter(warn: 80, bad: 150));
+stats.Add("loss", "LOSS", () => link.LossPercent, "0.0", "%", StatLimits.LowerIsBetter(warn: 1, bad: 5));
+
+fps.Shown = settings.ShowFps;                                   // the game's setting, the game's console
+
+// each frame
+frames.Tick(Time.unscaledDeltaTime);
+stats.Tick(Time.unscaledDeltaTime);
+```
+
+- **Rows** — `Add` shows a number in a `double.ToString` format (invariant culture) and a unit, `AddText` a text read each refresh, `AddFixed` a text that does not change. NaN or a null text shows a dash. `Remove(row)` takes out a row whose source went away, such as a ping when the match ends.
+- **Limits** — `LowerIsBetter(warn, bad)` and `HigherIsBetter(warn, bad)`; a value on a limit is past it. Levels: `Plain` (no limits, or NaN), `Good`, `Warn`, `Bad`. The value label carries `stat-row__value--good` (and so on) and the colour from the options.
+- **Cost** — shown rows are read every `Interval` seconds (0.25 by default), hidden rows never; a label changes only when its text does, so an unchanged value makes no string.
+- **Placement** — `Corner`, `Margin`, `FontSize` (zero keeps the host's), `Gap`, the four colours and a text `Shadow`, all in `StatPanelOptions`. The panel takes no pointer events and hides itself while no row is shown. Give it its own `UIDocument` with a high sorting order to draw it over everything.
+
 ### Debug window
 
 **Rubickanov → UI Debug** lists, per `UIService` in Play Mode: pointer capture count, back stack depth, the active screen, the screen history, the registered popup views, and the other registered views by layer with their `ViewState`.
@@ -329,4 +355,5 @@ The loader looks up assets by name, throws naming the catalog when one is missin
 - **History of factories, not of view models** — a view model belongs to one show, so the history keeps how to build one.
 - **No device input in the package** — the game owns its bindings and feeds `Back()`, `BackOrPause` and `MenuNavigation.Update`; the package owns the order: who hears a key, what Back reaches.
 - **Unscaled time for animations** — a UI animation that runs on scaled time never finishes on a pause menu.
+- **The stat panel reads, the game knows** — no built-in stat but frame times: what a row reads, its limits and who may turn it on belong to the game, so a networked game adds ping and loss in its own code and the package stays free of any network or settings.
 - **Catalog, not `Resources`** — `Resources` ships every asset in the folder and finds views by strings that break silently on rename; the loader stays a delegate, so a project can still use Addressables.
