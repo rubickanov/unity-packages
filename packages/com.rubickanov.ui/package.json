@@ -1,9 +1,9 @@
 {
   "name": "com.rubickanov.ui",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "license": "MIT",
   "displayName": "UI Framework",
-  "description": "UI Toolkit framework: views with view models on layers, a screen history, popups with view content, unscaled-time animations, and one pointer capture, back stack and menu navigation for cursor, Escape and pad.",
+  "description": "UI Toolkit framework: views with view models on layers, a screen history, popups with view content, unscaled-time animations, one pointer capture, back stack and menu navigation for cursor, Escape and pad, and a stat panel coloured by limits.",
   "unity": "6000.0",
   "author": {
     "name": "rubickanov"
