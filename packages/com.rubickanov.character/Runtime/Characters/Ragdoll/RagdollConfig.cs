@@ -72,6 +72,25 @@ namespace Rubickanov.Characters
         [Tooltip("Without a get-up clip, seconds the pose blends straight into standing.")]
         [Min(0)] public float StandInBlendTime = 0.3f;
 
+        [Header("Get-up spot")]
+        [Tooltip("Before getting up, the capsule looks for the nearest place round where the body lies where it " +
+                 "stands on stable ground (not a step's nose), out of walls, with room to stand and nothing fixed " +
+                 "over the lying head; with none the body stays down and looks again. Off: it stands on the ground " +
+                 "under the hips (the default; a game turns it on in its config).")]
+        public bool SafeSpot;
+        [Tooltip("Rings of points round the first spot are this far apart, metres.")]
+        [Min(0.01f)] public float SpotStep = 0.06f;
+        [Tooltip("How many rings of 8 points are tried.")]
+        [Range(0, 8)] public int SpotRings = 3;
+        [Tooltip("How many times a capsule put into something is moved out of it.")]
+        [Range(0, 8)] public int SpotFreeTries = 4;
+        [Tooltip("With no place to stand, the body looks again this often, seconds.")]
+        [Min(0.02f)] public float SpotRetry = 0.5f;
+        [Tooltip("Down this long, seconds from the fall, it gets up where it lies, place or not.")]
+        [Min(0)] public float SpotGiveUp = 8f;
+        [Tooltip("The standing capsule and the head may be this deep in a fixed piece, metres.")]
+        [Min(0)] public float PieceSlop = 0.02f;
+
         [Header("Water")]
         [Tooltip("Lift of a bone fully under water as a share of its weight. Above 1 floats.")]
         [Min(0)] public float Buoyancy = 1.25f;

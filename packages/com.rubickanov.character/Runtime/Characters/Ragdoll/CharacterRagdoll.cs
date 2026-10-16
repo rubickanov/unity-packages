@@ -56,6 +56,12 @@ namespace Rubickanov.Characters
         private AnimancerState _getUpClip;
         private Vector3 _followPosition;
         private readonly RaycastHit[] _groundHits = new RaycastHit[8];
+        // Seconds since the fall, in the air or not; a get-up with no place to stand waits until _spotAgain.
+        private float _downTime;
+        private float _spotAgain;
+        private bool _hasSpot;
+        private Vector3 _spot;
+        private readonly List<Collider> _boneColliders = new();
 
         public BodyState State { get; private set; }
 
@@ -229,6 +235,7 @@ namespace Rubickanov.Characters
                 return;
             }
 
+            _downTime += dt;
             _ragdoll.Drive(dt);
             Float();
             // Only a body lying on the ground or floating in deep water rests: hips slow at the top of a flight or
@@ -302,6 +309,12 @@ namespace Rubickanov.Characters
                     if (_getUpPending)
                     {
                         _getUpPending = false;
+                        if (!PlaceToStand())
+                        {
+                            _ragdoll.Map(1f);
+                            break;
+                        }
+
                         _ragdoll.Freeze();
                         BeginGetUp(LiesFaceUp(), true);
                         break;
@@ -334,7 +347,8 @@ namespace Rubickanov.Characters
         private void LieDown()
         {
             State = BodyState.Down;
-            _lyingTime = _restTime = _fallTime = 0f;
+            _lyingTime = _restTime = _fallTime = _downTime = _spotAgain = 0f;
+            _hasSpot = false;
             _fallGravity = false;
             _getUpPending = false;
             _followPosition = Character.transform.position;
@@ -512,8 +526,72 @@ namespace Rubickanov.Characters
                 bodyPosition = modelPosition - bodyRotation * body.InverseTransformVector(model.position - body.position);
             }
 
+            // Where the clip puts it, or the nearest place round it that stands; else where the hips' place stood.
+            if (_hasSpot)
+            {
+                bodyPosition = FindSpot(bodyPosition, bodyRotation, head, out Vector3 spot) ? spot : _spot;
+                _hasSpot = false;
+            }
+
             Character.Teleport(bodyPosition, bodyRotation);
             Animator.AlignModel();
+        }
+
+        // Whether a body about to get up has a place to stand round the ground under its hips: with none it stays
+        // down and looks again every SpotRetry. Down SpotGiveUp from the fall it waits no longer: it gets up at the
+        // place if there is one, else where it lies. A body in deep water swims up wherever it floats.
+        private bool PlaceToStand()
+        {
+            _hasSpot = false;
+            Vector3 hips = _ragdoll.Hips.transform.position;
+            if (!Config.SafeSpot || InDeepWater(hips, out _, out _))
+            {
+                return true;
+            }
+
+            bool gaveUp = _downTime >= Config.SpotGiveUp;
+            if (!gaveUp && _downTime < _spotAgain)
+            {
+                return false;
+            }
+
+            _hasSpot = FindSpot(GroundUnder(hips), Upright(Character.Motor.TransientRotation),
+                _ragdoll.Head.transform.position, out _spot);
+            if (!_hasSpot)
+            {
+                _spotAgain = _downTime + Config.SpotRetry;
+            }
+
+            return _hasSpot || gaveUp;
+        }
+
+        // GetUpSpot with the body's own bones out of the motor's sight (frozen, they are kinematic, which the motor
+        // would stand on) and the suspended motor's ground solving on for the search.
+        private bool FindSpot(Vector3 feet, Quaternion heading, Vector3 head, out Vector3 spot)
+        {
+            List<Collider> ignored = Character.IgnoredColliders;
+            int count = ignored.Count;
+            _boneColliders.Clear();
+            _ragdoll.GetColliders(_boneColliders);
+            ignored.AddRange(_boneColliders);
+            Character.Motor.SetGroundSolvingActivation(true);
+            try
+            {
+                var settings = new GetUpSpotSettings
+                {
+                    Step = Config.SpotStep,
+                    Rings = Config.SpotRings,
+                    FreeTries = Config.SpotFreeTries,
+                    PieceSlop = Config.PieceSlop,
+                    HeadRadius = _ragdoll.HeadRadius,
+                };
+                return GetUpSpot.Find(Character.Motor, feet, heading, head, settings, out spot);
+            }
+            finally
+            {
+                ignored.RemoveRange(count, ignored.Count - count);
+                Character.Motor.SetGroundSolvingActivation(!Character.IsSuspended);
+            }
         }
 
         private void StepGetUp()
