@@ -114,6 +114,38 @@ namespace Rubickanov.Characters
         /// <summary>The bones, the hips first and every bone after the one it is connected to.</summary>
         public IReadOnlyList<RagdollBone> Bones => _bones;
 
+        /// <summary>Adds every bone's colliders to <paramref name="into"/>.</summary>
+        public void GetColliders(List<Collider> into)
+        {
+            foreach (Collider[] colliders in _colliders)
+            {
+                into.AddRange(colliders);
+            }
+        }
+
+        /// <summary>Radius of the head's collider, metres; 0 for none.</summary>
+        public float HeadRadius
+        {
+            get
+            {
+                float radius = 0f;
+                foreach (Collider collider in _colliders[HeadIndex])
+                {
+                    Vector3 scale = collider.transform.lossyScale;
+                    float size = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+                    radius = Mathf.Max(radius, collider switch
+                    {
+                        SphereCollider sphere => sphere.radius * size,
+                        CapsuleCollider capsule => capsule.radius * size,
+                        BoxCollider box => Mathf.Min(box.size.x, box.size.y, box.size.z) * 0.5f * size,
+                        _ => 0f,
+                    });
+                }
+
+                return radius;
+            }
+        }
+
         public RagdollBone Hips => _bones[0];
         public RagdollBone Chest => _bones[ChestIndex];
         public RagdollBone Head => _bones[HeadIndex];

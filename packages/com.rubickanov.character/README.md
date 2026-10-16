@@ -60,7 +60,7 @@ Runtime/
     ├── Motor/              CharacterMotor, input, motion, MovementConfig
     ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape
     │   └── IK/             CharacterRig + config, FootPlacement, HeadLook, TurnLean, GetUpContacts, MountLimbs
-    ├── Ragdoll/            CharacterRagdoll, Ragdoll, RagdollBone, RagdollConfig
+    ├── Ragdoll/            CharacterRagdoll, Ragdoll, RagdollBone, RagdollConfig, GetUpSpot
     ├── Climb/              CharacterClimb, IClimbable, ClimbPoint
     └── Hooks/              what the game implements: input source, mount, water, foot ground, footprints, solid
 └── Netcode/                optional module (NGO): NetworkCharacter, CharacterNetSnapshot, part writer/reader,
@@ -77,12 +77,13 @@ Every tunable lives in a config asset the game owns: **MovementConfig** (speeds,
 (feet, head look, lean, seat grips, hand shapes), **CharacterAnimationsConfig** (clips), **RagdollConfig** (muscles,
 falling, get-up, water), **CharacterProportions** (build data for a game's character builder).
 
-A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Four config fields are where games chose differently; their defaults are the conservative side:
+A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Five config fields are where games chose differently; their defaults are the conservative side:
 
 | Field | Default | Other value |
 |---|---|---|
 | `MovementConfig.FirstPersonTurn` | `Eased`: in first person the body eases round to the camera at `OrientationSharpness` | `AtOnce`: the body faces the camera at once (the game sets `CharacterInput.FirstPerson`) |
 | `RagdollConfig.FallTime` | `0`: a long fall stays upright until it lands | `1`: after 1 s of falling the body goes down into its ragdoll in the air |
+| `RagdollConfig.SafeSpot` | `false`: the capsule stands on the ground under the hips | `true`: `GetUpSpot` looks round that point in rings (`SpotStep` × `SpotRings` × 8) for stable ground, out of walls, with room to stand and nothing fixed over the lying head; with none the body stays down, looks again every `SpotRetry` and gets up where it lies after `SpotGiveUp` from the fall |
 | `RagdollConfig.SolverVelocityIterations` | `1` (the physics default) | e.g. `4`: stiffer bones on a moving deck |
 | `CharacterRigConfig.MountGrip` | `Wrist`: the wrist goes onto the hold, the hand keeps the clip's turn | `Palm`: the hand takes the hold's turn exactly (palm faces Z, fingers along Y), fingers shaped Fist/OpenPalm |
 
