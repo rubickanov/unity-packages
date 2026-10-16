@@ -26,6 +26,15 @@ namespace Rubickanov.Characters
         [Tooltip("How quickly the slope blend follows the ground. 0 follows it instantly.")]
         [Min(0)] public float SlopeSharpness = 8f;
 
+        [Header("Stride sync")]
+        [Tooltip("When locomotion comes back after another clip (a landing, a jump, a turn), its loops start in the " +
+                 "stance of the foot the shown pose bears on, at the matching reach, instead of from their first " +
+                 "frame. Needs StrideMarkers baked from the locomotion clips. Off: from the start.")]
+        public bool StrideSync;
+        [Tooltip("Every locomotion loop's feet baked on the character's rig (package editor StrideBaker). A clip " +
+                 "changed without a rebake starts from its first frame, with one warning.")]
+        public StrideMarkers StrideMarkers;
+
         [Header("Turning in place")]
         [Tooltip("Optional. Standing turns whose root rotation turns the model, picked by the nearest angle. " +
                  "Import them with root rotation not baked into the pose. Without any, the model simply follows the body.")]
