@@ -1,6 +1,6 @@
 {
     "name": "com.rubickanov.character",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "license": "MIT",
     "displayName": "Character",
     "description": "A third-person character body shared by games: a motor over Kinematic Character Controller, an Animancer animator, a ragdoll that falls, lies and gets up, and IK for feet, head look, turn lean, seat and work hands, climbing and swimming. The game provides KCC, Animancer and com.rubickanov.log and turns features on through hooks and config assets.",
