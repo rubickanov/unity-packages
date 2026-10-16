@@ -204,7 +204,7 @@ namespace Rubickanov.Characters
             _move = Vector3.ClampMagnitude(input.Move, 1f);
             _look = input.Look;
             _aim = input.Aim;
-            _faceLook = input.FaceLook;
+            _faceLook = input.FirstPerson && Settings.FirstPersonTurn == BodyTurn.AtOnce;
             _sprint = input.Sprint;
             _pendingJump |= input.JumpPressed && Constraints.Current.Jump;
         }
