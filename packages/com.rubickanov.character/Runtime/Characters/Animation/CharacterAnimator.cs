@@ -574,6 +574,54 @@ namespace Rubickanov.Characters
             Animancer.Graph.PauseGraph();
         }
 
+        /// <summary>Whether the config has the three flail clips a flying ragdoll reaches for.</summary>
+        public bool HasFlails
+        {
+            get
+            {
+                ClipTransition[] flails = Animations != null ? Animations.Flails : null;
+                if (flails == null || flails.Length < 3)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < 3; i++)
+                {
+                    if (flails[i] == null || !flails[i].IsValid)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// While down, plays flail clip <paramref name="kind"/> (head first, along the fall, feet first) from its
+        /// start, fading in over <paramref name="fade"/> seconds, and evaluates it so its pose is on the bones now.
+        /// </summary>
+        public void PlayFlail(int kind, float fade)
+        {
+            if (_phase != Phase.Down || !HasFlails)
+            {
+                return;
+            }
+
+            Animancer.Graph.UnpauseGraph();
+            Animancer.Play(Animations.Flails[kind], fade, FadeMode.FromStart);
+            Animancer.Evaluate();
+        }
+
+        /// <summary>Holds the pose again, as <see cref="EnterDown"/> does, once the body stops flailing.</summary>
+        public void StopFlail()
+        {
+            if (_phase == Phase.Down)
+            {
+                Animancer.Graph.PauseGraph();
+            }
+        }
+
         /// <summary>
         /// Plays the get-up for a body lying face up or down, its first frame already on the bones so the caller
         /// can read it. Null without that clip: the character goes straight back to locomotion. The clip's travel
