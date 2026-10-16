@@ -23,8 +23,15 @@ namespace Rubickanov.Characters
         public CharacterMotor Character;
         public AnimancerComponent Animancer;
         public CharacterAnimationsConfig Animations;
+        [Tooltip("Optional. Inertialization over the clips (the config's Inertialization switches); without it " +
+                 "every switch cross-fades and get-ups blend from a held clip.")]
+        public PoseInertia Inertia;
 
         private enum Phase { Grounded, Turning, Jumping, Falling, Landing, Down, GettingUp, Mounted, Swimming }
+
+        // Inertialization per switch kind, from the config, changed at run time by SetInertia.
+        private readonly bool[] _inertial = new bool[5];
+        private readonly float[] _inertiaLength = new float[5];
 
         private const float MinSlopeSpeed = 0.1f;
         // A larger turn of the body between two frames is a teleport or a snap; the model goes with it.
@@ -198,6 +205,18 @@ namespace Rubickanov.Characters
             }
 
             _modelRest = Quaternion.Inverse(Body.rotation) * _model.rotation;
+            _inertial[(int)InertiaKind.GetUp] = Animations.InertialGetUp;
+            _inertial[(int)InertiaKind.Jump] = Animations.InertialJump;
+            _inertial[(int)InertiaKind.Land] = Animations.InertialLand;
+            _inertial[(int)InertiaKind.Turn] = Animations.InertialTurn;
+            _inertial[(int)InertiaKind.WaterEntry] = Animations.InertialWaterEntry;
+            _inertiaLength[(int)InertiaKind.GetUp] = Animations.GetUpInertia;
+            for (int i = 1; i < _inertiaLength.Length; i++)
+            {
+                _inertiaLength[i] = Animations.SwitchInertia;
+            }
+
+            TrackInertia();
             _lastBodyForward = PlanarForward(Body);
             _turn.Reset();
             _aimYaw = 0f;
@@ -270,7 +289,7 @@ namespace Rubickanov.Characters
                 bool swimming = motion.IsSwimming && Animations.Swim.IsValid;
                 if (swimming && _phase != Phase.Swimming)
                 {
-                    PlaySwim(Animations.Swim.FadeDuration);
+                    PlaySwim(SwitchFade(InertiaKind.WaterEntry, Animations.Swim.FadeDuration));
                 }
                 else if (!swimming && _phase == Phase.Swimming)
                 {
@@ -478,7 +497,7 @@ namespace Rubickanov.Characters
                 return;
             }
             _phase = Phase.Jumping;
-            AnimancerState state = Animancer.Play(jump);
+            AnimancerState state = Animancer.Play(jump, SwitchFade(InertiaKind.Jump, jump.FadeDuration));
             state.Events(this).OnEnd ??= OnJumpEnd;
         }
 
@@ -504,7 +523,7 @@ namespace Rubickanov.Characters
             }
             _phase = Phase.Landing;
             _landAuthoredSpeed = land.AuthoredSpeed;
-            _land = Animancer.Play(land.Animation);
+            _land = Animancer.Play(land.Animation, SwitchFade(InertiaKind.Land, land.Animation.FadeDuration));
             _land.Events(this).OnEnd ??= OnLandEnd;
         }
 
@@ -554,7 +573,8 @@ namespace Rubickanov.Characters
             // Lands the turn on the look; stretching the clip's rotation a little barely shows in the feet.
             _turnScale = Mathf.Abs(degrees) / angle;
             // From the start even when a turn to the same side is still fading out, or it would end at once.
-            AnimancerState state = Animancer.Play(turn, turn.FadeDuration, FadeMode.FromStart);
+            AnimancerState state = Animancer.Play(turn, SwitchFade(InertiaKind.Turn, turn.FadeDuration),
+                FadeMode.FromStart);
             state.Events(this).OnEnd ??= OnTurnEnd;
         }
 
@@ -650,6 +670,83 @@ namespace Rubickanov.Characters
             _phase = Phase.GettingUp;
             Animancer.Evaluate();
             return state;
+        }
+
+        /// <summary>The model's rotation in the body's space when it is not turned.</summary>
+        public Quaternion ModelRest => _modelRest;
+
+        /// <summary>Whether the config has nearest-frame get-ups (<see cref="CharacterAnimationsConfig.GetUps"/>).</summary>
+        public bool HasGetUps => Animations.GetUps != null && Animations.GetUps.Length > 0 && Animations.GetUpPoses != null;
+
+        /// <summary>
+        /// Plays nearest-frame get-up <paramref name="index"/> of the config from <paramref name="time"/> s, its pose
+        /// on the bones now. With an inertia, the clip is first evaluated a step later so it knows the new pose's
+        /// velocity. The clip's travel moves the body when <paramref name="moveBody"/>. It hands back to locomotion
+        /// at <paramref name="standTime"/> s, where the body stands, not at the clip's end.
+        /// </summary>
+        public AnimancerState PlayGetUpAt(int index, float time, float standTime, bool moveBody, PoseInertia inertia)
+        {
+            Animancer.Graph.UnpauseGraph();
+            AlignModel();
+            DropHold();
+            // Setting the time is no travel: nothing moves the body while the start is found.
+            _getUpMovesBody = false;
+            AnimancerState state = Animancer.Play(Animations.GetUps[index], 0f, FadeMode.FromStart);
+            AnimancerEvent.Sequence events = state.Events(this);
+            events.OnEnd ??= OnGetUpEnd;
+            events.NormalizedEndTime = state.Length > 0f ? Mathf.Clamp01(standTime / state.Length) : 1f;
+            _phase = Phase.GettingUp;
+            if (inertia != null)
+            {
+                const float step = 1f / 60f;
+                state.Time = time + step;
+                Animancer.Evaluate();
+                inertia.TargetBefore(-step);
+            }
+
+            state.Time = time;
+            Animancer.Evaluate();
+            _getUpMovesBody = moveBody && _rootMotion;
+            return state;
+        }
+
+        /// <summary>Whether a switch of <paramref name="kind"/> is inertialized now, and over how long.</summary>
+        public bool InertiaOf(InertiaKind kind, out float seconds)
+        {
+            seconds = _inertiaLength[(int)kind];
+            return _inertial[(int)kind] && Inertia != null && seconds > 0f;
+        }
+
+        /// <summary>Turns inertialization of <paramref name="kind"/> on or off for this character (not saved).</summary>
+        public void SetInertia(InertiaKind kind, bool on)
+        {
+            _inertial[(int)kind] = on;
+            TrackInertia();
+        }
+
+        /// <summary>Sets how long the old pose of <paramref name="kind"/> takes to die away (not saved).</summary>
+        public void SetInertiaLength(InertiaKind kind, float seconds) => _inertiaLength[(int)kind] = Mathf.Max(0f, seconds);
+
+        // A switch inertialized from the last frame's pose: no cross-fade, the inertia begins once Animancer evaluated.
+        private float SwitchFade(InertiaKind kind, float fade)
+        {
+            if (!InertiaOf(kind, out float seconds))
+            {
+                return fade;
+            }
+
+            Inertia.Request(seconds);
+            return 0f;
+        }
+
+        // The inertia reads every frame only while a switch begun from the last frame is on.
+        private void TrackInertia()
+        {
+            if (Inertia != null)
+            {
+                Inertia.Tracking = _inertial[(int)InertiaKind.Jump] || _inertial[(int)InertiaKind.Land] ||
+                                   _inertial[(int)InertiaKind.Turn] || _inertial[(int)InertiaKind.WaterEntry];
+            }
         }
 
         /// <summary>

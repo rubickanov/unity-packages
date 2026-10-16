@@ -32,7 +32,7 @@ namespace Rubickanov.Characters
     // After CharacterRig works on the model (-50), before the camera follows it (0).
     [DefaultExecutionOrder(-40)]
     [DisallowMultipleComponent]
-    public sealed class CharacterRagdoll : MonoBehaviour
+    public sealed partial class CharacterRagdoll : MonoBehaviour
     {
         private static readonly LogChannel Log = LogChannel.Get("Character");
 
@@ -51,6 +51,11 @@ namespace Rubickanov.Characters
         // Fell in the air from a long fall: the bones fall with the character's gravity until they reach the ground.
         private bool _fallGravity;
         private bool _getUpPending;
+        private bool _showPending;
+        private CharacterGetUp _shownGetUp;
+        private bool _showCaptured;
+        private Vector3 _drawnAt;
+        private Quaternion _drawnTurn = Quaternion.identity;
         private float _blend;
         private float _blendTime;
         private AnimancerState _getUpClip;
@@ -86,8 +91,9 @@ namespace Rubickanov.Characters
         /// <summary>The ragdoll took over. Raised on the owner only.</summary>
         public event Action FellDown;
 
-        /// <summary>The character starts getting up, lying face up (true) or down. Raised on the owner only.</summary>
-        public event Action<bool> GettingUp;
+        /// <summary>The character starts getting up: lying face up or down, and the nearest-frame get-up's clip and
+        /// start (<see cref="CharacterGetUp.Classic"/> for the face up / down one). Raised on the owner only.</summary>
+        public event Action<CharacterGetUp> GettingUp;
 
         // The bones are left on in the prefab, so they can be seen and edited there; the character starts
         // upright, before the first physics step.
@@ -99,11 +105,15 @@ namespace Rubickanov.Characters
             {
                 Log.Error("CharacterRagdoll requires a character, an animator, a config and built bones.", this);
                 enabled = false;
+                return;
             }
+
+            Everyone.Add(this);
         }
 
         private void OnDisable()
         {
+            Everyone.Remove(this);
             if (State != BodyState.Upright)
             {
                 Stand();
@@ -212,12 +222,35 @@ namespace Rubickanov.Characters
         }
 
         /// <summary>A replicated character gets up; its capsule is already where the owner stood it.</summary>
-        public void ShowGetUp(bool faceUp)
+        public void ShowGetUp(CharacterGetUp getUp)
         {
-            if (State == BodyState.Down && IsReplica)
+            if (State != BodyState.Down || !IsReplica)
             {
-                BeginGetUp(faceUp, false);
+                return;
             }
+
+            if (getUp.Clip != CharacterGetUp.Classic && NearestReady() && getUp.Clip < Animator.Animations.GetUps.Length)
+            {
+                Log.Info($"Shows get-up {Animator.Animations.GetUpPoses.Entries[getUp.Clip].Name} from {getUp.Time:F2} s", this);
+                // Switched in LateUpdate, as the owner does: played now, the animation update would move the clip on
+                // by this frame before the inertia shows the ragdoll's pose. The pose it starts from is the one shown
+                // until now, taken before the stream moves the lying body onto the new capsule.
+                _shownGetUp = getUp;
+                _showPending = true;
+                _showCaptured = CaptureShown();
+                if (_showCaptured)
+                {
+                    // The stream already set the capsule where the owner stood it, carrying the lying bones along: the
+                    // pose shown is the one at the capsule as drawn last frame.
+                    Transform body = Character.transform;
+                    Quaternion back = _drawnTurn * Quaternion.Inverse(body.rotation);
+                    _shownHips = _drawnAt + back * (_shownHips - body.position);
+                    _shown[0] = back * _shown[0];
+                }
+                return;
+            }
+
+            BeginGetUp(getUp.FaceUp, false);
         }
 
         private void FixedUpdate()
@@ -311,9 +344,31 @@ namespace Rubickanov.Characters
 
                     break;
                 case BodyState.Down:
+                    if (_showPending)
+                    {
+                        _showPending = false;
+                        BeginNearest(_shownGetUp.Clip, _shownGetUp.Time, false, _showCaptured);
+                        break;
+                    }
+
                     if (_getUpPending)
                     {
                         _getUpPending = false;
+                        if (UsesNearest())
+                        {
+                            if (ChooseNearest(out int clip, out float time))
+                            {
+                                _ragdoll.Freeze();
+                                BeginNearest(clip, time, true);
+                            }
+                            else
+                            {
+                                _ragdoll.Map(1f);
+                            }
+
+                            break;
+                        }
+
                         if (!PlaceToStand())
                         {
                             _ragdoll.Map(1f);
@@ -332,6 +387,7 @@ namespace Rubickanov.Characters
                     }
 
                     _ragdoll.Map(1f);
+                    Character.transform.GetPositionAndRotation(out _drawnAt, out _drawnTurn);
                     break;
                 case BodyState.GettingUp:
                     StepGetUp();
@@ -360,9 +416,12 @@ namespace Rubickanov.Characters
             State = BodyState.Down;
             _lyingTime = _restTime = _fallTime = _downTime = _spotAgain = 0f;
             _hasSpot = false;
+            _searchAgain = 0f;
+            _risingByClip = false;
             _flailShown = FlailClip.None;
             _fallGravity = false;
             _getUpPending = false;
+            _showPending = false;
             _followPosition = Character.transform.position;
             if (IsReplica)
             {
@@ -414,7 +473,7 @@ namespace Rubickanov.Characters
 
             if (placeBody)
             {
-                GettingUp?.Invoke(faceUp);
+                GettingUp?.Invoke(new CharacterGetUp(faceUp));
             }
         }
 
@@ -446,7 +505,7 @@ namespace Rubickanov.Characters
 
             if (placeBody)
             {
-                GettingUp?.Invoke(LiesFaceUp());
+                GettingUp?.Invoke(new CharacterGetUp(LiesFaceUp()));
             }
         }
 
@@ -678,7 +737,9 @@ namespace Rubickanov.Characters
             }
 
             State = BodyState.Upright;
+            _risingByClip = false;
             _getUpPending = false;
+            _showPending = false;
             _getUpClip = null;
             Animator.EndGetUp();
             Character.Resume();

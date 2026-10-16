@@ -29,6 +29,7 @@ namespace Rubickanov.Characters.Netcode.Tests
                 Assert.That(back.Rotation, Is.EqualTo(sent.Rotation));
                 Assert.That(back.Aim, Is.EqualTo(sent.Aim));
                 Assert.That((back.Jumps, back.Falls, back.GetUps), Is.EqualTo((sent.Jumps, sent.Falls, sent.GetUps)));
+                Assert.That((back.GetUpClip, back.GetUpTime), Is.EqualTo((sent.GetUpClip, sent.GetUpTime)));
                 Assert.That(back.Flags, Is.EqualTo(flag), $"flag {flag}");
                 Assert.That(back.Parts.Length, Is.Zero);
             }
@@ -149,6 +150,8 @@ namespace Rubickanov.Characters.Netcode.Tests
             Falls = 250,
             GetUps = 7,
             Flags = flags,
+            GetUpClip = 4,
+            GetUpTime = 1234,
         };
 
         private static byte[] Write(in CharacterNetSnapshot snapshot)
