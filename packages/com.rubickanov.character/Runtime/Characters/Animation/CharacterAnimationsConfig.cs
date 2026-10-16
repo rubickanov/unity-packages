@@ -77,6 +77,11 @@ namespace Rubickanov.Characters
         [Tooltip("Fade from a get-up that reached its end time back to locomotion.")]
         [Min(0)] public float GetUpBlendOut = 0.25f;
 
+        [Header("Flailing")]
+        [Tooltip("Flail clips a flying ragdoll's muscles reach for (RagdollConfig.Flail), in this order: head first, " +
+                 "along the fall, feet first. Played in place and looped. Empty: no flailing.")]
+        public ClipTransition[] Flails = { };
+
         [Header("Riding")]
         [Tooltip("Optional. Held while riding in or on something whose seat has no pose of its own. Without it " +
                  "such a rider idles.")]

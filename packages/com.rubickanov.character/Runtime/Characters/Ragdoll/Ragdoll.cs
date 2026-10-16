@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Rubickanov.Rig;
+using Unity.Profiling;
 using UnityEngine;
 
 namespace Rubickanov.Characters
@@ -33,6 +34,8 @@ namespace Rubickanov.Characters
         /// <summary>The chest's place in <see cref="Bones"/>, in the order RagdollBuilder builds them.</summary>
         public const int ChestIndex = 2;
 
+        private static readonly ProfilerMarker DriveMarker = new("Ragdoll.Drive");
+
         private readonly RagdollConfig _config;
         private readonly Transform _root;
         private readonly RagdollBone[] _bones;
@@ -61,8 +64,18 @@ namespace Rubickanov.Characters
         private float _appliedSpring = -1f;
         private float _appliedDamper = -1f;
 
+        // The joints' targets for the pose the body fell in, set on Activate: what the limp muscles hold.
+        private readonly Quaternion[] _holdTargets;
+
+        // Only with the flail on: the reflex and the bones' touch.
+        private readonly FlailReflex _flail;
+        private readonly RagdollTouch[] _touch;
+        private bool _wet;
+
+        /// <param name="flail">Whether the muscles flail in the air (<see cref="FlailReflex"/>): the caller has the
+        /// clips for it and the config turns it on.</param>
         public Ragdoll(RagdollConfig config, Transform root, IReadOnlyList<RagdollBone> bones,
-            IReadOnlyList<Collider> own)
+            IReadOnlyList<Collider> own, bool flail = false)
         {
             _config = config;
             _root = root;
@@ -101,6 +114,120 @@ namespace Rubickanov.Characters
             _placeRotation = new Quaternion[_bones.Length];
             _pushHops = new int[_bones.Length];
             _pushSpeeds = new float[_bones.Length];
+            _holdTargets = new Quaternion[_bones.Length];
+            for (int i = 0; i < _bones.Length; i++)
+            {
+                _holdTargets[i] = Quaternion.identity;
+            }
+
+            if (!flail)
+            {
+                return;
+            }
+
+            _flail = new FlailReflex(this, config, _bones, _parents, _mass);
+            var ownColliders = new HashSet<Collider>(_own);
+            foreach (Collider[] colliders in _colliders)
+            {
+                ownColliders.UnionWith(colliders);
+            }
+
+            _touch = new RagdollTouch[_bones.Length];
+            for (int i = 0; i < _bones.Length; i++)
+            {
+                RagdollBone bone = _bones[i];
+                _touch[i] = bone.TryGetComponent(out RagdollTouch touch) ? touch : bone.gameObject.AddComponent<RagdollTouch>();
+                _touch[i].Construct(ownColliders);
+            }
+        }
+
+        /// <summary>The muscles' reflex in the air, null when the flail is off.</summary>
+        public FlailReflex Flail => _flail;
+
+        /// <summary>Whether the pose should be read every frame: the muscles reach for the flail clip playing.</summary>
+        public bool ReadsFlailPose => _flail != null && _flail.State == FlailState.Flailing;
+
+        /// <summary>
+        /// Whether a bone is in water, set every physics step: the flail lets go at once and does not start again
+        /// while it stays wet (floating touches nothing, so it would count as flight).
+        /// </summary>
+        public void SetWet(bool wet)
+        {
+            _wet = wet;
+            if (wet && _flail != null && _flail.HoldsMuscles)
+            {
+                _flail.Reset();
+                ReleaseMuscles();
+            }
+        }
+
+        public bool HasJoint(int index) => _bones[index].Joint != null && _parents[index] >= 0;
+
+        /// <summary>Joint <paramref name="index"/>'s target for the pose last read by <see cref="SamplePose"/>.</summary>
+        public Quaternion PoseTarget(int index)
+        {
+            RagdollBone bone = _bones[index];
+            Quaternion local = Quaternion.Inverse(_rotation[_parents[index]]) * _rotation[index];
+            return RagdollMath.TargetRotation(bone.JointSpace, bone.RestLocal, local);
+        }
+
+        /// <summary>Joint <paramref name="index"/>'s target for the pose the body fell in, which limp muscles hold.</summary>
+        public Quaternion HoldTarget(int index) => _holdTargets[index];
+
+        /// <summary>Sets joint <paramref name="index"/>'s slerp drive, for a reflex that holds the muscles.</summary>
+        public void SetMuscle(int index, float spring, float damper, float maxTorque, Quaternion target)
+        {
+            ConfigurableJoint joint = _bones[index].Joint;
+            joint.slerpDrive = new JointDrive
+            {
+                positionSpring = spring,
+                positionDamper = damper,
+                maximumForce = maxTorque,
+            };
+            joint.targetRotation = target;
+            _appliedSpring = _appliedDamper = -1f;
+        }
+
+        // The reflex let go: the muscles are limp at once, holding the pose the body fell in, and Drive writes them.
+        private void ReleaseMuscles()
+        {
+            MuscleWeight = _config.LimpMuscleWeight;
+            for (int i = 1; i < _bones.Length; i++)
+            {
+                if (HasJoint(i))
+                {
+                    _bones[i].Joint.targetRotation = _holdTargets[i];
+                }
+            }
+
+            _appliedSpring = _appliedDamper = -1f;
+            DriveLimp(0f);
+        }
+
+        // PhysX sleeps a jointed island as one and sends no collision stay for sleeping bodies, so a body lying
+        // still reports no touch; asleep means at rest on something.
+        private bool Asleep()
+        {
+            foreach (RagdollBone bone in _bones)
+            {
+                if (bone.Body.IsSleeping())
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private float TakeTouch()
+        {
+            float force = 0f;
+            foreach (RagdollTouch touch in _touch)
+            {
+                force += touch.Take();
+            }
+
+            return force;
         }
 
         public RagdollMode Mode { get; private set; }
@@ -245,6 +372,7 @@ namespace Rubickanov.Characters
 
             _samples = 0;
             IsLimp = false;
+            _flail?.Reset();
             Mode = RagdollMode.Off;
         }
 
@@ -282,6 +410,14 @@ namespace Rubickanov.Characters
             IsLimp = false;
             MuscleWeight = 1f;
             _appliedSpring = _appliedDamper = -1f;
+            if (_flail != null)
+            {
+                _flail.Bind();
+                _flail.Reset();
+                TakeTouch();
+                _wet = false;
+            }
+
             SetLimits(ConfigurableJointMotion.Free);
             IgnoreOwnPairs(true);
             SetMaterial(_config.PinnedMaterial);
@@ -325,6 +461,32 @@ namespace Rubickanov.Characters
                 return;
             }
 
+            using ProfilerMarker.AutoScope scope = DriveMarker.Auto();
+            // The reflex holds the drives while it flails or eases; the limp fade waits, and is complete once it lets go.
+            if (_flail != null)
+            {
+                float touch = TakeTouch();
+                if (!_wet)
+                {
+                    if (_flail.Step(touch, Asleep(), dt, out bool ended))
+                    {
+                        return;
+                    }
+
+                    if (ended)
+                    {
+                        ReleaseMuscles();
+                        return;
+                    }
+                }
+            }
+
+            DriveLimp(dt);
+        }
+
+        // The muscles fade from full to the limp weight while limp, written only when they change.
+        private void DriveLimp(float dt)
+        {
             if (IsLimp)
             {
                 MuscleWeight = _config.LimpTime > 0f
@@ -437,6 +599,7 @@ namespace Rubickanov.Characters
                 bone.Body.isKinematic = true;
             }
 
+            _flail?.Reset();
             Mode = RagdollMode.Kinematic;
         }
 
@@ -604,7 +767,8 @@ namespace Rubickanov.Characters
                 }
 
                 Quaternion local = Quaternion.Inverse(_rotation[parent]) * _rotation[i];
-                bone.Joint.targetRotation = RagdollMath.TargetRotation(bone.JointSpace, bone.RestLocal, local);
+                _holdTargets[i] = RagdollMath.TargetRotation(bone.JointSpace, bone.RestLocal, local);
+                bone.Joint.targetRotation = _holdTargets[i];
             }
         }
 

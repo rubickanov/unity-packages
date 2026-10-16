@@ -62,6 +62,10 @@ namespace Rubickanov.Characters
         private bool _hasSpot;
         private Vector3 _spot;
         private readonly List<Collider> _boneColliders = new();
+        // The flail clip on the animation and the reflex's count of choices it was played for.
+        private FlailClip _flailShown = FlailClip.None;
+        private int _flailChoices;
+        private int _flailFlights;
 
         public BodyState State { get; private set; }
 
@@ -237,7 +241,8 @@ namespace Rubickanov.Characters
 
             _downTime += dt;
             _ragdoll.Drive(dt);
-            Float();
+            _ragdoll.SetWet(Float());
+            ShowFlail();
             // Only a body lying on the ground or floating in deep water rests: hips slow at the top of a flight or
             // hung on something do not.
             Vector3 hips = _ragdoll.Hips.transform.position;
@@ -320,6 +325,12 @@ namespace Rubickanov.Characters
                         break;
                     }
 
+                    // The muscles reach for the flail clip as the animation played it this frame, before it is hidden.
+                    if (_ragdoll.ReadsFlailPose)
+                    {
+                        _ragdoll.SamplePose(Time.deltaTime);
+                    }
+
                     _ragdoll.Map(1f);
                     break;
                 case BodyState.GettingUp:
@@ -349,6 +360,7 @@ namespace Rubickanov.Characters
             State = BodyState.Down;
             _lyingTime = _restTime = _fallTime = _downTime = _spotAgain = 0f;
             _hasSpot = false;
+            _flailShown = FlailClip.None;
             _fallGravity = false;
             _getUpPending = false;
             _followPosition = Character.transform.position;
@@ -438,15 +450,44 @@ namespace Rubickanov.Characters
             }
         }
 
+        // The flail clip the reflex follows goes on the animation: a new flight's from its start at once, a new
+        // choice fading in; once the reflex lets go the pose is held again.
+        private void ShowFlail()
+        {
+            FlailReflex flail = _ragdoll.Flail;
+            if (flail == null || (flail.Clip == _flailShown && flail.Choices == _flailChoices))
+            {
+                return;
+            }
+
+            bool start = flail.Flights != _flailFlights;
+            _flailShown = flail.Clip;
+            _flailChoices = flail.Choices;
+            _flailFlights = flail.Flights;
+            if (flail.Clip == FlailClip.None)
+            {
+                Animator.StopFlail();
+                return;
+            }
+
+            Animator.PlayFlail((int)flail.Clip, start ? 0f : Config.FlailBlendTime);
+            if (start)
+            {
+                _ragdoll.SamplePose(0f);
+            }
+        }
+
         // Lifts each bone by how deep it is under water and drags it through the water; the vest on the chest
-        // lifts in front of it, so a body face down rolls over.
-        private void Float()
+        // lifts in front of it, so a body face down rolls over. True when any bone is wet.
+        private bool Float()
         {
             ICharacterWater water = Character.Water;
             if (water == null)
             {
-                return;
+                return false;
             }
+
+            bool anyWet = false;
 
             Vector3 lift = -Physics.gravity;
             IReadOnlyList<RagdollBone> bones = _ragdoll.Bones;
@@ -465,6 +506,8 @@ namespace Rubickanov.Characters
                     continue;
                 }
 
+                anyWet = true;
+
                 if (i == Ragdoll.ChestIndex)
                 {
                     Vector3 front = center + _ragdoll.Facing(i) * Vector3.forward * Config.VestForward;
@@ -478,6 +521,8 @@ namespace Rubickanov.Characters
                 body.AddForce((flow - body.linearVelocity) * (Config.WaterDrag * wet), ForceMode.Acceleration);
                 body.AddTorque(-body.angularVelocity * (Config.WaterAngularDrag * wet), ForceMode.Acceleration);
             }
+
+            return anyWet;
         }
 
         // Hips at or under the surface of water too deep to stand in: a body there swims rather than stands.
@@ -737,7 +782,8 @@ namespace Rubickanov.Characters
                 Character.GetComponents(own);
             }
 
-            return new Ragdoll(Config, Character.transform, Bones, own);
+            return new Ragdoll(Config, Character.transform, Bones, own,
+                Config.Flail && Animator != null && Animator.HasFlails);
         }
     }
 }
