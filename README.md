@@ -51,26 +51,44 @@ of these wired up and is the configuration all packages are developed against.
 
 ## Linking into a Unity project (`link.sh`)
 
-`link.sh` rewrites a consumer Unity project's `Packages/manifest.json` to point
-at either local `file:` paths (for editing packages alongside the game) or the
-git remote URLs (for release builds). Only packages already listed in the
-target manifest are touched.
+`link.sh` rewrites a consumer Unity project's `Packages/manifest.json`: a package
+comes either from this checkout (`file:`, for editing it alongside the game) or
+from the git URL pinned at a commit (what games commit).
 
 ```
-./link.sh <project-path> [local|remote|status]
+./link.sh <project-path> [status|local|pin <sha>|remote] [package...]
 ```
 
-- `local` — rewrite each matching entry to `file:<relative-path>/com.rubickanov.<name>`
-- `remote` — rewrite each matching entry to the `git+ssh://…?path=packages/com.rubickanov.<name>` form
-- `status` — (default) list which packages are currently LOCAL, REMOTE, or not in the manifest
+- `status` — (default) each package's source: `LOCAL <path>`, `PINNED <sha>`, `REMOTE` (no sha) or `--`
+- `local` — `file:<absolute path to this checkout>/packages/com.rubickanov.<name>` and the package goes into
+  `testables` (absolute so copies and worktrees of a game work; `--relative` keeps the old relative path)
+- `pin <sha>` — `https://github.com/rubickanov/unity-packages.git?path=packages/com.rubickanov.<name>#<sha>`, out of `testables`
+- `remote` — the same URL without a sha (follows the default branch; prefer `pin`)
+- `package...` — only these (`character` or `com.rubickanov.character`); a named package is added if missing.
+  Without names, every package of this repo already in the manifest switches.
 
-Example:
+The loop for a fix in a package a game uses (e.g. `character`, shared by beach and leonid):
 
 ```
-./link.sh <project-path> local      # switch to local editing
-./link.sh <project-path> remote     # switch back for release
-./link.sh <project-path>            # inspect current state
+./link.sh ../beach local character        # 1. the game compiles this checkout
+# 2. fix in packages/com.rubickanov.character, check it in the game (link the other game too if the fix is shared)
+git commit && git push                    # 3. here
+./link.sh ../beach pin <sha> character    # 4. in every game that uses it; commit its manifest + packages-lock.json
+./link.sh ../leonid pin <sha> character
 ```
+
+## Packages
+
+| Package | Version | What |
+|---|---|---|
+| `audio` | 3.1.2 | Audio service: SFX pooling, music, mixer volume |
+| `character` | 1.0.0 | Character body: KCC motor, Animancer animator, ragdoll and get-up, feet/head/seat IK (the game provides KCC and Animancer; not in `unity-project-pckgs`) |
+| `devconsole` | 5.0.0 | In-game dev console |
+| `eqs` | 2.0.0 | Environment Query System |
+| `input` | 1.1.0 | Input System helpers each game needs |
+| `log` | 1.2.0 | Named log channels |
+| `save` | 1.0.0 | Player data store |
+| `ui` | 4.1.0 | UI Toolkit framework |
 
 ## Running package tests from a consumer project
 
@@ -105,7 +123,7 @@ tests will appear under its assembly name (e.g. `Rubickanov.UI.Tests`). Reimport
 package (right-click in Project → Reimport) if the tests don't show up after
 editing the manifest.
 
-Switch the project back to `remote` with `./link.sh <project-path> remote` when
+Pin the project again with `./link.sh <project-path> pin <sha>` when
 you're done — `testables` entries can stay in the manifest; they are ignored
 for packages that aren't present.
 

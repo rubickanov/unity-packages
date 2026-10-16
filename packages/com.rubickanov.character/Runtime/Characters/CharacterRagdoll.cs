@@ -1,0 +1,665 @@
+using System;
+using System.Collections.Generic;
+using Animancer;
+using Rubickanov.Rig;
+using Rubickanov.Log;
+using UnityEngine;
+
+namespace Rubickanov.Characters
+{
+    public enum BodyState
+    {
+        /// <summary>The capsule is the body and the skeleton is animated.</summary>
+        Upright,
+
+        /// <summary>The ragdoll is the body; the capsule follows its hips.</summary>
+        Down,
+
+        /// <summary>The pose blends from where the ragdoll lies into getting up; the capsule stands.</summary>
+        GettingUp,
+    }
+
+    /// <summary>
+    /// Knocks a character down into its ragdoll and gets it back up. Falling hands the body from the capsule to
+    /// the ragdoll with the animated pose and its speed; lying, the capsule follows the hips so the camera and
+    /// the network stay with the body; getting up stands the capsule where the hips lie, turned so the get-up
+    /// clip's first frame lies as the ragdoll does, and blends the pose from the one into the other while the
+    /// clip gathers speed, so the body moves off the ground as one motion instead of two laid over each other.
+    /// In water the bones float, the chest most (a life vest), and a body at rest in deep water comes back up
+    /// swimming instead of standing. On a replicated character nothing is simulated: the pose and the get-up come
+    /// from the owner.
+    /// </summary>
+    // After CharacterRig works on the model (-50), before the camera follows it (0).
+    [DefaultExecutionOrder(-40)]
+    [DisallowMultipleComponent]
+    public sealed class CharacterRagdoll : MonoBehaviour
+    {
+        private static readonly LogChannel Log = LogChannel.Get("Character");
+
+        public CharacterMotor Character;
+        public CharacterAnimator Animator;
+        [Tooltip("Optional. Switched off while the ragdoll shows the body.")]
+        public CharacterRig Rig;
+        public RagdollConfig Config;
+        [Tooltip("Written by Tools/Characters/Build Ragdoll: the hips first, every bone after its parent.")]
+        public RagdollBone[] Bones = { };
+
+        private Ragdoll _ragdoll;
+        private float _lyingTime;
+        private float _restTime;
+        private float _fallTime;
+        // Fell in the air from a long fall: the bones fall with the character's gravity until they reach the ground.
+        private bool _fallGravity;
+        private bool _getUpPending;
+        private float _blend;
+        private float _blendTime;
+        private AnimancerState _getUpClip;
+        private Vector3 _followPosition;
+        private readonly RaycastHit[] _groundHits = new RaycastHit[8];
+
+        public BodyState State { get; private set; }
+
+        /// <summary>Whether the pose comes from elsewhere, as on a character replicated over the network.</summary>
+        public bool IsReplica { get; set; }
+
+        public bool IsDown => State == BodyState.Down;
+
+        /// <summary>
+        /// Velocity of whatever carries the body at a point, such as a moving deck it lies on, or null for none: a
+        /// body at rest on it rests, and the capsule that follows the hips is carried along rather than left behind.
+        /// </summary>
+        public Func<Vector3, Vector3> Carrier { get; set; }
+
+        /// <summary>The ragdoll itself, null until the bones are built.</summary>
+        public Ragdoll Ragdoll => _ragdoll ??= CreateRagdoll();
+
+        /// <summary>The ragdoll took over. Raised on the owner only.</summary>
+        public event Action FellDown;
+
+        /// <summary>The character starts getting up, lying face up (true) or down. Raised on the owner only.</summary>
+        public event Action<bool> GettingUp;
+
+        // The bones are left on in the prefab, so they can be seen and edited there; the character starts
+        // upright, before the first physics step.
+        private void Awake() => Ragdoll?.TurnOff();
+
+        private void OnEnable()
+        {
+            if (Character == null || Animator == null || Config == null || Bones.Length == 0)
+            {
+                Log.Error("CharacterRagdoll requires a character, an animator, a config and built bones.", this);
+                enabled = false;
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (State != BodyState.Upright)
+            {
+                Stand();
+            }
+        }
+
+        /// <summary>
+        /// Knocks the character down, pushed by <paramref name="impulse"/> (N·s) at <paramref name="point"/>.
+        /// A body already down is pushed where it lies; one getting up falls again.
+        /// </summary>
+        public void Knockdown(Vector3 impulse, Vector3 point) => Fall(impulse, point, false);
+
+        // In flight, the ragdoll takes over at the capsule's full speed: a long fall is not slowed in the air.
+        private void Fall(Vector3 impulse, Vector3 point, bool inFlight)
+        {
+            if (!isActiveAndEnabled || IsReplica || Ragdoll == null)
+            {
+                return;
+            }
+
+            if (State == BodyState.Down)
+            {
+                _restTime = 0f;
+                _ragdoll.Push(impulse, point, Config.MaxPushSpeed);
+                return;
+            }
+
+            // A getting-up body falls from the pose it shows now, which is what SamplePose reads next.
+            Vector3 carrier = Character.Motion.Velocity;
+            if (State == BodyState.GettingUp)
+            {
+                _ragdoll.TurnOff();
+                _ragdoll.SamplePose(0f);
+                carrier = Vector3.zero;
+            }
+
+            Character.Suspend();
+            if (inFlight)
+            {
+                _ragdoll.Activate(carrier, carrier.magnitude + Config.MaxActivationSpeed);
+            }
+            else
+            {
+                _ragdoll.Activate(carrier);
+            }
+
+            _ragdoll.GoLimp();
+            _ragdoll.Push(impulse, point, Config.MaxPushSpeed);
+            LieDown();
+            _fallGravity = inFlight;
+            FellDown?.Invoke();
+        }
+
+        /// <summary>
+        /// Throws a standing character down with its whole body going at <paramref name="velocity"/>, e.g. off a
+        /// vehicle: the bones take that velocity rather than the capsule's, and no push is added, so how fast it
+        /// flies does not depend on the body's mass. A body down or getting up is left as it is.
+        /// </summary>
+        public void Throw(Vector3 velocity)
+        {
+            if (!isActiveAndEnabled || IsReplica || Ragdoll == null || State != BodyState.Upright)
+            {
+                return;
+            }
+
+            Character.Suspend();
+            _ragdoll.Activate(velocity, Config.MaxThrowSpeed);
+            _ragdoll.GoLimp();
+            LieDown();
+            FellDown?.Invoke();
+        }
+
+        /// <summary>Gets a character that is down up now, whether or not it has come to rest.</summary>
+        public void GetUp()
+        {
+            if (State == BodyState.Down && !IsReplica)
+            {
+                _getUpPending = true;
+            }
+        }
+
+        /// <summary>A replicated character went down: its bones follow <see cref="ShowPose"/> from now.</summary>
+        public void ShowDown()
+        {
+            if (!isActiveAndEnabled || !IsReplica || Ragdoll == null || State == BodyState.Down)
+            {
+                return;
+            }
+
+            if (_ragdoll.Mode != RagdollMode.Off)
+            {
+                _ragdoll.TurnOff();
+            }
+
+            _ragdoll.BeKinematic();
+            LieDown();
+        }
+
+        /// <summary>A replicated character's bones, as <see cref="Characters.Ragdoll.Capture"/> gave them.</summary>
+        public void ShowPose(Vector3 hipsPosition, IReadOnlyList<Quaternion> rotations)
+        {
+            if (State == BodyState.Down && _ragdoll != null)
+            {
+                _ragdoll.Place(hipsPosition, rotations);
+            }
+        }
+
+        /// <summary>A replicated character gets up; its capsule is already where the owner stood it.</summary>
+        public void ShowGetUp(bool faceUp)
+        {
+            if (State == BodyState.Down && IsReplica)
+            {
+                BeginGetUp(faceUp, false);
+            }
+        }
+
+        private void FixedUpdate()
+        {
+            if (IsReplica)
+            {
+                return;
+            }
+
+            float dt = Time.fixedDeltaTime;
+            if (State == BodyState.Upright)
+            {
+                WatchFall(dt);
+                return;
+            }
+
+            if (State != BodyState.Down)
+            {
+                return;
+            }
+
+            _ragdoll.Drive(dt);
+            Float();
+            // Only a body lying on the ground or floating in deep water rests: hips slow at the top of a flight or
+            // hung on something do not.
+            Vector3 hips = _ragdoll.Hips.transform.position;
+            bool onGround = TryGroundUnder(hips, out Vector3 ground, out float height)
+                            && height <= Config.LyingHeight;
+            bool floating = InDeepWater(hips, out float surface, out Vector3 water);
+            // The time down counts lying or floating only, so a long flight does not use it up before the landing.
+            if (onGround || floating)
+            {
+                _lyingTime += dt;
+            }
+
+            // The physics' gravity is weaker than the character's: without the rest the body would float down.
+            if (_fallGravity && (onGround || floating))
+            {
+                _fallGravity = false;
+            }
+            else if (_fallGravity)
+            {
+                _ragdoll.Accelerate(Character.Gravity - Physics.gravity);
+            }
+
+            Vector3 carried = Carrier?.Invoke(hips) ?? Vector3.zero;
+            bool slow = floating
+                ? (_ragdoll.Hips.Body.linearVelocity - water).magnitude < Config.WaterRestSpeed
+                : (_ragdoll.Hips.Body.linearVelocity - carried).magnitude < Config.RestSpeed;
+            _restTime = (onGround || floating) && slow ? _restTime + dt : 0f;
+            bool rested = _lyingTime >= Config.MinDownTime && _restTime >= Config.RestTime;
+            bool tooLong = Config.MaxDownTime > 0f && _lyingTime >= Config.MaxDownTime && (onGround || floating);
+            if (rested || tooLong)
+            {
+                _getUpPending = true;
+            }
+
+            // The capsule stands where the hips lie, so the camera and the network stay with the body; in deep
+            // water it floats where a swimmer would. Thrown off a tilted seat, it turns upright as a standing
+            // character would, not at once, so the camera does not jerk.
+            if (floating)
+            {
+                ground = new Vector3(hips.x, surface - Character.Settings.FloatDepth, hips.z);
+            }
+
+            _followPosition += (Carrier?.Invoke(_followPosition) ?? Vector3.zero) * dt;
+            _followPosition = Vector3.Lerp(_followPosition, ground, 1f - Mathf.Exp(-dt / Config.FollowTime));
+            Quaternion rotation = Character.Motor.TransientRotation;
+            rotation = Quaternion.Slerp(rotation, Upright(rotation),
+                1f - Mathf.Exp(-Character.Settings.UpOrientationSharpness * dt));
+            Character.Follow(_followPosition, rotation);
+        }
+
+        private void LateUpdate()
+        {
+            if (Ragdoll == null)
+            {
+                return;
+            }
+
+            switch (State)
+            {
+                case BodyState.Upright:
+                    // What the ragdoll takes over from: the pose as drawn, and how fast it moves.
+                    if (!IsReplica)
+                    {
+                        _ragdoll.SamplePose(Time.deltaTime);
+                    }
+
+                    break;
+                case BodyState.Down:
+                    if (_getUpPending)
+                    {
+                        _getUpPending = false;
+                        _ragdoll.Freeze();
+                        BeginGetUp(LiesFaceUp(), true);
+                        break;
+                    }
+
+                    _ragdoll.Map(1f);
+                    break;
+                case BodyState.GettingUp:
+                    StepGetUp();
+                    break;
+            }
+        }
+
+        // A character falling longer than the config's FallTime, counted from the top of its flight, goes down in the
+        // air. Standing, seated or simulated by something else, it is not falling.
+        private void WatchFall(float dt)
+        {
+            Vector3 gravity = Character.Gravity;
+            bool falling = Config.FallTime > 0f && Character.isActiveAndEnabled && !Character.IsSuspended &&
+                           Character.Mount == null && !Character.Motion.IsGrounded &&
+                           Vector3.Dot(Character.Motion.Velocity, gravity) > 0f;
+            _fallTime = falling ? _fallTime + dt : 0f;
+            // falling first: with FallTime 0 ("never") a zero _fallTime would otherwise pass the check every step.
+            if (falling && _fallTime >= Config.FallTime)
+            {
+                Fall(Vector3.zero, _ragdoll.Hips.transform.position, true);
+            }
+        }
+
+        private void LieDown()
+        {
+            State = BodyState.Down;
+            _lyingTime = _restTime = _fallTime = 0f;
+            _fallGravity = false;
+            _getUpPending = false;
+            _followPosition = Character.transform.position;
+            if (IsReplica)
+            {
+                // The owner's capsule collides with nothing while down; the replica's must not block others.
+                Character.Motor.Capsule.enabled = false;
+            }
+
+            Animator.EnterDown();
+            if (Rig != null)
+            {
+                Rig.enabled = false;
+            }
+
+            _ragdoll.Map(1f);
+        }
+
+        // The pose stops being the ragdoll's, the capsule stands where the hips lie, and the get-up starts
+        // from its first frame. The owner places the capsule; a replica's comes from the owner's snapshots.
+        private void BeginGetUp(bool faceUp, bool placeBody)
+        {
+            Transform hips = _ragdoll.Hips.transform;
+            Transform head = _ragdoll.Head.transform;
+            if (InDeepWater(hips.position, out float surface, out _) && Animator.PlaySwimUp())
+            {
+                BeginSwimUp(hips.position, head.position, surface, placeBody);
+                return;
+            }
+
+            _getUpClip = Animator.PlayGetUp(faceUp, placeBody);
+            if (_getUpClip != null)
+            {
+                _getUpClip.Speed = 0f;
+            }
+
+            if (placeBody)
+            {
+                PlaceBody(faceUp, hips.position, head.position);
+            }
+
+            State = BodyState.GettingUp;
+            _blend = 1f;
+            _blendTime = _getUpClip != null ? Config.GetUpBlendTime : Config.StandInBlendTime;
+            _ragdoll.Map(1f);
+            // The rig holds hands and feet on the ground from here; the ragdoll's pose hides it until it fades.
+            if (Rig != null)
+            {
+                Rig.enabled = true;
+            }
+
+            if (placeBody)
+            {
+                GettingUp?.Invoke(faceUp);
+            }
+        }
+
+        // Swimming takes over where the body floats, facing where its head points; the pose blends from the
+        // ragdoll into the swimming blend, which StepGetUp ends like a get-up without a clip.
+        private void BeginSwimUp(Vector3 hips, Vector3 head, float surface, bool placeBody)
+        {
+            _getUpClip = null;
+            if (placeBody)
+            {
+                Transform body = Character.transform;
+                Vector3 heading = Vector3.ProjectOnPlane(head - hips, body.up);
+                Quaternion rotation = heading.sqrMagnitude > 1e-6f
+                    ? Quaternion.LookRotation(heading, body.up)
+                    : body.rotation;
+                Character.Teleport(new Vector3(hips.x, surface - Character.Settings.FloatDepth, hips.z), rotation);
+                Animator.AlignModel();
+                Character.StartSwimming();
+            }
+
+            State = BodyState.GettingUp;
+            _blend = 1f;
+            _blendTime = Config.SwimUpBlendTime;
+            _ragdoll.Map(1f);
+            if (Rig != null)
+            {
+                Rig.enabled = true;
+            }
+
+            if (placeBody)
+            {
+                GettingUp?.Invoke(LiesFaceUp());
+            }
+        }
+
+        // Lifts each bone by how deep it is under water and drags it through the water; the vest on the chest
+        // lifts in front of it, so a body face down rolls over.
+        private void Float()
+        {
+            ICharacterWater water = Character.Water;
+            if (water == null)
+            {
+                return;
+            }
+
+            Vector3 lift = -Physics.gravity;
+            IReadOnlyList<RagdollBone> bones = _ragdoll.Bones;
+            for (int i = 0; i < bones.Count; i++)
+            {
+                Rigidbody body = bones[i].Body;
+                Vector3 center = body.worldCenterOfMass;
+                if (!water.TrySample(center, out float surface, out Vector3 flow))
+                {
+                    continue;
+                }
+
+                float wet = Mathf.Clamp01((surface - center.y) / Config.ImmersionDepth + 0.5f);
+                if (wet <= 0f)
+                {
+                    continue;
+                }
+
+                if (i == Ragdoll.ChestIndex)
+                {
+                    Vector3 front = center + _ragdoll.Facing(i) * Vector3.forward * Config.VestForward;
+                    body.AddForceAtPosition(lift * (Config.VestBuoyancy * wet * body.mass), front);
+                }
+                else
+                {
+                    body.AddForce(lift * (Config.Buoyancy * wet), ForceMode.Acceleration);
+                }
+
+                body.AddForce((flow - body.linearVelocity) * (Config.WaterDrag * wet), ForceMode.Acceleration);
+                body.AddTorque(-body.angularVelocity * (Config.WaterAngularDrag * wet), ForceMode.Acceleration);
+            }
+        }
+
+        // Hips at or under the surface of water too deep to stand in: a body there swims rather than stands.
+        private bool InDeepWater(Vector3 hips, out float surface, out Vector3 flow)
+        {
+            flow = Vector3.zero;
+            surface = 0f;
+            ICharacterWater water = Character.Water;
+            if (water == null || !water.TrySample(hips, out surface, out flow) || hips.y > surface + 0.1f)
+            {
+                return false;
+            }
+
+            float bottom = TryGroundUnder(hips, out Vector3 ground, out _) ? ground.y : float.NegativeInfinity;
+            return water.Level(hips) - bottom > Character.Settings.SwimEnterDepth;
+        }
+
+        // Turned so the clip's first frame lies along the ragdoll, hips over hips. The clip's pose is on the
+        // bones now, read in the model's space before the body moves.
+        private void PlaceBody(bool faceUp, Vector3 hips, Vector3 head)
+        {
+            Transform body = Character.transform;
+            Vector3 up = Up;
+            Transform model = Animator.Animancer.Animator.transform;
+            Transform clipHips = _ragdoll.Hips.Visible;
+            Transform clipHead = _ragdoll.Head.Visible;
+            Vector3 hipsToHead = head - hips;
+
+            // Without a clip the character stands facing where its head lay, or its feet when face up.
+            Vector3 heading = Vector3.ProjectOnPlane(faceUp ? -hipsToHead : hipsToHead, up);
+            Quaternion bodyRotation = heading.sqrMagnitude > 1e-6f
+                ? Quaternion.LookRotation(heading, up)
+                : body.rotation;
+            Vector3 ground = GroundUnder(hips);
+            Vector3 bodyPosition = ground;
+            if (_getUpClip != null)
+            {
+                Quaternion toModel = Quaternion.Inverse(model.rotation);
+                Vector3 clipHipsToHead = toModel * (clipHead.position - clipHips.position);
+                Vector3 clipHipsOffset = toModel * (clipHips.position - model.position);
+                Quaternion modelInBody = Quaternion.Inverse(body.rotation) * model.rotation;
+                Quaternion modelRotation = RagdollMath.GetUpRotation(clipHipsToHead, hipsToHead, up,
+                    bodyRotation * modelInBody);
+                bodyRotation = modelRotation * Quaternion.Inverse(modelInBody);
+                Vector3 modelPosition = ground - Vector3.ProjectOnPlane(modelRotation * clipHipsOffset, up);
+                bodyPosition = modelPosition - bodyRotation * body.InverseTransformVector(model.position - body.position);
+            }
+
+            Character.Teleport(bodyPosition, bodyRotation);
+            Animator.AlignModel();
+        }
+
+        private void StepGetUp()
+        {
+            if (_blend > 0f)
+            {
+                _blend = _blendTime > 0f ? Mathf.Max(0f, _blend - Time.deltaTime / _blendTime) : 0f;
+                // Smoothed at both ends so the pose neither jerks off the ragdoll nor snaps onto the clip.
+                float weight = _blend * _blend * (3f - 2f * _blend);
+                if (_getUpClip != null)
+                {
+                    _getUpClip.Speed = 1f - weight;
+                }
+
+                if (weight > 0f)
+                {
+                    _ragdoll.Map(weight);
+                    return;
+                }
+
+                _ragdoll.TurnOff();
+                if (_getUpClip == null)
+                {
+                    Animator.EndGetUp();
+                }
+            }
+
+            if (!Animator.IsGettingUp)
+            {
+                Stand();
+            }
+        }
+
+        private void Stand()
+        {
+            if (_ragdoll != null && _ragdoll.Mode != RagdollMode.Off)
+            {
+                _ragdoll.TurnOff();
+            }
+
+            State = BodyState.Upright;
+            _getUpPending = false;
+            _getUpClip = null;
+            Animator.EndGetUp();
+            Character.Resume();
+            if (IsReplica)
+            {
+                Character.Motor.Capsule.enabled = true;
+            }
+
+            if (Rig != null)
+            {
+                Rig.enabled = true;
+            }
+        }
+
+        // Against gravity, not along the capsule: a body thrown off a seat lies down with the seat's tilt.
+        private Vector3 Up => Character.Gravity.sqrMagnitude > 0f ? -Character.Gravity.normalized : Vector3.up;
+
+        private Quaternion Upright(Quaternion rotation)
+        {
+            Vector3 up = Up;
+            Vector3 forward = Vector3.ProjectOnPlane(rotation * Vector3.forward, up);
+            if (forward.sqrMagnitude < 1e-6f)
+            {
+                // Facing straight up or down: its up shows which way its front was.
+                forward = Vector3.ProjectOnPlane(rotation * Vector3.up, up);
+            }
+
+            return Quaternion.LookRotation(forward, up);
+        }
+
+        private bool LiesFaceUp() =>
+            RagdollMath.LiesFaceUp(_ragdoll.Facing(0) * Vector3.forward, Up);
+
+        // The ground under a point, or the point itself where nothing is under it.
+        private Vector3 GroundUnder(Vector3 point)
+        {
+            TryGroundUnder(point, out Vector3 ground, out _);
+            return ground;
+        }
+
+        // The ground under a point and how far below it that is; the point itself where nothing is under it.
+        // Looked for from the point down, not from above it: a table or a ledge over the hips is not ground.
+        // The rig's body ground, if any, counts below the point within the probe, where it is above what the ray hit.
+        private bool TryGroundUnder(Vector3 point, out Vector3 ground, out float height)
+        {
+            Vector3 down = -Up;
+            IFootGround provider = Rig != null ? Rig.BodyGround : null;
+            if (provider == null)
+            {
+                if (Physics.Raycast(point, down, out RaycastHit hit, Config.GroundProbe, Config.GroundLayers,
+                        QueryTriggerInteraction.Ignore))
+                {
+                    ground = hit.point;
+                    height = hit.distance;
+                    return true;
+                }
+
+                ground = point;
+                height = float.PositiveInfinity;
+                return false;
+            }
+
+            ground = point;
+            height = float.PositiveInfinity;
+            int count = Physics.RaycastNonAlloc(point, down, _groundHits, Config.GroundProbe, Config.GroundLayers,
+                QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < count; i++)
+            {
+                RaycastHit hit = _groundHits[i];
+                if (hit.distance < height && !provider.Ignores(hit.collider, point))
+                {
+                    ground = hit.point;
+                    height = hit.distance;
+                }
+            }
+
+            if (provider.TryGetGround(point, out float top, out _))
+            {
+                var provided = new Vector3(point.x, top, point.z);
+                float along = Vector3.Dot(provided - point, down);
+                if (along >= 0f && along <= Config.GroundProbe && along < height)
+                {
+                    ground = provided;
+                    height = along;
+                }
+            }
+
+            return !float.IsPositiveInfinity(height);
+        }
+
+        private Ragdoll CreateRagdoll()
+        {
+            if (Bones.Length == 0 || Config == null)
+            {
+                return null;
+            }
+
+            var own = new List<Collider>();
+            if (Character != null)
+            {
+                Character.GetComponents(own);
+            }
+
+            return new Ragdoll(Config, Character.transform, Bones, own);
+        }
+    }
+}

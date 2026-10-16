@@ -8,12 +8,13 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-Versions: `audio` `3.1.2`, `log` `1.2.0`, `eqs` `2.0.0`, `ui` `4.1.0`, `devconsole` `5.0.0`, `save` `1.0.0`, `input` `1.1.0`:
+Versions: `audio` `3.1.2`, `log` `1.2.0`, `eqs` `2.0.0`, `ui` `4.1.0`, `devconsole` `5.0.0`, `save` `1.0.0`, `input` `1.1.0`, `character` `1.0.0`:
 
 | Package | Purpose |
 |---|---|
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
 | `devconsole` | In-game dev console: one IMGUI window the package creates, `[ConsoleCommand]` methods registered by a source generator (no reflection, safe under code stripping), autocomplete, chains, aliases, bindings and history in plain files, `autoexec.cfg` and `-command` run on the first frame, optional `log` commands. |
+| `character` | Character body shared by beach and leonid: motor over KCC, animator on Animancer, ragdoll + get-up, IK (feet, head look, turn lean, seat and work hands, climb), configs and hooks. KCC (`KCC`) and Animancer (`Kybernetik.Animancer`) are Asset Store code: referenced by asmdef name only, never copied here; the game provides them and `com.rubickanov.log`. Not in `unity-project-pckgs` (would not compile there); its tests (`Rubickanov.Rig.Tests`) run from a game linked `local`. |
 | `eqs` | Environment Query System — data-driven spatial queries for AI. |
 | `input` | What Input System leaves to each game, on its own action types: the device in hand (Steam Input's duplicate pad included), key names for the player's layout and pad family, an action's keys for hints, rebind slots with conflicts, swaps and JSON (kept in the save store by an optional assembly), maps blocked by reason, local players seated by a press with their own input copy (Steam Input copies kept out), devices fed from code for Remote Play Together guests. |
 | `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release, a speaker scope (`[Host]`) before every message. No dependencies. |
@@ -57,7 +58,8 @@ The actual working directory when Claude starts is `unity-project-pckgs/`, so pa
 - **Don't commit `unity-project-pckgs/Library/`, `Temp/`, `Logs/`, `obj/`, `UserSettings/`.** Those are Unity editor state.
 - **READMEs follow `README_STANDARD.md`.** English prose, code examples over descriptions, no marketing fluff. Code comments may be Russian.
 - **Package tests are gated by `UNITY_INCLUDE_TESTS` + `includePlatforms: [Editor]`.** They only compile when the consuming project has the package as a local `file:` reference and lists it in `testables`.
-- **`link.sh <project> [local|remote|status]`** switches a *consumer* project's manifest between local file paths (dev) and git URLs (release). Don't run it against `unity-project-pckgs` itself — that sandbox stays local.
+- **`link.sh <project> [status|local|pin <sha>|remote] [package...]`** switches a *consumer* project's manifest between this checkout (`local`: absolute `file:` path + `testables`) and the https git URL pinned at a commit (`pin <sha>`, what games commit). Don't run it against `unity-project-pckgs` itself — that sandbox stays local.
+- **Fixing a package a game uses** (e.g. `character` in beach and leonid): `./link.sh <game> local character` → fix here and check in the game (both games if the behaviour is shared) → commit + push here → `./link.sh <game> pin <sha> character` in each game and commit its `Packages/manifest.json` + `packages-lock.json` there.
 - **`docs/generate.sh`** regenerates the DocFX site. `docs/docfx.json`, `docs/index.md`, `docs/toc.yml`, `docs/guides/toc.yml`, `docs/api/index.md` are regenerated on every run — don't hand-edit them.
 - **Bumping a package version:** edit `packages/com.rubickanov.<name>/package.json`.
 - **No LINQ in runtime hot paths.** `System.Linq` is banned in `Runtime/` code that can fire per-tick / per-frame / per-entity — boxed enumerators and closure captures generate GC pressure Unity's main loop can't afford. Use `foreach`, hand-rolled loops, pooled `List<T>`, or a `struct Enumerator GetEnumerator()` pattern for public collection types.
