@@ -43,6 +43,25 @@ get-up hands the body back.
 | `Rubickanov.Characters.Runtime` | `Rubickanov.Rig.Runtime`, `KCC`, `Kybernetik.Animancer`, `Rubickanov.Log.Runtime` | Motor, animator, ragdoll, rig, climbing, configs, hooks |
 | `Rubickanov.Rig.Tests` | `Rubickanov.Rig.Runtime`, NUnit | EditMode tests of the Rig math |
 
+## Layout
+
+One namespace per assembly (`Rubickanov.Characters`, `Rubickanov.Rig`); folders only group files.
+
+```text
+Runtime/
+├── Rig/                    math, no components
+└── Characters/
+    ├── CharacterProportions.cs
+    ├── Motor/              CharacterMotor, input, motion, MovementConfig, MovementLimits
+    ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape
+    │   └── IK/             CharacterRig + config, FootPlacement, HeadLook, TurnLean, GetUpContacts, MountLimbs
+    ├── Ragdoll/            CharacterRagdoll, Ragdoll, RagdollBone, RagdollConfig
+    ├── Climb/              CharacterClimb, IClimbable, ClimbPoint
+    ├── WorkHands/          IWorkHands, leases, hand and body reach
+    └── Hooks/              what the game implements: input source, mount, water, foot ground, footprints, solid
+Tests/Rig/
+```
+
 ## Core Concepts
 
 Every tunable lives in a config asset the game owns: **MovementConfig** (speeds, jump, swimming), **CharacterRigConfig**
