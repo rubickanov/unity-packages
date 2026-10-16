@@ -1,0 +1,19 @@
+{
+    "name": "Rubickanov.Characters.Runtime",
+    "rootNamespace": "Rubickanov.Characters",
+    "references": [
+        "Rubickanov.Log.Runtime",
+        "KCC",
+        "Kybernetik.Animancer",
+        "Rubickanov.Rig.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
