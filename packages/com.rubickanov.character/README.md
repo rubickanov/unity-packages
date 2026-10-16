@@ -58,7 +58,7 @@ Runtime/
 └── Characters/
     ├── CharacterProportions.cs
     ├── Motor/              CharacterMotor, input, motion, MovementConfig
-    ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape, GetUpPoses, PoseInertia
+    ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape, GetUpPoses, PoseInertia, StrideMarkers
     │   └── IK/             CharacterRig + config, FootPlacement, HeadLook, TurnLean, GetUpContacts, MountLimbs
     ├── Ragdoll/            CharacterRagdoll (+ .GetUp: nearest-frame get-up), Ragdoll, RagdollBone, RagdollConfig,
     │                       GetUpSpot, FlailReflex, RagdollTouch, CharacterGetUp
@@ -69,6 +69,7 @@ Runtime/
                             ICharacterSpace, INetworkCharacterSide
 Editor/Gasp/                GaspImport: GASP clips (UEFN Mannequin FBX) as humanoids on the game's model
 Editor/GetUp/               GetUpBaker: every frame of the config's get-ups on the game's character → GetUpPoses
+Editor/Strides/             StrideBaker: every frame of the config's locomotion loops on the game's character → StrideMarkers
 Tests/Rig/
 Tests/Netcode/
 ```
@@ -240,6 +241,25 @@ first use (names, lengths, frame counts).
 inertialization offset (`Inertia`, a port of Sinew's `Inertialization`: the offset falls as
 `(1 − s)⁴(x₀ + (v₀T + 4x₀)s)`, keeps its velocity, never overshoots) over ~22 humanoid bones and the hips' place. It
 records the shown pose every frame only while a switch kind other than the get-up is on, so it costs nothing otherwise.
+
+## Stride sync
+
+Animancer stops a state whose fade-out has ended, and stopping rewinds it, so after a landing, a jump, a turn or a
+get-up the locomotion mixer comes back from its first frame — one foot's stance, whichever foot the shown pose bears
+on. With `CharacterAnimationsConfig.StrideSync` on (off by default), `CharacterAnimator` tracks the shown pose's
+reach (left foot minus right along the model's forward) every frame, and when the mixer restarts it takes the clip
+weighing most in the blend and sets the mixer's normalized time to that clip's frame in the stance of the foot that
+bears (the foot moving back against the other: a falling reach is the left's stance) with the nearest reach. The
+mixer keeps its children in step by normalized time, so one time sets them all. A body that comes back standing (the
+idle has no strides) starts from the start as before.
+
+The strides are baked, not computed at runtime: `StrideBaker.Bake(characterPrefab, StrideBaker.LocomotionClips(config),
+markers)` samples every frame of the clips of the Locomotion, Uphill and Downhill mixers on the game's character into
+the `StrideMarkers` asset the config points at: per frame the reach, and each foot's touch-down markers (`Strides`, a
+port of Sinew's `ClipMarkers.FindMarkers`: the foot farthest ahead, peaks 0.2 s apart, at least 0.34 of the leg
+ahead). Strafes whose feet never pass each other that far have no strides and start from the start. **More locomotion
+clips = add them to the mixers and rebuild the markers** (beach: Game/Builders/Build Stride Markers). A clip baked
+under its name but with another length or frame count warns once and starts from the start.
 
 ## Integration
 

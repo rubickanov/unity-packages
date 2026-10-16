@@ -1,6 +1,7 @@
 using Animancer;
 using Rubickanov.Rig;
 using Rubickanov.Log;
+using Unity.Profiling;
 using UnityEngine;
 
 namespace Rubickanov.Characters
@@ -80,6 +81,15 @@ namespace Rubickanov.Characters
         private float _turnPending;
         // Stretches the clip's root rotation to the turn actually needed.
         private float _turnScale;
+        // Stride sync: the shown pose's reach (left foot minus right along the model's forward, m) and how fast it
+        // changes; a falling reach is the left foot's stance.
+        private static readonly ProfilerMarker StrideMarker = new("CharacterAnimator.StrideSync");
+        private Transform _leftFoot;
+        private Transform _rightFoot;
+        private float _shownReach;
+        private float _reachRate;
+        private bool _reachKnown;
+        private bool _strideStaleWarned;
 
         /// <summary>
         /// Degrees the model is turned from the body while it turns in place, positive to the right.
@@ -281,6 +291,11 @@ namespace Rubickanov.Characters
         {
             // The motor steps at a fixed rate; smoothing here keeps the blend from stepping with it.
             CharacterMotion motion = Source.Motion;
+            if (StrideSyncs)
+            {
+                TrackReach();
+            }
+
             Vector2 target = PlanarVelocity(motion);
             _moveParameter = Vector2.Lerp(_moveParameter, target, Smoothing(Animations.ParameterSharpness));
             _slope = Mathf.Lerp(_slope, SlopeAlongMovement(motion), Smoothing(Animations.SlopeSharpness));
@@ -860,7 +875,101 @@ namespace Rubickanov.Characters
             _phase = Phase.Grounded;
             // Parameters were left alone while airborne or landing; bring them up to date before the fade shows them.
             UpdateLocomotion();
+            // Animancer stops a state whose fade-out ends, and stopping rewinds it: the loops come back from their
+            // start unless stride sync picks the stance the shown pose is in.
+            bool restarts = _locomotion.Weight <= 0f;
             Animancer.Play(_locomotion, fadeDuration);
+            if (restarts && StrideSyncs)
+            {
+                SyncStride();
+            }
+        }
+
+        private bool StrideSyncs => Animations.StrideSync && Animations.StrideMarkers != null;
+
+        // Bones still hold the pose shown last frame (after IK) when Update runs.
+        private void TrackReach()
+        {
+            if (_leftFoot == null || _rightFoot == null)
+            {
+                _leftFoot = Animancer.Animator.GetBoneTransform(HumanBodyBones.LeftFoot);
+                _rightFoot = Animancer.Animator.GetBoneTransform(HumanBodyBones.RightFoot);
+                _reachKnown = false;
+                if (_leftFoot == null || _rightFoot == null)
+                {
+                    return;
+                }
+            }
+
+            float reach = (Quaternion.Inverse(_model.rotation) * (_leftFoot.position - _rightFoot.position)).z;
+            _reachRate = _reachKnown && Time.deltaTime > 0f ? (reach - _shownReach) / Time.deltaTime : 0f;
+            _shownReach = reach;
+            _reachKnown = true;
+        }
+
+        // On the stride the shown pose is on (Sinew ActorController.EndAction/SetPhase: the loops carry on the
+        // stride the clip was on), here judged by the feet: the dominant loop's frame in the bearing foot's stance
+        // with the shown reach. The mixer keeps its children in step by normalized time, so one time sets them all.
+        private void SyncStride()
+        {
+            using ProfilerMarker.AutoScope scope = StrideMarker.Auto();
+            AnimationClip clip = DominantClip();
+            if (clip == null || !_reachKnown)
+            {
+                return;
+            }
+
+            StrideMarkers markers = Animations.StrideMarkers;
+            if (!markers.TryGet(clip, out StrideMarkers.Entry entry, out bool stale))
+            {
+                if (stale && !_strideStaleWarned)
+                {
+                    _strideStaleWarned = true;
+                    Log.Warn($"Stride markers {markers.name} do not match {clip.name}: rebuild them. That loop " +
+                             "starts from its first frame meanwhile.", this);
+                }
+
+                return;
+            }
+
+            float time = markers.StanceTime(entry, _shownReach, _reachRate < 0f);
+            if (time >= 0f)
+            {
+                _locomotion.NormalizedTime = time;
+            }
+        }
+
+        // The clip that weighs most in the locomotion blend, through the slope mixers.
+        private AnimationClip DominantClip()
+        {
+            _locomotion.RecalculateWeights();
+            AnimancerState slope = Heaviest(_locomotion);
+            if (slope is MixerState<Vector2> flat)
+            {
+                flat.RecalculateWeights();
+            }
+            else if (slope is MixerState<float> linear)
+            {
+                linear.RecalculateWeights();
+            }
+
+            AnimancerState leaf = slope is ManualMixerState mixer ? Heaviest(mixer) : slope;
+            return leaf is ClipState clipState ? clipState.Clip : null;
+        }
+
+        private static AnimancerState Heaviest(ManualMixerState mixer)
+        {
+            AnimancerState heaviest = null;
+            for (int i = 0; i < mixer.ChildCount; i++)
+            {
+                AnimancerState child = mixer.GetChild(i);
+                if (heaviest == null || child.Weight > heaviest.Weight)
+                {
+                    heaviest = child;
+                }
+            }
+
+            return heaviest;
         }
 
         private void PlaySwim(float fadeDuration)
