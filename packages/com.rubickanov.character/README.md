@@ -28,7 +28,7 @@ input (game) ──► CharacterMotor ──► CharacterMotion ──► Charac
                   walk, sprint, jump,                     ▼
                   swim, follow)                    CharacterRig (LateUpdate)
                       ▲                             FootPlacement, HeadLook, TurnLean,
-                      │ Suspend / Follow            MountLimbs (seat + work hands), WorkBodyReach
+                      │ Suspend / Follow            MountLimbs (seat holds, item grips)
                  CharacterRagdoll ──► Ragdoll (bones, pins, push) + GetUpContacts
                  CharacterClimb (IClimbable: ClimbPoint, game edges)
 ```
@@ -56,12 +56,11 @@ Runtime/
 ├── Rig/                    math, no components
 └── Characters/
     ├── CharacterProportions.cs
-    ├── Motor/              CharacterMotor, input, motion, MovementConfig, MovementLimits
+    ├── Motor/              CharacterMotor, input, motion, MovementConfig
     ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape
     │   └── IK/             CharacterRig + config, FootPlacement, HeadLook, TurnLean, GetUpContacts, MountLimbs
     ├── Ragdoll/            CharacterRagdoll, Ragdoll, RagdollBone, RagdollConfig
     ├── Climb/              CharacterClimb, IClimbable, ClimbPoint
-    ├── WorkHands/          IWorkHands, leases, hand and body reach
     └── Hooks/              what the game implements: input source, mount, water, foot ground, footprints, solid
 └── Netcode/                optional module (NGO): NetworkCharacter, CharacterNetSnapshot, part writer/reader,
                             RemoteCharacterMotion, RagdollSnapshot, RemoteRagdoll, ICharacterNetPart/Frame,
@@ -76,8 +75,7 @@ Every tunable lives in a config asset the game owns: **MovementConfig** (speeds,
 (feet, head look, lean, seat grips, hand shapes), **CharacterAnimationsConfig** (clips), **RagdollConfig** (muscles,
 falling, get-up, water), **CharacterProportions** (build data for a game's character builder).
 
-A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`, work hands an
-`IWorkHands`. Four config fields are where games chose differently; their defaults are the conservative side:
+A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Four config fields are where games chose differently; their defaults are the conservative side:
 
 | Field | Default | Other value |
 |---|---|---|
@@ -119,16 +117,10 @@ Game-specific behaviour enters through these hooks; nothing in the package names
 | `ICharacterSolid` | component on a dynamic body | `StopsCharacters`: the capsule stops at it and does not stand on it |
 | `ICharacterMount`, `ClimbPoint` | `CharacterMotor.Mount` | Seat anchor, pose, hand/foot holds, hand shapes |
 | `IClimbable` | `Climbables.Add` / `Remove` | Answers a swimmer's `ClimbQuery` with a `ClimbEdge` to pull up onto (`ClimbPoint` is one; reach over the shoulders is `MovementConfig.ClimbReachUp`) |
-| `IWorkHands`, `WorkHandsLease` | `CharacterRig.WorkHands` | Hands reach for a work station's targets; one owner at a time |
-| `MovementConstraints` | `CharacterMotor.Constraints.Add(limits)` | Caps speed, sprint, jump, turning while the lease lives |
 | `Carrier` | `CharacterRagdoll.Carrier` | Velocity of what the lying body rests on (a moving deck) |
 | `SpeedMultiplier`, `JumpScale`, `GravityOverride` | `CharacterMotor` | Per-game scaling of the walk, jump and gravity |
 
 ```csharp
-// A work station holds the character still and takes its hands while used.
-using IDisposable hold = motor.Constraints.Add(new MovementLimits(0f, sprint: false, jump: false, turnBody: false));
-using WorkHandsLease hands = WorkHandsLease.TryAcquire(rig, station);
-
 // Knocked down by a hit, or thrown off a vehicle with the vehicle's velocity.
 ragdoll.Knockdown(impulse, hitPoint);
 ragdoll.Throw(seatVelocity + Vector3.up * 2f);

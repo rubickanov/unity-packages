@@ -8,13 +8,13 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-Versions: `audio` `3.1.2`, `log` `1.2.0`, `eqs` `2.0.0`, `ui` `4.1.0`, `devconsole` `5.0.0`, `save` `1.0.0`, `input` `1.1.0`, `character` `2.2.0`:
+Versions: `audio` `3.1.2`, `log` `1.2.0`, `eqs` `2.0.0`, `ui` `4.1.0`, `devconsole` `5.0.0`, `save` `1.0.0`, `input` `1.1.0`, `character` `3.0.0`:
 
 | Package | Purpose |
 |---|---|
 | `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
 | `devconsole` | In-game dev console: one IMGUI window the package creates, `[ConsoleCommand]` methods registered by a source generator (no reflection, safe under code stripping), autocomplete, chains, aliases, bindings and history in plain files, `autoexec.cfg` and `-command` run on the first frame, optional `log` commands. |
-| `character` | Character body shared by beach and leonid: motor over KCC, animator on Animancer, ragdoll + get-up, IK (feet, head look, turn lean, seat and work hands, climb), configs and hooks; an optional module `Rubickanov.Characters.Netcode` (compiled only with NGO, versionDefines) replicates it with game parts and glue. KCC (`KCC`) and Animancer (`Kybernetik.Animancer`) are Asset Store code: referenced by asmdef name only, never copied here; the game provides them and `com.rubickanov.log`. Not in `unity-project-pckgs` (would not compile there); its tests (`Rubickanov.Rig.Tests`, `Rubickanov.Characters.Netcode.Tests`) run from a game linked `local`. |
+| `character` | Character body of beach (leonid carries an embedded copy, 2.2.0, since 2026-10-16): motor over KCC, animator on Animancer, ragdoll + get-up, IK (feet, head look, turn lean, seat holds and item grips, climb), configs and hooks; an optional module `Rubickanov.Characters.Netcode` (compiled only with NGO, versionDefines) replicates it with game parts and glue. KCC (`KCC`) and Animancer (`Kybernetik.Animancer`) are Asset Store code: referenced by asmdef name only, never copied here; the game provides them and `com.rubickanov.log`. Not in `unity-project-pckgs` (would not compile there); its tests (`Rubickanov.Rig.Tests`, `Rubickanov.Characters.Netcode.Tests`) run from a game linked `local`. |
 | `eqs` | Environment Query System — data-driven spatial queries for AI. |
 | `input` | What Input System leaves to each game, on its own action types: the device in hand (Steam Input's duplicate pad included), key names for the player's layout and pad family, an action's keys for hints, rebind slots with conflicts, swaps and JSON (kept in the save store by an optional assembly), maps blocked by reason, local players seated by a press with their own input copy (Steam Input copies kept out), devices fed from code for Remote Play Together guests. |
 | `log` | Named log channels over Unity's log: per-channel levels (`-log Course=Verbose`), interpolated messages built only when written, Verbose compiled out of release, a speaker scope (`[Host]`) before every message. No dependencies. |
