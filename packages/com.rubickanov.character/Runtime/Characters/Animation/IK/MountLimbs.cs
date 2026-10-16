@@ -119,8 +119,8 @@ namespace Rubickanov.Characters
                 return;
             }
 
-            GripHand(false, mount.LeftHand, config.MountPalmDepth, config.MountWristBend, config.MountWristTwist, weight);
-            GripHand(true, mount.RightHand, config.MountPalmDepth, config.MountWristBend, config.MountWristTwist, weight);
+            GripHand(false, mount.LeftHand, config.MountPalmDepth, weight);
+            GripHand(true, mount.RightHand, config.MountPalmDepth, weight);
             if (mount.LeftHand != null)
             {
                 ShapeFingers(false, config.Shape(mount.LeftHandShape), weight);
@@ -155,57 +155,44 @@ namespace Rubickanov.Characters
         }
 
         /// <summary>
-        /// Puts one palm on <paramref name="grip"/>: its middle, lifted by <paramref name="depth"/> off the palm's
-        /// face, at the grip's position, the palm facing along the grip's forward, the fingers on from the forearm
-        /// (along the grip's up when the forearm points into the palm). The wrist
-        /// bends at most <paramref name="maxBend"/> degrees off the forearm and twists at most
-        /// <paramref name="maxTwist"/>; past them the palm stays as close as the wrist allows. The elbow points
-        /// toward <paramref name="hint"/> when given, else where the pose points it. False without such a hand.
+        /// Puts one palm on <paramref name="grip"/> exactly: its middle, lifted by <paramref name="depth"/> off the
+        /// palm's face, at the grip's position, the palm facing along the grip's forward and the fingers along its up.
+        /// The arm reaches the wrist that puts the hand there, the elbow toward <paramref name="hint"/> when given,
+        /// else where the pose points it. The wrist is not limited: <see cref="AskedBend"/> and
+        /// <see cref="AskedTwist"/> say how far it turns, for warnings. False without such a hand.
         /// </summary>
-        public bool GripHand(bool right, Transform grip, float depth, float maxBend, float maxTwist, float weight,
-            Vector3? hint = null)
+        public bool GripHand(bool right, Transform grip, float depth, float weight, Vector3? hint = null)
         {
-            Limb limb = right ? _rightHand : _leftHand;
             Palm palm = right ? _rightPalm : _leftPalm;
-            if (limb == null || palm == null || grip == null || weight <= 0f)
+            if (palm == null || grip == null)
             {
                 return false;
             }
 
-            Quaternion upperStart = limb.Upper.rotation;
-            Quaternion middleStart = limb.Middle.rotation;
-            Quaternion endStart = limb.End.rotation;
-            Quaternion wanted = grip.rotation * palm.FromGrip;
-            Vector3 contact = palm.Middle + palm.Facing * depth;
-            // Reach with the hand as the grip has it, then again with the hand as the forearm there lays it.
-            Quaternion hand = wanted;
-            for (int pass = 0; pass < 3; pass++)
-            {
-                limb.Upper.rotation = upperStart;
-                limb.Middle.rotation = middleStart;
-                Reach(limb, grip.position - hand * contact, hint);
-                wanted = Along(limb, palm, grip);
-                hand = Wrist(limb, palm, wanted, maxBend, maxTwist);
-            }
-
-            if (weight < 1f)
-            {
-                limb.Upper.rotation = Quaternion.Slerp(upperStart, limb.Upper.rotation, weight);
-                limb.Middle.rotation = Quaternion.Slerp(middleStart, limb.Middle.rotation, weight);
-            }
-
-            limb.End.rotation = Quaternion.Slerp(endStart, Wrist(limb, palm, wanted, maxBend, maxTwist), weight);
-            Ask(right, WristTurn(limb, palm, wanted, out float asked), asked);
-            return true;
+            Quaternion hand = grip.rotation * palm.FromGrip;
+            Vector3 wrist = grip.position - hand * (palm.Middle + palm.Facing * depth);
+            return Place(right, wrist, hand, hint, weight);
         }
 
         /// <summary>
-        /// Puts the right or left hand bone at <paramref name="position"/> turned to <paramref name="rotation"/>: the
-        /// arm reaches with its elbow toward <paramref name="hint"/>, the wrist turns the hand as near to the rotation
-        /// as <paramref name="maxBend"/> and <paramref name="maxTwist"/> let it. False without such a hand.
+        /// Puts the right or left hand bone at <paramref name="position"/> turned to <paramref name="rotation"/>
+        /// exactly: the arm reaches with its elbow toward <paramref name="hint"/>. The wrist is not limited:
+        /// <see cref="HoldBend"/> and <see cref="HoldTwist"/> say how far it turns. False without such a hand.
         /// </summary>
-        public bool HoldHand(bool right, Vector3 position, Quaternion rotation, Vector3 hint, float maxBend,
-            float maxTwist, float weight)
+        public bool HoldHand(bool right, Vector3 position, Quaternion rotation, Vector3 hint, float weight)
+        {
+            if (!Place(right, position, rotation, hint, weight))
+            {
+                return false;
+            }
+
+            HoldBend = AskedBend(right);
+            HoldTwist = AskedTwist(right);
+            return true;
+        }
+
+        // The end bone takes the rotation as given; the two-bone solve puts the wrist where it goes.
+        private bool Place(bool right, Vector3 wrist, Quaternion hand, Vector3? hint, float weight)
         {
             Limb limb = right ? _rightHand : _leftHand;
             Palm palm = right ? _rightPalm : _leftPalm;
@@ -217,24 +204,22 @@ namespace Rubickanov.Characters
             Quaternion upperStart = limb.Upper.rotation;
             Quaternion middleStart = limb.Middle.rotation;
             Quaternion endStart = limb.End.rotation;
-            TwoBoneIK.Solve(limb.Upper, limb.Middle, limb.End, position, hint, 1f);
+            Reach(limb, wrist, hint);
             if (weight < 1f)
             {
                 limb.Upper.rotation = Quaternion.Slerp(upperStart, limb.Upper.rotation, weight);
                 limb.Middle.rotation = Quaternion.Slerp(middleStart, limb.Middle.rotation, weight);
             }
 
-            limb.End.rotation = Quaternion.Slerp(endStart, Wrist(limb, palm, rotation, maxBend, maxTwist), weight);
-            HoldBend = WristTurn(limb, palm, rotation, out float twist);
-            HoldTwist = twist;
-            Ask(right, HoldBend, HoldTwist);
+            limb.End.rotation = Quaternion.Slerp(endStart, hand, weight);
+            Ask(right, WristTurn(limb, palm, hand, out float twist), twist);
             return true;
         }
 
-        /// <summary>How far the last grip or hold of that hand asked its wrist to bend, degrees, before the limit.</summary>
+        /// <summary>How far the last grip or hold of that hand bent its wrist off the forearm, degrees.</summary>
         public float AskedBend(bool right) => right ? _askedRight.x : _askedLeft.x;
 
-        /// <summary>How far the last grip or hold of that hand asked its wrist to twist, degrees, before the limit.</summary>
+        /// <summary>How far the last grip or hold of that hand twisted its wrist about the forearm, degrees.</summary>
         public float AskedTwist(bool right) => right ? _askedRight.y : _askedLeft.y;
 
         private void Ask(bool right, float bend, float twist)
@@ -249,7 +234,7 @@ namespace Rubickanov.Characters
             }
         }
 
-        /// <summary>How far the last <see cref="HoldHand"/> asked the wrist to bend and twist, degrees, before limits.</summary>
+        /// <summary>How far the last <see cref="HoldHand"/> bent and twisted the wrist, degrees.</summary>
         public float HoldBend { get; private set; }
 
         public float HoldTwist { get; private set; }
@@ -336,54 +321,6 @@ namespace Rubickanov.Characters
             Quaternion straight = limb.Middle.rotation * palm.Rest;
             Vector3 along = straight * palm.Axis;
             return Vector3.Angle(along, limb.End.rotation * palm.Axis);
-        }
-
-        // The palm on the grip with the fingers carrying on from the forearm, as near straight as the grip allows.
-        private static Quaternion Along(Limb limb, Palm palm, Transform grip)
-        {
-            Vector3 facing = grip.forward;
-            Vector3 fingers = Vector3.ProjectOnPlane(limb.End.position - limb.Middle.position, facing);
-            if (fingers.sqrMagnitude < 0.04f * (limb.End.position - limb.Middle.position).sqrMagnitude)
-            {
-                fingers = grip.up;
-            }
-
-            return Quaternion.LookRotation(facing, fingers) * palm.FromGrip;
-        }
-
-        // The hand's rotation nearest to wanted that the wrist reaches from the forearm as posed now.
-        private static Quaternion Wrist(Limb limb, Palm palm, Quaternion wanted, float maxBend, float maxTwist)
-        {
-            Quaternion straight = limb.Middle.rotation * palm.Rest;
-            Quaternion turn = Quaternion.Inverse(straight) * wanted;
-            // Split into a twist about the forearm and the bend left over.
-            Vector3 part = new Vector3(turn.x, turn.y, turn.z);
-            Vector3 along = Vector3.Project(part, palm.Axis);
-            var twist = new Quaternion(along.x, along.y, along.z, turn.w);
-            if (twist.x * twist.x + twist.y * twist.y + twist.z * twist.z + twist.w * twist.w < 1e-8f)
-            {
-                twist = Quaternion.identity;
-            }
-            else
-            {
-                twist = Normalized(twist);
-            }
-
-            Quaternion bend = turn * Quaternion.Inverse(twist);
-            return straight * Clamp(bend, maxBend) * Clamp(twist, maxTwist);
-        }
-
-        private static Quaternion Clamp(Quaternion rotation, float maxAngle)
-        {
-            rotation.ToAngleAxis(out float angle, out Vector3 axis);
-            if (angle > 180f)
-            {
-                angle -= 360f;
-            }
-
-            return Mathf.Abs(angle) <= maxAngle || !float.IsFinite(axis.x)
-                ? rotation
-                : Quaternion.AngleAxis(Mathf.Sign(angle) * maxAngle, axis);
         }
 
         private static Quaternion Normalized(Quaternion q)
