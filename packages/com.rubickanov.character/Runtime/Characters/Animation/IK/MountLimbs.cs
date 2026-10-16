@@ -48,24 +48,6 @@ namespace Rubickanov.Characters
         // Where the palm's middle lies from the wrist to the index's root, as the hand pieces are built.
         private const float PalmAlong = 0.55f;
 
-        private readonly WorkHandReach _leftWork = new();
-        private readonly WorkHandReach _rightWork = new();
-
-        public void ApplyWork(IWorkHands targets, float deltaTime, float weight = 1f,
-            ICharacterMount mount = null, bool suppressed = false)
-        {
-            bool valid = targets != null && !(targets is Object obj && obj == null)
-                && !(targets is Behaviour behaviour && !behaviour.isActiveAndEnabled);
-            bool mounted = mount != null && !(mount is Object seat && seat == null);
-            bool free = !suppressed && (!mounted || mount.HandsFree);
-            _leftWork.Step(valid ? targets.Left : null, valid ? targets.Weight : 0, weight,
-                free && (!mounted || mount.LeftHand == null), deltaTime);
-            _rightWork.Step(valid ? targets.Right : null, valid ? targets.Weight : 0, weight,
-                free && (!mounted || mount.RightHand == null), deltaTime);
-            Reach(_leftHand, _leftWork.Position, _leftWork.Weight);
-            Reach(_rightHand, _rightWork.Position, _rightWork.Weight);
-        }
-
         public bool IsValid => _leftHand != null || _rightHand != null || _leftFoot != null || _rightFoot != null;
 
         public MountLimbs(Animator animator)
@@ -86,8 +68,6 @@ namespace Rubickanov.Characters
         public void Reset()
         {
             _reach = 0f;
-            _leftWork.Reset();
-            _rightWork.Reset();
         }
 
         /// <summary>

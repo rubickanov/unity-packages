@@ -30,7 +30,6 @@ namespace Rubickanov.Characters
         private HeadLook _look;
         private TurnLean _lean;
         private MountLimbs _limbs;
-        private WorkBodyReach _workReach;
         // The seat the limbs reach for; changing it starts the reach over, leaving it resets what it held back.
         private ICharacterMount _mount;
         private float _lastTurnOffset;
@@ -51,8 +50,6 @@ namespace Rubickanov.Characters
                 }
             }
         }
-
-        public IWorkHands WorkHands { get; set; }
 
         /// <summary>Ground for the feet besides what physics hits; null: physics alone.</summary>
         public IFootGround FootGround
@@ -115,7 +112,6 @@ namespace Rubickanov.Characters
             _look = new HeadLook(_animator, _model, Config.LookBones);
             _lean = new TurnLean(_animator, _model, Config.LeanBones);
             _limbs = new MountLimbs(_animator);
-            _workReach = new WorkBodyReach(_animator);
 
             CharacterMotion motion = Animator.Source?.Motion ?? default;
             _feet.Reset(motion.IsGrounded);
@@ -183,14 +179,11 @@ namespace Rubickanov.Characters
 
             if (mounted)
             {
-                _workReach.Apply(null, Weight, deltaTime, false);
                 // The seat holds the body: no ground under the feet, no lean, no get-up.
-                if (_limbs.IsValid)
+                // A body down or getting up lets go of the holds.
+                if (_limbs.IsValid && !Animator.IsGettingUp && !Animator.IsDown)
                 {
-                    bool suppressed = Animator.IsGettingUp || Animator.IsDown;
-                    if (!suppressed) _limbs.Apply(Config, mount, Weight, deltaTime);
-                    if (!suppressed && WorkHands is IWorkHandPose pose) pose.PrepareHands();
-                    _limbs.ApplyWork(WorkHands, deltaTime, Weight, mount, suppressed);
+                    _limbs.Apply(Config, mount, Weight, deltaTime);
                 }
 
                 return;
@@ -204,14 +197,6 @@ namespace Rubickanov.Characters
             if (_contacts.IsValid)
             {
                 _contacts.Apply(Config, Animator.IsGettingUp, Weight, deltaTime);
-            }
-            if (_limbs.IsValid)
-            {
-                bool bodyAllowed = !Animator.IsGettingUp && !Animator.IsDown && motion.IsGrounded;
-                Vector3? target = bodyAllowed && WorkHands is IWorkHandPose bodyPose ? bodyPose.PrepareBody() : null;
-                _workReach.Apply(target, Weight, deltaTime, bodyAllowed);
-                if (!Animator.IsGettingUp && !Animator.IsDown && WorkHands is IWorkHandPose pose) pose.PrepareHands();
-                _limbs.ApplyWork(WorkHands, deltaTime, Weight, null, Animator.IsGettingUp || Animator.IsDown);
             }
         }
 

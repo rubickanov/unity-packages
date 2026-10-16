@@ -29,7 +29,6 @@ namespace Rubickanov.Characters
         public Vector3 Gravity => GravityOverride ?? Settings.Gravity;
         /// <summary>Scales the top speed on the ground, for whatever slows the character down. 1 is no change.</summary>
         public float SpeedMultiplier { get; set; } = 1f;
-        public MovementConstraints Constraints { get; } = new();
         /// <summary>
         /// The velocity the input asks for along the ground, world space, at the top speed it allows; zero without input
         /// or while suspended. What the character leans into something with: a ball it walks into is pushed toward it.
@@ -206,7 +205,7 @@ namespace Rubickanov.Characters
             _aim = input.Aim;
             _faceLook = input.FirstPerson && Settings.FirstPersonTurn == BodyTurn.AtOnce;
             _sprint = input.Sprint;
-            _pendingJump |= input.JumpPressed && Constraints.Current.Jump;
+            _pendingJump |= input.JumpPressed;
         }
 
         /// <summary>
@@ -321,7 +320,6 @@ namespace Rubickanov.Characters
         public void BeforeCharacterUpdate(float deltaTime)
         {
             _jumped = false;
-            if (!Constraints.Current.Jump) _pendingJump = _jumpRequested = false;
             if (_pendingJump)
             {
                 _jumpRequested = true;
@@ -342,7 +340,7 @@ namespace Rubickanov.Characters
             Vector3 look = Vector3.ProjectOnPlane(_look, Motor.CharacterUp).normalized;
             _facing = _faceLook && look.sqrMagnitude > 0f
                       && (_facing || Vector3.Angle(Motor.CharacterForward, look) <= FacingCatch);
-            if (Constraints.Current.TurnBody && look.sqrMagnitude > 0f && (_facing || Settings.OrientationSharpness > 0f))
+            if (look.sqrMagnitude > 0f && (_facing || Settings.OrientationSharpness > 0f))
             {
                 Vector3 direction = _facing
                     ? look
@@ -386,12 +384,8 @@ namespace Rubickanov.Characters
                 return;
             }
 
-            var limits = Constraints.Current;
-            if (!limits.Jump) _pendingJump = _jumpRequested = false;
-            Vector3 move = limits.MaxSpeed == 0 ? Vector3.zero
-                : Vector3.ClampMagnitude(Vector3.ProjectOnPlane(_move, Motor.CharacterUp), 1f);
-            float maxSpeed = Mathf.Min(limits.MaxSpeed,
-                (_sprint && limits.Sprint ? Settings.MaxSprintSpeed : Settings.MaxStableMoveSpeed) * SpeedMultiplier);
+            Vector3 move = Vector3.ClampMagnitude(Vector3.ProjectOnPlane(_move, Motor.CharacterUp), 1f);
+            float maxSpeed = (_sprint ? Settings.MaxSprintSpeed : Settings.MaxStableMoveSpeed) * SpeedMultiplier;
             WantedVelocity = move * maxSpeed;
 
             if (UpdateSwimming(deltaTime, out float surface, out Vector3 water))
@@ -416,10 +410,9 @@ namespace Rubickanov.Characters
             {
                 Vector3 added = move * Settings.AirAccelerationSpeed * deltaTime;
                 Vector3 planarVelocity = Vector3.ProjectOnPlane(currentVelocity, Motor.CharacterUp);
-                float airSpeed = Mathf.Min(Settings.MaxAirMoveSpeed, limits.MaxSpeed);
-                if (planarVelocity.magnitude < airSpeed)
+                if (planarVelocity.magnitude < Settings.MaxAirMoveSpeed)
                 {
-                    added = Vector3.ClampMagnitude(planarVelocity + added, airSpeed) - planarVelocity;
+                    added = Vector3.ClampMagnitude(planarVelocity + added, Settings.MaxAirMoveSpeed) - planarVelocity;
                 }
                 else if (Vector3.Dot(planarVelocity, added) > 0f)
                 {
@@ -443,7 +436,7 @@ namespace Rubickanov.Characters
                 _timeSinceCanJump = 0f;
                 _jumpConsumed = false;
             }
-            if (limits.Jump && _jumpRequested && !_jumpConsumed &&
+            if (_jumpRequested && !_jumpConsumed &&
                 (canJump || _timeSinceCanJump <= Settings.JumpPostGroundingGraceTime))
             {
                 Vector3 direction = Motor.CharacterUp;
