@@ -16,7 +16,8 @@ Store code that must not be published). The game provides:
 | `Kybernetik.Animancer` | Animancer (Asset Store) | e.g. an embedded `Packages/com.kybernetik.animancer` |
 | `Rubickanov.Log.Runtime` | `com.rubickanov.log` | the game's `Packages/manifest.json` |
 
-Input System is not needed: the game reads its own input and hands the character a `CharacterInput`. The package is
+Input System is not needed: the game reads its own input and hands the character a `CharacterInput`. Netcode for
+GameObjects is optional: with it the `Rubickanov.Characters.Netcode` module compiles (see Netcode (optional)). The package is
 not in `unity-project-pckgs` (it does not compile without KCC and Animancer); its tests run from a game.
 
 ## Architecture
@@ -41,11 +42,14 @@ get-up hands the body back.
 |---|---|---|
 | `Rubickanov.Rig.Runtime` | UnityEngine only | Math: `TwoBoneIK`, `Spring`, `AimAngles`, `TurnOffset`, `LimbPin`, `SoleContact`, `RagdollMath` |
 | `Rubickanov.Characters.Runtime` | `Rubickanov.Rig.Runtime`, `KCC`, `Kybernetik.Animancer`, `Rubickanov.Log.Runtime` | Motor, animator, ragdoll, rig, climbing, configs, hooks |
+| `Rubickanov.Characters.Netcode` | `Rubickanov.Characters.Runtime`, `Rubickanov.Rig.Runtime`, `Rubickanov.Log.Runtime`, `KCC`, `Unity.Netcode.Runtime`, `Unity.Collections` | Optional, only with NGO: `NetworkCharacter`, snapshots, playback, parts and sides |
 | `Rubickanov.Rig.Tests` | `Rubickanov.Rig.Runtime`, NUnit | EditMode tests of the Rig math |
+| `Rubickanov.Characters.Netcode.Tests` | the module, NGO, NUnit | EditMode: snapshot wire round trip, playback over a poor network |
 
 ## Layout
 
-One namespace per assembly (`Rubickanov.Characters`, `Rubickanov.Rig`); folders only group files.
+One namespace per assembly (`Rubickanov.Characters`, `Rubickanov.Rig`, `Rubickanov.Characters.Netcode`); folders only
+group files.
 
 ```text
 Runtime/
@@ -59,7 +63,11 @@ Runtime/
     ├── Climb/              CharacterClimb, IClimbable, ClimbPoint
     ├── WorkHands/          IWorkHands, leases, hand and body reach
     └── Hooks/              what the game implements: input source, mount, water, foot ground, footprints, solid
+└── Netcode/                optional module (NGO): NetworkCharacter, CharacterNetSnapshot, part writer/reader,
+                            RemoteCharacterMotion, RagdollSnapshot, RemoteRagdoll, ICharacterNetPart/Frame,
+                            ICharacterSpace, INetworkCharacterSide
 Tests/Rig/
+Tests/Netcode/
 ```
 
 ## Core Concepts
@@ -129,9 +137,59 @@ ragdoll.Throw(seatVelocity + Vector3.up * 2f);
 Vector3 wanted = motor.WantedVelocity;
 ```
 
+## Netcode (optional)
+
+`Runtime/Netcode` compiles only in a project that has Netcode for GameObjects (`com.unity.netcode.gameobjects` 2.0 or
+newer): its asmdef turns `versionDefines` on that package into `RUBICKANOV_CHARACTER_NETCODE` and requires it in
+`defineConstraints`. `package.json` does not depend on NGO, so a single-player game simply does not compile the module.
+
+`NetworkCharacter` (a `NetworkBehaviour` on the character's root, fields `Character`, `Animator`,
+`InterpolationDelay`, `TeleportDistance`) replicates the body. The owner simulates and sends a snapshot every tick, and
+on its own step whenever a jump, landing, knockdown, get-up, sitting down or standing up, going in or out of the water
+or a part asks for it (unreliable RPC to everyone else). Other machines play the snapshots back `InterpolationDelay`
+behind (`Remote`, a `RemoteCharacterMotion` that drives the animator) and fire the events when playback reaches them.
+While the ragdoll is the body, its bones go too (`RagdollSnapshot`, 72 B per step, played by `RemoteRagdoll` on the same
+clock). `Knockdown(impulse, point)` works on any machine: a non-owner sends it to the owner (reliable). Ownership of a
+character is fixed: neither spawn order nor despawn handles an owner change.
+
+What a snapshot carries is what the package simulates: 52 B written field by field — time (f64), position, rotation, aim,
+jump/fall/get-up counters, and one flags byte (grounded, swimming, seated, faces-look, face-up, down) — then one byte with
+the parts' length and the parts. Off any part: 53 B, plus ~11 B of RPC framing, 30 a second.
+
+A game adds its own data as parts and its glue as sides, components anywhere on the character:
+
+```csharp
+// A part: its bytes ride in the same snapshot and play back at that snapshot's time.
+public sealed class EmotePart : MonoBehaviour, ICharacterNetPart
+{
+    public byte PartId => 2;                       // unique on this character
+    public bool SendNow => _emote != _sent;        // asked every owner step: send this step at once
+    public void Write(ref CharacterNetPartWriter w) { _sent = _emote; if (_emote != 0) w.WriteByte(_emote); }
+    public void Play(CharacterNetPartReader r) => Show(r.ReadByte());   // replica, in order
+    // ...
+}
+```
+
+A frame part (`ICharacterNetFrame`, at most one) sends the pose in a moving space: `ToFrame` turns the owner's pose into
+it at send, `Space(reader)` gives the replica its own copy of that space (`ICharacterSpace`: `ToWorld`, `PointVelocity`),
+or null for the world. beach's deck is one: the vehicle's NetworkObjectId (1–2 B) and the pose in the deck's space.
+`NetworkCharacter.Shown` fires on a replica after every playback update (before its first snapshot too), for a part that
+places the shown body, and `NetworkCharacter.Ragdoll` gives the ragdoll found at spawn.
+
+A side (`INetworkCharacterSide`) is the game's glue — camera, input, spawn point:
+
+| Hook | When |
+|---|---|
+| `OnLocal` | this machine simulates the character (its player, the host's bots); before the package listens to it |
+| `OnReplica` | another machine does; after the package made `Remote` and disabled the motor, before the components' `Start` |
+| `OnLocalDespawn` | this machine's own copy goes away |
+| `OnReplicaDespawn` | another machine's character goes away (must not touch this machine's camera or input) |
+
+Both peers must run the same build of the module: NGO hashes RPCs by method name.
+
 ## Integration
 
-What stays in each game: reading its own input and camera, network snapshots of the body and the ragdoll, interaction
+What stays in each game: reading its own input and camera, the glue and parts of its network character, interaction
 and items, the builders that make the character prefab and config assets, and the assets themselves (clips, configs,
 prefabs). Script GUIDs in this package are the ones the games had, so prefabs keep their references.
 
