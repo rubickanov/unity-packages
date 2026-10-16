@@ -43,12 +43,13 @@ get-up hands the body back.
 | `Rubickanov.Rig.Runtime` | UnityEngine only | Math: `TwoBoneIK`, `Spring`, `AimAngles`, `TurnOffset`, `LimbPin`, `SoleContact`, `RagdollMath` |
 | `Rubickanov.Characters.Runtime` | `Rubickanov.Rig.Runtime`, `KCC`, `Kybernetik.Animancer`, `Rubickanov.Log.Runtime` | Motor, animator, ragdoll, rig, climbing, configs, hooks |
 | `Rubickanov.Characters.Netcode` | `Rubickanov.Characters.Runtime`, `Rubickanov.Rig.Runtime`, `Rubickanov.Log.Runtime`, `KCC`, `Unity.Netcode.Runtime`, `Unity.Collections` | Optional, only with NGO: `NetworkCharacter`, snapshots, playback, parts and sides |
+| `Rubickanov.Characters.Editor` | `Rubickanov.Characters.Runtime`, `Rubickanov.Rig.Runtime`, `Kybernetik.Animancer` | Editor only: `GaspImport` (Game Animation Sample clips as humanoids) |
 | `Rubickanov.Rig.Tests` | `Rubickanov.Rig.Runtime`, NUnit | EditMode tests of the Rig math |
 | `Rubickanov.Characters.Netcode.Tests` | the module, NGO, NUnit | EditMode: snapshot wire round trip, playback over a poor network |
 
 ## Layout
 
-One namespace per assembly (`Rubickanov.Characters`, `Rubickanov.Rig`, `Rubickanov.Characters.Netcode`); folders only
+One namespace per assembly (`Rubickanov.Characters`, `Rubickanov.Rig`, `Rubickanov.Characters.Netcode`, `Rubickanov.Characters.Editor`); folders only
 group files.
 
 ```text
@@ -65,6 +66,7 @@ Runtime/
 └── Netcode/                optional module (NGO): NetworkCharacter, CharacterNetSnapshot, part writer/reader,
                             RemoteCharacterMotion, RagdollSnapshot, RemoteRagdoll, ICharacterNetPart/Frame,
                             ICharacterSpace, INetworkCharacterSide
+Editor/Gasp/                GaspImport: GASP clips (UEFN Mannequin FBX) as humanoids on the game's model
 Tests/Rig/
 Tests/Netcode/
 ```
@@ -178,6 +180,30 @@ A side (`INetworkCharacterSide`) is the game's glue — camera, input, spawn poi
 | `OnReplicaDespawn` | another machine's character goes away (must not touch this machine's camera or input) |
 
 Both peers must run the same build of the module: NGO hashes RPCs by method name.
+
+## GASP clips (editor)
+
+`GaspImport` sets up clips of Epic's Game Animation Sample (FBX on the UEFN Mannequin skeleton, from the private
+`rubickanov/gasp` export; Fab Standard License: usable outside Unreal, not for AI training) so they play on the game's
+humanoid. The game keeps the FBX (with the GASP tree's paths and `RefPose.fbx`) and calls, from its own builder,
+`GaspImport.Import(refPose, clipPaths, referenceAnimator, out reports)`:
+
+- **Avatar.** `RefPose.fbx` becomes a humanoid with the UEFN Mannequin bone map (`HumanMap`); its legs, arms and fingers
+  are turned so each bone points to the next as on the reference — a model of the game with a humanoid `Animator` in
+  its T-pose — and twist shares are 1. A reference with full hands (middle and little fingers) also lays the palms; a
+  mitten hand keeps GASP's hand-to-forearm turn. Both figures must face +Z in their root frames (the report prints it).
+- **Root by kind** (`KindOf`, by name; no motion node): `*_flail_*` loop with all root motion in the pose; `*_getup_*`
+  keep turn and height in the pose and give their level travel as root motion from the centre of mass (the capsule
+  carries it); `*_poses_*` all in the pose; any other clip gives travel and turn as root motion.
+- **End facing.** A get-up's body may end turned off the root's forward (GASP's stand ends at ~6°, crouch at 17–22°).
+  The import measures the yaw of `Animator.bodyRotation` at the last frame on the reference, writes it as the clip's
+  `rotationOffset` (Unity turns the clip by minus the offset), reimports and measures again; every get-up then ends
+  facing root forward (residual 0°), so the capsule keeps one heading from start to end.
+- **Report.** Per clip: root travel (reference metres and source metres, to check against GASP's `manifest.json`),
+  the end yaw before and after, the hips at the first frame.
+
+More clips: add the FBX under the game's GASP folder (same path as in GASP), list them where the game's config wants
+them, and rebuild; the import settings are rewritten in the `.meta` files each time.
 
 ## Integration
 
