@@ -1,0 +1,34 @@
+{
+    "name": "Rubickanov.Characters.Netcode.Tests",
+    "rootNamespace": "Rubickanov.Characters.Netcode.Tests",
+    "references": [
+        "Rubickanov.Characters.Netcode",
+        "Rubickanov.Characters.Runtime",
+        "Unity.Netcode.Runtime",
+        "Unity.Collections",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "RUBICKANOV_CHARACTER_NETCODE"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.netcode.gameobjects",
+            "expression": "2.0.0",
+            "define": "RUBICKANOV_CHARACTER_NETCODE"
+        }
+    ],
+    "noEngineReferences": false
+}
