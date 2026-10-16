@@ -66,13 +66,16 @@ namespace Rubickanov.Characters
         [Tooltip("How long the hands and feet take to reach the seat's holds after sitting down, seconds.")]
         [Min(0)] public float MountReachTime = 0.2f;
         [Tooltip("Wrist: the wrist goes onto the hold and the hand keeps the clip's turn (a sled's rope). Palm: the " +
-                 "palm's middle lies on the hold facing its forward, fingers shaped by the seat's hand shape.")]
+                 "hand takes the hold's turn exactly, the palm's middle on the hold facing its forward (Z) with the " +
+                 "fingers along its up (Y), fingers shaped by the seat's hand shape.")]
         public MountGrip MountGrip = MountGrip.Wrist;
         [Tooltip("The palm's face lies this far off a hand hold, metres: the hold's forward is where the palm faces.")]
         [Min(0)] public float MountPalmDepth = 0.026f;
-        [Tooltip("Most a hand on a hold bends off the forearm, degrees.")]
+        [Tooltip("A hand on a hold bent further off the forearm than this, degrees, is worth a warning; the hand still " +
+                 "takes the hold's turn.")]
         [Range(0, 90)] public float MountWristBend = 45f;
-        [Tooltip("Most a hand on a hold twists about the forearm, degrees.")]
+        [Tooltip("A hand on a hold twisted further about the forearm than this, degrees, is worth a warning; the hand " +
+                 "still takes the hold's turn.")]
         [Range(0, 180)] public float MountWristTwist = 120f;
 
         [Header("Hand shapes")]

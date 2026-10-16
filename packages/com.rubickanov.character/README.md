@@ -75,7 +75,7 @@ A feature is off until the game turns it on: swimming needs a `Water`, footprint
 |---|---|---|
 | `RagdollConfig.FallTime` | `0`: a long fall stays upright until it lands | `1`: after 1 s of falling the body goes down into its ragdoll in the air |
 | `RagdollConfig.SolverVelocityIterations` | `1` (the physics default) | e.g. `4`: stiffer bones on a moving deck |
-| `CharacterRigConfig.MountGrip` | `Wrist`: the wrist goes onto the hold, the hand keeps the clip's turn | `Palm`: the palm lies on the hold, fingers shaped Fist/OpenPalm |
+| `CharacterRigConfig.MountGrip` | `Wrist`: the wrist goes onto the hold, the hand keeps the clip's turn | `Palm`: the hand takes the hold's turn exactly (palm faces Z, fingers along Y), fingers shaped Fist/OpenPalm |
 
 ## Quick Start
 
@@ -143,3 +143,6 @@ Working on the package from a game: `./link.sh <game> local com.rubickanov.chara
 - **Off unless the game asks.** A feature one game uses (swimming, the in-air ragdoll, palm grips, work hands) sits in
   the package but changes nothing in a game that sets no hook and keeps the config defaults.
 - **No Asset Store code.** KCC and Animancer are referenced by assembly name only.
+- **A hand goes where it is put.** `MountLimbs.GripHand` and `HoldHand` give the hand bone the grip's turn exactly and
+  solve the arm for the wrist that follows, as two-bone IK end effectors do; the elbow goes by its hint. Nothing is
+  clamped behind the author's back: `MountWristBend`/`MountWristTwist` and `AskedBend`/`AskedTwist` are for warnings.
