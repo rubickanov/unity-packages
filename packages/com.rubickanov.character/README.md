@@ -40,11 +40,11 @@ get-up hands the body back.
 
 | Assembly | References | Contents |
 |---|---|---|
-| `Rubickanov.Rig.Runtime` | UnityEngine only | Math: `TwoBoneIK`, `Spring`, `AimAngles`, `TurnOffset`, `LimbPin`, `SoleContact`, `RagdollMath` |
+| `Rubickanov.Rig.Runtime` | UnityEngine only | Math: `TwoBoneIK`, `Spring`, `AimAngles`, `TurnOffset`, `LimbPin`, `SoleContact`, `RagdollMath`, `Inertia`, `GetUpSearch` |
 | `Rubickanov.Characters.Runtime` | `Rubickanov.Rig.Runtime`, `KCC`, `Kybernetik.Animancer`, `Rubickanov.Log.Runtime` | Motor, animator, ragdoll, rig, climbing, configs, hooks |
 | `Rubickanov.Characters.Netcode` | `Rubickanov.Characters.Runtime`, `Rubickanov.Rig.Runtime`, `Rubickanov.Log.Runtime`, `KCC`, `Unity.Netcode.Runtime`, `Unity.Collections` | Optional, only with NGO: `NetworkCharacter`, snapshots, playback, parts and sides |
-| `Rubickanov.Characters.Editor` | `Rubickanov.Characters.Runtime`, `Rubickanov.Rig.Runtime`, `Kybernetik.Animancer` | Editor only: `GaspImport` (Game Animation Sample clips as humanoids) |
-| `Rubickanov.Rig.Tests` | `Rubickanov.Rig.Runtime`, NUnit | EditMode tests of the Rig math |
+| `Rubickanov.Characters.Editor` | `Rubickanov.Characters.Runtime`, `Rubickanov.Rig.Runtime`, `Kybernetik.Animancer` | Editor only: `GaspImport` (Game Animation Sample clips as humanoids), `GetUpBaker` (nearest-frame get-up data) |
+| `Rubickanov.Rig.Tests` | `Rubickanov.Rig.Runtime`, NUnit | EditMode tests of the Rig math (inertialization, get-up search) |
 | `Rubickanov.Characters.Netcode.Tests` | the module, NGO, NUnit | EditMode: snapshot wire round trip, playback over a poor network |
 
 ## Layout
@@ -58,15 +58,17 @@ Runtime/
 └── Characters/
     ├── CharacterProportions.cs
     ├── Motor/              CharacterMotor, input, motion, MovementConfig
-    ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape
+    ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape, GetUpPoses, PoseInertia
     │   └── IK/             CharacterRig + config, FootPlacement, HeadLook, TurnLean, GetUpContacts, MountLimbs
-    ├── Ragdoll/            CharacterRagdoll, Ragdoll, RagdollBone, RagdollConfig, GetUpSpot, FlailReflex, RagdollTouch
+    ├── Ragdoll/            CharacterRagdoll (+ .GetUp: nearest-frame get-up), Ragdoll, RagdollBone, RagdollConfig,
+    │                       GetUpSpot, FlailReflex, RagdollTouch, CharacterGetUp
     ├── Climb/              CharacterClimb, IClimbable, ClimbPoint
     └── Hooks/              what the game implements: input source, mount, water, foot ground, footprints, solid
 └── Netcode/                optional module (NGO): NetworkCharacter, CharacterNetSnapshot, part writer/reader,
                             RemoteCharacterMotion, RagdollSnapshot, RemoteRagdoll, ICharacterNetPart/Frame,
                             ICharacterSpace, INetworkCharacterSide
 Editor/Gasp/                GaspImport: GASP clips (UEFN Mannequin FBX) as humanoids on the game's model
+Editor/GetUp/               GetUpBaker: every frame of the config's get-ups on the game's character → GetUpPoses
 Tests/Rig/
 Tests/Netcode/
 ```
@@ -77,7 +79,7 @@ Every tunable lives in a config asset the game owns: **MovementConfig** (speeds,
 (feet, head look, lean, seat grips, hand shapes), **CharacterAnimationsConfig** (clips), **RagdollConfig** (muscles,
 falling, get-up, water), **CharacterProportions** (build data for a game's character builder).
 
-A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Six config fields are where games chose differently; their defaults are the conservative side:
+A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Eight config fields are where games chose differently; their defaults are the conservative side:
 
 | Field | Default | Other value |
 |---|---|---|
@@ -85,6 +87,8 @@ A feature is off until the game turns it on: swimming needs a `Water`, footprint
 | `RagdollConfig.FallTime` | `0`: a long fall stays upright until it lands | `1`: after 1 s of falling the body goes down into its ragdoll in the air |
 | `RagdollConfig.SafeSpot` | `false`: the capsule stands on the ground under the hips | `true`: `GetUpSpot` looks round that point in rings (`SpotStep` × `SpotRings` × 8) for stable ground, out of walls, with room to stand and nothing fixed over the lying head; with none the body stays down, looks again every `SpotRetry` and gets up where it lies after `SpotGiveUp` from the fall |
 | `RagdollConfig.Flail` | `false`: in the air the body holds the pose it fell in and fades to limp over `LimpTime` | `true` (with three `CharacterAnimationsConfig.Flails` clips: head first, along the fall, feet first): `FlailReflex` drives the joints toward the flail clip's pose (`FlailStrength` × peak torque, `FlailHz`), the clip chosen by the pelvis's up every `FlailChooseTime`; a touch over `FlailTouchForce` eases them to limp over `FlailEaseTime` (arms `FlailArmsTime`); water lets go at once. Bones get a `RagdollTouch` only then |
+| `CharacterAnimationsConfig.GetUps` (+ `GetUpPoses`) | empty: the body gets up by `GetUpFaceUp` / `GetUpFaceDown`, the clip held on the ragdoll's pose and blended in over `GetUpBlendTime` | a list of get-up clips and their baked `GetUpPoses`: the get-up starts from the frame, clip and heading nearest the lying body (see Nearest-frame get-up) |
+| `CharacterAnimationsConfig.InertialGetUp` (and `InertialJump`, `InertialLand`, `InertialTurn`, `InertialWaterEntry`) | `false`: clips cross-fade | `true` (with a `PoseInertia` on the model, `CharacterAnimator.Inertia`): the new clip plays at once and the offset to the old pose dies away over `GetUpInertia` / `SwitchInertia` s, keeping its velocity |
 | `RagdollConfig.SolverVelocityIterations` | `1` (the physics default) | e.g. `4`: stiffer bones on a moving deck |
 | `CharacterRigConfig.MountGrip` | `Wrist`: the wrist goes onto the hold, the hand keeps the clip's turn | `Palm`: the hand takes the hold's turn exactly (palm faces Z, fingers along Y), fingers shaped Fist/OpenPalm |
 
@@ -148,9 +152,13 @@ While the ragdoll is the body, its bones go too (`RagdollSnapshot`, 72 B per ste
 clock). `Knockdown(impulse, point)` works on any machine: a non-owner sends it to the owner (reliable). Ownership of a
 character is fixed: neither spawn order nor despawn handles an owner change.
 
-What a snapshot carries is what the package simulates: 52 B written field by field — time (f64), position, rotation, aim,
-jump/fall/get-up counters, and one flags byte (grounded, swimming, seated, faces-look, face-up, down) — then one byte with
-the parts' length and the parts. Off any part: 53 B, plus ~11 B of RPC framing, 30 a second.
+What a snapshot carries is what the package simulates: 55 B written field by field — time (f64), position, rotation, aim,
+jump/fall/get-up counters, one flags byte (grounded, swimming, seated, faces-look, face-up, down), the get-up's clip (a
+byte, 255 = face up / face down) and start time (ushort ms) — then one byte with the parts' length and the parts. Off
+any part: 56 B, plus ~11 B of RPC framing, 30 a second. A replica gets up by the same clip from the same time: the
+capsule is held at the last lying snapshot and set where the owner stood it as the get-up plays, and the pose shown
+until then is where its inertia starts. `CharacterRagdoll.GettingUp` is an `Action<CharacterGetUp>` (`FaceUp`, `Clip`,
+`Time`).
 
 A game adds its own data as parts and its glue as sides, components anywhere on the character:
 
@@ -206,6 +214,32 @@ humanoid. The game keeps the FBX (with the GASP tree's paths and `RefPose.fbx`) 
 
 More clips: add the FBX under the game's GASP folder (same path as in GASP), list them where the game's config wants
 them, and rebuild; the import settings are rewritten in the `.meta` files each time.
+
+## Nearest-frame get-up
+
+With `CharacterAnimationsConfig.GetUps` set, a body that gets up on land (`GetUpSearch`, a port of Sinew's
+`MotionSearch.Nearest`) compares the lying ragdoll — joint turns of the 11 ragdoll joints, the pelvis against gravity
+(×4, any heading) and which of the 12 segments bear on the ground (heights capped at 0.25 m) — with every baked frame
+of every clip up to its stand frame minus 0.5 s, and takes each clip's nearest frame and heading. Cheapest first, a
+candidate must have a safe spot at its root (`GetUpSpot`, when `SafeSpot`), not lead the trunk or head into a fixed piece
+overhead, and not sweep its body through another character that is down, getting up or standing; if none passes the
+body waits, looks again every `SpotRetry` and gets up anyway after `SpotGiveUp`. The capsule goes to the match's root and
+heading, the clip plays from the found time (with `InertialGetUp`, at once: the ragdoll's pose is the offset that dies
+away; without, the clip waits on the ragdoll's pose and blends in), and control comes back at the clip's stand frame
+(the first frame at 95 % of the final pelvis height that never sinks below 90 % after), blending to locomotion over
+`GetUpBlendOut`. Bodies in deep water, a stale bake and a config without clips take the face-up / face-down path; a
+stale bake warns once.
+
+The data is baked, not computed at runtime: `GetUpBaker.Bake(characterPrefab, config.GetUps, poses)` samples every
+frame of each listed clip on the game's character (joint turns, pelvis, segment heights, a whole-body path every
+0.1 s) into the `GetUpPoses` asset the config points at. **More get-up clips = add the FBX, add them to `GetUps`, and
+rebuild the poses** from the game's builder (beach: Game/Builders/Build GetUp Poses). Entries are checked against the list on
+first use (names, lengths, frame counts).
+
+`PoseInertia` (on the model, `[DefaultExecutionOrder(-60)]`: after Animancer, before `CharacterRig`) lays an
+inertialization offset (`Inertia`, a port of Sinew's `Inertialization`: the offset falls as
+`(1 − s)⁴(x₀ + (v₀T + 4x₀)s)`, keeps its velocity, never overshoots) over ~22 humanoid bones and the hips' place. It
+records the shown pose every frame only while a switch kind other than the get-up is on, so it costs nothing otherwise.
 
 ## Integration
 

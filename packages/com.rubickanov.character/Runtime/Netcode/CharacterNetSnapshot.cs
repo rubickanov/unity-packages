@@ -32,8 +32,9 @@ namespace Rubickanov.Characters.Netcode
     /// </summary>
     public struct CharacterNetSnapshot : INetworkSerializable
     {
-        /// <summary>Time 8, Position 12, Rotation 16, Aim 12, Jumps, Falls, GetUps, Flags 1 each.</summary>
-        public const int CoreSize = 52;
+        /// <summary>Time 8, Position 12, Rotation 16, Aim 12, Jumps, Falls, GetUps, Flags 1 each, GetUpClip 1,
+        /// GetUpTime 2.</summary>
+        public const int CoreSize = 55;
 
         /// <summary>The owner's Time.fixedTime of the step. Only meaningful relative to other snapshots.</summary>
         public double Time;
@@ -56,6 +57,13 @@ namespace Rubickanov.Characters.Netcode
         public byte GetUps;
 
         public CharacterNetFlags Flags;
+
+        /// <summary>The last get-up's clip in the config's GetUps, <see cref="CharacterGetUp.Classic"/> for the face up /
+        /// down one.</summary>
+        public byte GetUpClip;
+
+        /// <summary>Where the last get-up's clip started, ms.</summary>
+        public ushort GetUpTime;
 
         /// <summary>The game's parts, back to back: id, length, bytes each. Empty without any.</summary>
         public FixedList128Bytes<byte> Parts;
@@ -138,6 +146,8 @@ namespace Rubickanov.Characters.Netcode
             byte flags = (byte)Flags;
             serializer.SerializeValue(ref flags);
             Flags = (CharacterNetFlags)flags;
+            serializer.SerializeValue(ref GetUpClip);
+            serializer.SerializeValue(ref GetUpTime);
 
             // No serializer overload for a FixedList: the used length, then the bytes. A short buffer fails at once.
             byte count = (byte)Parts.Length;

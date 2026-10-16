@@ -76,6 +76,29 @@ namespace Rubickanov.Characters
         public ClipTransition GetUpFaceDown = new();
         [Tooltip("Fade from a get-up that reached its end time back to locomotion.")]
         [Min(0)] public float GetUpBlendOut = 0.25f;
+        [Tooltip("Get-ups started from the frame nearest the lying body, its heading and place found by the search " +
+                 "(clips that end facing the root's forward, root motion on the level travel). Empty: the face up / " +
+                 "face down get-ups above. Needs GetUpPoses baked from this list.")]
+        public ClipTransition[] GetUps = { };
+        [Tooltip("Every frame of GetUps baked on the character's ragdoll (package editor GetUpBaker). A list " +
+                 "changed without a rebake falls back to the face up / face down get-ups with a warning.")]
+        public GetUpPoses GetUpPoses;
+
+        [Header("Inertialization")]
+        [Tooltip("A nearest-frame get-up starts its clip at once and the ragdoll's pose dies away over it " +
+                 "(PoseInertia on the model) instead of a held clip blending in. Off: the held blend.")]
+        public bool InertialGetUp;
+        [Min(0)] public float GetUpInertia = 0.25f;
+        [Tooltip("A jump starts with no cross-fade and the old pose dies away over it (PoseInertia).")]
+        public bool InertialJump;
+        [Tooltip("A landing, the same.")]
+        public bool InertialLand;
+        [Tooltip("A turn in place, the same.")]
+        public bool InertialTurn;
+        [Tooltip("Going into the water (swimming), the same.")]
+        public bool InertialWaterEntry;
+        [Tooltip("How long the old pose takes to die away on a jump, landing, turn or water entry, s.")]
+        [Min(0)] public float SwitchInertia = 0.2f;
 
         [Header("Flailing")]
         [Tooltip("Flail clips a flying ragdoll's muscles reach for (RagdollConfig.Flail), in this order: head first, " +

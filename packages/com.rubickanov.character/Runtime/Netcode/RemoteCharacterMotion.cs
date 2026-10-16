@@ -27,8 +27,9 @@ namespace Rubickanov.Characters.Netcode
         /// <summary>The owner knocked the character down: its ragdoll is the body from here.</summary>
         public event Action FellDown;
 
-        /// <summary>The owner started getting up, from lying face up (true) or down.</summary>
-        public event Action<bool> GettingUp;
+        /// <summary>The owner started getting up: lying face up or down, the nearest-frame clip and its start. The
+        /// body is already where the owner stood it.</summary>
+        public event Action<CharacterGetUp> GettingUp;
 
         /// <summary>The character sat in a seat at the step playback has reached.</summary>
         public bool Seated => _seated;
@@ -156,7 +157,8 @@ namespace Rubickanov.Characters.Netcode
                 space = null;
             }
 
-            if (to.Time <= from.Time || _playback <= from.Time)
+            // Into a get-up the owner stood the capsule somewhere new: held, then set there as the get-up starts.
+            if (to.Time <= from.Time || _playback <= from.Time || to.GetUps != from.GetUps)
             {
                 position = fromPosition;
                 rotation = fromRotation;
@@ -199,7 +201,7 @@ namespace Rubickanov.Characters.Netcode
 
             if (gotUp is { } getUp)
             {
-                GettingUp?.Invoke(getUp.FaceUp);
+                GettingUp?.Invoke(new CharacterGetUp(getUp.FaceUp, getUp.GetUpClip, getUp.GetUpTime / 1000f));
             }
 
             if (jumped)

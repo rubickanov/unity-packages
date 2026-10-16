@@ -46,6 +46,8 @@ namespace Rubickanov.Characters.Netcode
         private byte _sentGetUps;
         private byte _getUps;
         private bool _faceUp;
+        private byte _getUpClip = CharacterGetUp.Classic;
+        private ushort _getUpTime;
         private bool _warnedOverflow;
 
         /// <summary>A copy's playback of its owner's snapshots; null on the owner.</summary>
@@ -207,10 +209,12 @@ namespace Rubickanov.Characters.Netcode
 
         private void OnFellDown() => _falls++;
 
-        private void OnGettingUp(bool faceUp)
+        private void OnGettingUp(CharacterGetUp getUp)
         {
             _getUps++;
-            _faceUp = faceUp;
+            _faceUp = getUp.FaceUp;
+            _getUpClip = getUp.Clip;
+            _getUpTime = (ushort)Mathf.Clamp(Mathf.RoundToInt(getUp.Time * 1000f), 0, ushort.MaxValue);
         }
 
         // Runs in the simulation step, right after the motor moved.
@@ -261,6 +265,8 @@ namespace Rubickanov.Characters.Netcode
                 Falls = _falls,
                 GetUps = _getUps,
                 FaceUp = _faceUp,
+                GetUpClip = _getUpClip,
+                GetUpTime = _getUpTime,
                 Down = down,
                 Seated = seated,
             };
