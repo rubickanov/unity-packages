@@ -69,10 +69,11 @@ Every tunable lives in a config asset the game owns: **MovementConfig** (speeds,
 falling, get-up, water), **CharacterProportions** (build data for a game's character builder).
 
 A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`, work hands an
-`IWorkHands`. Three config fields are where games chose differently; their defaults are the conservative side:
+`IWorkHands`. Four config fields are where games chose differently; their defaults are the conservative side:
 
 | Field | Default | Other value |
 |---|---|---|
+| `MovementConfig.FirstPersonTurn` | `Eased`: in first person the body eases round to the camera at `OrientationSharpness` | `AtOnce`: the body faces the camera at once (the game sets `CharacterInput.FirstPerson`) |
 | `RagdollConfig.FallTime` | `0`: a long fall stays upright until it lands | `1`: after 1 s of falling the body goes down into its ragdoll in the air |
 | `RagdollConfig.SolverVelocityIterations` | `1` (the physics default) | e.g. `4`: stiffer bones on a moving deck |
 | `CharacterRigConfig.MountGrip` | `Wrist`: the wrist goes onto the hold, the hand keeps the clip's turn | `Palm`: the hand takes the hold's turn exactly (palm faces Z, fingers along Y), fingers shaped Fist/OpenPalm |

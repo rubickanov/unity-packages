@@ -9,8 +9,11 @@ namespace Rubickanov.Characters
         public Vector3 Look;
         /// <summary>Where the character looks, pitch included. Turns the head, not the body. Zero looks ahead.</summary>
         public Vector3 Aim;
-        /// <summary>The body turns to Look at once instead of easing round, as in first person.</summary>
-        public bool FaceLook;
+        /// <summary>
+        /// The player looks through the character's eyes; <see cref="MovementConfig.FirstPersonTurn"/> says whether
+        /// the body then turns to Look at once.
+        /// </summary>
+        public bool FirstPerson;
         /// <summary>A press edge, not a held button. Latched until the next simulation step.</summary>
         public bool JumpPressed;
         /// <summary>Held. Raises the ground speed limit to the sprint speed.</summary>

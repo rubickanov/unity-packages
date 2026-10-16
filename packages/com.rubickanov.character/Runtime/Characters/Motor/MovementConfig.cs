@@ -5,6 +5,15 @@ namespace Rubickanov.Characters
 {
     public enum CharacterUpMode { World, Gravity, GroundAndGravity }
 
+    /// <summary>How the body turns to the camera in first person.</summary>
+    public enum BodyTurn
+    {
+        /// <summary>Eases round at <see cref="MovementConfig.OrientationSharpness"/>.</summary>
+        Eased,
+        /// <summary>Faces the camera at once, once it has turned to it.</summary>
+        AtOnce,
+    }
+
     [CreateAssetMenu(menuName = "Characters/Movement Config")]
     public sealed class MovementConfig : ScriptableObject
     {
@@ -18,6 +27,8 @@ namespace Rubickanov.Characters
         [Tooltip("How quickly ground speed falls toward a lower target, e.g. when stopping.")]
         [Min(0)] public float StableDecelerationSharpness = 4.5f;
         [Min(0)] public float OrientationSharpness = 10f;
+        [Tooltip("In first person: the body eases round to the camera or faces it at once.")]
+        public BodyTurn FirstPersonTurn = BodyTurn.Eased;
 
         [Header("Air movement")]
         [Min(0)] public float MaxAirMoveSpeed = 15f;
