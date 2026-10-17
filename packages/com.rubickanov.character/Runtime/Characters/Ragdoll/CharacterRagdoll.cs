@@ -71,6 +71,13 @@ namespace Rubickanov.Characters
         private FlailClip _flailShown = FlailClip.None;
         private int _flailChoices;
         private int _flailFlights;
+        // A replica showing a pose streamed in a frame: kinematic bones placed in LateUpdate, after the root has moved.
+        private bool _streamed;
+        private bool _streamPending;
+        private Vector3 _streamFrame;
+        private Quaternion _streamTurn;
+        private Vector3 _streamHips;
+        private readonly Quaternion[] _streamRotations = new Quaternion[16];
 
         public BodyState State { get; private set; }
 
@@ -78,6 +85,9 @@ namespace Rubickanov.Characters
         public bool IsReplica { get; set; }
 
         public bool IsDown => State == BodyState.Down;
+
+        /// <summary>An upright replica whose bones show a streamed pose (<see cref="ShowStreamed"/>) instead of the animation.</summary>
+        public bool ShowsStreamed => _streamed && State == BodyState.Upright;
 
         /// <summary>
         /// Velocity of whatever carries the body at a point, such as a moving deck it lies on, or null for none: a
@@ -209,13 +219,62 @@ namespace Rubickanov.Characters
                 return;
             }
 
-            if (_ragdoll.Mode != RagdollMode.Off)
+            // Bones already showing a stream go on from where they are.
+            if (_ragdoll.Mode != RagdollMode.Off && !(_streamed && _ragdoll.Mode == RagdollMode.Kinematic))
             {
                 _ragdoll.TurnOff();
             }
 
             _ragdoll.BeKinematic();
             LieDown();
+        }
+
+        /// <summary>
+        /// A replicated character's bones, as <see cref="Characters.Ragdoll.CaptureIn"/> gave them, in a frame that is at
+        /// <paramref name="framePosition"/> and <paramref name="frameRotation"/> this frame. Down, the bones lie there;
+        /// upright, the bones go kinematic and are shown instead of the animation until <see cref="EndStreamed"/>.
+        /// Placed after the character's root has moved this frame.
+        /// </summary>
+        public void ShowStreamed(Vector3 framePosition, Quaternion frameRotation, Vector3 hipsPosition,
+            IReadOnlyList<Quaternion> rotations)
+        {
+            if (!isActiveAndEnabled || !IsReplica || Ragdoll == null || State == BodyState.GettingUp
+                || rotations.Count != _ragdoll.Bones.Count || rotations.Count > _streamRotations.Length)
+            {
+                return;
+            }
+
+            if (State == BodyState.Upright && !_streamed)
+            {
+                _ragdoll.BeKinematic();
+                _streamed = true;
+            }
+
+            _streamFrame = framePosition;
+            _streamTurn = frameRotation;
+            _streamHips = hipsPosition;
+            for (int i = 0; i < rotations.Count; i++)
+            {
+                _streamRotations[i] = rotations[i];
+            }
+
+            _streamPending = true;
+        }
+
+        /// <summary>An upright replica's stream ended: back to the animated pose.</summary>
+        public void EndStreamed()
+        {
+            _streamPending = false;
+            if (!_streamed)
+            {
+                return;
+            }
+
+            _streamed = false;
+            if (State == BodyState.Upright && _ragdoll != null && _ragdoll.Mode != RagdollMode.Off)
+            {
+                _ragdoll.TurnOff();
+            }
         }
 
         /// <summary>A replicated character's bones, as <see cref="Characters.Ragdoll.Capture"/> gave them.</summary>
@@ -343,6 +402,15 @@ namespace Rubickanov.Characters
                 return;
             }
 
+            if (_streamPending)
+            {
+                _streamPending = false;
+                if (State == BodyState.Down || _streamed)
+                {
+                    _ragdoll.Place(_streamFrame, _streamTurn, _streamHips, _streamRotations);
+                }
+            }
+
             switch (State)
             {
                 case BodyState.Upright:
@@ -350,6 +418,10 @@ namespace Rubickanov.Characters
                     if (!IsReplica)
                     {
                         _ragdoll.SamplePose(Time.deltaTime);
+                    }
+                    else if (_streamed)
+                    {
+                        _ragdoll.Map(1f);
                     }
 
                     break;
@@ -424,6 +496,7 @@ namespace Rubickanov.Characters
         private void LieDown()
         {
             State = BodyState.Down;
+            _streamed = false;
             _lyingTime = _restTime = _fallTime = _downTime = _spotAgain = 0f;
             _hasSpot = false;
             _searchAgain = 0f;
@@ -746,6 +819,8 @@ namespace Rubickanov.Characters
 
         private void Stand()
         {
+            _streamed = false;
+            _streamPending = false;
             if (_ragdoll != null && _ragdoll.Mode != RagdollMode.Off)
             {
                 _ragdoll.TurnOff();
