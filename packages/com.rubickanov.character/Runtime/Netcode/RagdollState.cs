@@ -96,5 +96,21 @@ namespace Rubickanov.Characters.Netcode
 
         /// <summary>The machine taking it over, just before it does.</summary>
         void ReadState(CharacterNetPartReader reader);
+
+        /// <summary>
+        /// The machine given the body, each frame until it takes it (at most <see cref="NetworkCharacter.StateWait"/>):
+        /// whether it can now, e.g. once what the body is held on is simulated here too.
+        /// </summary>
+        bool CanTake(in RagdollState state) => true;
+
+        /// <summary>
+        /// The machine taking over a body that was upright with its ragdoll on (live on something), right after it
+        /// stops showing it: the game goes on from <paramref name="state"/>'s bones itself (in its frame; 0 is the
+        /// world). Without game bytes the state is the pose this machine showed, velocities zero (its simulator gone).
+        /// Left as is, the body starts anew as the game starts it.
+        /// </summary>
+        void TakeUpright(in RagdollState state)
+        {
+        }
     }
 }
