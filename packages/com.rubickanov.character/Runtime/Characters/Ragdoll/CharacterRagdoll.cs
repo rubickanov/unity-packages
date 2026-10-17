@@ -85,6 +85,12 @@ namespace Rubickanov.Characters
         /// </summary>
         public Func<Vector3, Vector3> Carrier { get; set; }
 
+        /// <summary>The game's say over the body at the water while it is down, or null to float as configured.</summary>
+        public IRagdollWater WaterHook { get; set; }
+
+        /// <summary>The gravity on the body now: the character's while a fall lasts, the physics' after it.</summary>
+        public Vector3 BodyGravity => State == BodyState.Down && _fallGravity ? Character.Gravity : Physics.gravity;
+
         /// <summary>The ragdoll itself, null until the bones are built.</summary>
         public Ragdoll Ragdoll => _ragdoll ??= CreateRagdoll();
 
@@ -274,7 +280,8 @@ namespace Rubickanov.Characters
 
             _downTime += dt;
             _ragdoll.Drive(dt);
-            _ragdoll.SetWet(Float());
+            RagdollWaterStep step = WaterHook?.Step(this, dt) ?? RagdollWaterStep.Float;
+            _ragdoll.SetWet(step == RagdollWaterStep.Float ? Float() : step == RagdollWaterStep.Pushed);
             ShowFlail();
             // Only a body lying on the ground or in water rests: hips slow at the top of a flight or hung on
             // something do not. Water of any depth counts: a body floating in water too shallow to swim in has its
@@ -283,7 +290,7 @@ namespace Rubickanov.Characters
             bool onGround = TryGroundUnder(hips, out Vector3 ground, out float height)
                             && height <= Config.LyingHeight;
             bool inWater = InWater(hips, out float surface, out Vector3 water);
-            bool floating = inWater && IsDeep(hips);
+            bool floating = inWater && IsDeep(hips) && step == RagdollWaterStep.Float;
             bool lying = onGround || inWater;
             // The time down counts lying or floating only, so a long flight does not use it up before the landing.
             if (lying)
@@ -292,7 +299,7 @@ namespace Rubickanov.Characters
             }
 
             // The physics' gravity is weaker than the character's: without the rest the body would float down.
-            if (_fallGravity && lying)
+            if (_fallGravity && (lying || step != RagdollWaterStep.Float))
             {
                 _fallGravity = false;
             }
