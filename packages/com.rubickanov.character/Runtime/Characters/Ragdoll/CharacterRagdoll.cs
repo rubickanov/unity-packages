@@ -276,20 +276,23 @@ namespace Rubickanov.Characters
             _ragdoll.Drive(dt);
             _ragdoll.SetWet(Float());
             ShowFlail();
-            // Only a body lying on the ground or floating in deep water rests: hips slow at the top of a flight or
-            // hung on something do not.
+            // Only a body lying on the ground or in water rests: hips slow at the top of a flight or hung on
+            // something do not. Water of any depth counts: a body floating in water too shallow to swim in has its
+            // hips higher over the bottom than LyingHeight, yet it lies there.
             Vector3 hips = _ragdoll.Hips.transform.position;
             bool onGround = TryGroundUnder(hips, out Vector3 ground, out float height)
                             && height <= Config.LyingHeight;
-            bool floating = InDeepWater(hips, out float surface, out Vector3 water);
+            bool inWater = InWater(hips, out float surface, out Vector3 water);
+            bool floating = inWater && IsDeep(hips);
+            bool lying = onGround || inWater;
             // The time down counts lying or floating only, so a long flight does not use it up before the landing.
-            if (onGround || floating)
+            if (lying)
             {
                 _lyingTime += dt;
             }
 
             // The physics' gravity is weaker than the character's: without the rest the body would float down.
-            if (_fallGravity && (onGround || floating))
+            if (_fallGravity && lying)
             {
                 _fallGravity = false;
             }
@@ -299,12 +302,12 @@ namespace Rubickanov.Characters
             }
 
             Vector3 carried = Carrier?.Invoke(hips) ?? Vector3.zero;
-            bool slow = floating
+            bool slow = inWater
                 ? (_ragdoll.Hips.Body.linearVelocity - water).magnitude < Config.WaterRestSpeed
                 : (_ragdoll.Hips.Body.linearVelocity - carried).magnitude < Config.RestSpeed;
-            _restTime = (onGround || floating) && slow ? _restTime + dt : 0f;
+            _restTime = lying && slow ? _restTime + dt : 0f;
             bool rested = _lyingTime >= Config.MinDownTime && _restTime >= Config.RestTime;
-            bool tooLong = Config.MaxDownTime > 0f && _lyingTime >= Config.MaxDownTime && (onGround || floating);
+            bool tooLong = Config.MaxDownTime > 0f && _lyingTime >= Config.MaxDownTime && lying;
             if (rested || tooLong)
             {
                 _getUpPending = true;
@@ -585,18 +588,23 @@ namespace Rubickanov.Characters
         }
 
         // Hips at or under the surface of water too deep to stand in: a body there swims rather than stands.
-        private bool InDeepWater(Vector3 hips, out float surface, out Vector3 flow)
+        private bool InDeepWater(Vector3 hips, out float surface, out Vector3 flow) =>
+            InWater(hips, out surface, out flow) && IsDeep(hips);
+
+        // Hips at or under the surface of water of any depth.
+        private bool InWater(Vector3 hips, out float surface, out Vector3 flow)
         {
             flow = Vector3.zero;
             surface = 0f;
             ICharacterWater water = Character.Water;
-            if (water == null || !water.TrySample(hips, out surface, out flow) || hips.y > surface + 0.1f)
-            {
-                return false;
-            }
+            return water != null && water.TrySample(hips, out surface, out flow) && hips.y <= surface + 0.1f;
+        }
 
+        // The water at rest over the bottom under the hips is too deep to stand in. Only with a Water.
+        private bool IsDeep(Vector3 hips)
+        {
             float bottom = TryGroundUnder(hips, out Vector3 ground, out _) ? ground.y : float.NegativeInfinity;
-            return water.Level(hips) - bottom > Character.Settings.SwimEnterDepth;
+            return Character.Water.Level(hips) - bottom > Character.Settings.SwimEnterDepth;
         }
 
         // Turned so the clip's first frame lies along the ragdoll, hips over hips. The clip's pose is on the

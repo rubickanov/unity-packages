@@ -47,14 +47,14 @@ namespace Rubickanov.Characters
         public PhysicsMaterial LimpMaterial;
 
         [Header("Lying")]
-        [Tooltip("The least time the body lies on the ground or floats before it gets up, seconds; time in the " +
+        [Tooltip("The least time the body lies on the ground or in water before it gets up, seconds; time in the " +
                  "air does not count.")]
         [Min(0)] public float MinDownTime = 1.5f;
         [Tooltip("The hips count as at rest below this speed, m/s.")]
         [Min(0)] public float RestSpeed = 0.2f;
         [Tooltip("How long the hips must be at rest before the character gets up, seconds.")]
         [Min(0)] public float RestTime = 0.5f;
-        [Tooltip("Gets up after lying on the ground or floating this long however the body moves, seconds; time " +
+        [Tooltip("Gets up after lying on the ground or in water this long however the body moves, seconds; time " +
                  "in the air does not count. 0 never forces it.")]
         [Min(0)] public float MaxDownTime = 8f;
         [Tooltip("How quickly the capsule catches up with the hips while down, seconds.")]
@@ -65,7 +65,7 @@ namespace Rubickanov.Characters
         [Tooltip("How far below the hips the ground is looked for, metres.")]
         [Min(0)] public float GroundProbe = 1.5f;
         [Tooltip("The body lies on the ground while the hips are no higher above it than this, metres. It gets " +
-                 "up by itself only then, never in the air or hung on something.")]
+                 "up by itself only then or in water, never in the air or hung on something.")]
         [Min(0)] public float LyingHeight = 0.5f;
         [Tooltip("Seconds the pose blends from the ragdoll into the get-up clip.")]
         [Min(0)] public float GetUpBlendTime = 0.4f;
@@ -139,7 +139,7 @@ namespace Rubickanov.Characters
         [Tooltip("Drag of the water on a bone moving through it, 1/s.")]
         [Min(0)] public float WaterDrag = 3f;
         [Min(0)] public float WaterAngularDrag = 2f;
-        [Tooltip("The hips count as at rest below this speed through the water, m/s.")]
+        [Tooltip("The hips count as at rest below this speed through water of any depth, m/s.")]
         [Min(0)] public float WaterRestSpeed = 0.5f;
         [Tooltip("Seconds the pose blends from the ragdoll into swimming.")]
         [Min(0)] public float SwimUpBlendTime = 0.5f;
