@@ -66,7 +66,7 @@ Runtime/
     └── Hooks/              what the game implements: input source, mount, water, foot ground, footprints, solid
 └── Netcode/                optional module (NGO): NetworkCharacter, CharacterNetSnapshot, part writer/reader,
                             RemoteCharacterMotion, RagdollSnapshot, RemoteRagdoll, ICharacterNetPart/Frame,
-                            IRagdollNetFrame, ICharacterSpace, INetworkCharacterSide
+                            RagdollState, IRagdollNetState, IRagdollNetFrame, ICharacterSpace, INetworkCharacterSide
 Editor/Gasp/                GaspImport: GASP clips (UEFN Mannequin FBX) as humanoids on the game's model
 Editor/GetUp/               GetUpBaker: every frame of the config's get-ups on the game's character → GetUpPoses
 Editor/Strides/             StrideBaker: every frame of the config's locomotion loops on the game's character → StrideMarkers
@@ -189,6 +189,21 @@ frame's poses on that clock. An upright replica shows such a stream on kinematic
 `RemoteRagdoll.StreamTimeout` (0.25 s) after the last pose (`EndStreamed`); going down it carries on without turning
 the bones off. beach's ride is one: a rider live on a towed ride in the ride's space on the server's clock, then the
 world on the same clock after the throw. `RagdollSnapshot.Frame` (u32) keeps the snapshot at 72 B.
+A ragdoll can be lent: the server's `Lend(client)` makes another machine simulate it (`RagdollSimulator`, a
+host-written NetworkVariable with a hand-over count `Lends`; the owner by default, `Lend(OwnerClientId)` gives it back),
+e.g. a rider's body on the machine that drives the ride, so it rides the same physics step as the ride. Ownership of the
+NetworkObject does not change. `SimulatesRagdoll` is true on the simulator, `RagdollLent` while it is not the owner;
+`CharacterRagdoll.IsReplica` follows "simulated elsewhere" (a body down when it becomes a replica holds still for the
+stream). At each hand-over the old simulator captures the bodies (`Ragdoll.CaptureState`: every bone's position,
+rotation, velocity and spin, in the ragdoll frame) and sends a reliable `RagdollState` (~500 B, plus up to 64 B of the
+game's own `IRagdollNetState`) to the new one, which seeds from it (`Ragdoll.Seed`, `CharacterRagdoll.TakeOver`); if
+none comes within `StateWait` (0.5 s) it goes on from the pose it shows. A non-owner simulator streams the ragdoll in
+the ragdoll frame only (never frame 0), at the tick rate; poses go `SendTo.NotMe` and anything not from the current
+simulator is dropped. A fall on the simulator reaches the owner (its fall counter, the down state) and everyone else; a
+knockdown goes to the simulator. While lent, the owner shows the poses like any replica and its capsule follows the
+shown hips. A lent body that comes to rest down does not get up there (`CharacterRagdoll.GetsUpElsewhere`,
+`WouldGetUp`): the simulator hands it back with `GetUp` set, and the owner gets up from the pose it shows, so the body
+does not jump. `LentDown` (server) tells whether the lent body is down on its simulator.
 `NetworkCharacter.Shown` fires on a replica after every playback update (before its first snapshot too), for a part that
 places the shown body, and `NetworkCharacter.Ragdoll` gives the ragdoll found at spawn.
 

@@ -78,11 +78,53 @@ namespace Rubickanov.Characters
         private Quaternion _streamTurn;
         private Vector3 _streamHips;
         private readonly Quaternion[] _streamRotations = new Quaternion[16];
+        private bool _replica;
+        private bool _getsUpElsewhere;
+        private bool _askedGetUp;
 
         public BodyState State { get; private set; }
 
-        /// <summary>Whether the pose comes from elsewhere, as on a character replicated over the network.</summary>
-        public bool IsReplica { get; set; }
+        /// <summary>
+        /// Whether the pose comes from elsewhere, as on a character replicated over the network or one whose ragdoll
+        /// another machine simulates for now. A body down when it becomes a replica holds still where it is, for the
+        /// stream to move it; one that stops being a replica while down goes on from <see cref="TakeOver"/>.
+        /// </summary>
+        public bool IsReplica
+        {
+            get => _replica;
+            set
+            {
+                if (_replica == value)
+                {
+                    return;
+                }
+
+                _replica = value;
+                _getUpPending = false;
+                _askedGetUp = false;
+                if (value && State == BodyState.Down && _ragdoll != null && _ragdoll.Mode == RagdollMode.Active)
+                {
+                    _ragdoll.Freeze();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Simulated here for another machine that owns the character, e.g. a rider's body on the ride's machine: once it
+        /// would get up, it lies on and raises <see cref="WouldGetUp"/> instead, for the owner to take it back.
+        /// </summary>
+        public bool GetsUpElsewhere
+        {
+            get => _getsUpElsewhere;
+            set
+            {
+                _getsUpElsewhere = value;
+                _askedGetUp = false;
+            }
+        }
+
+        /// <summary>A body down that <see cref="GetsUpElsewhere"/> came to rest (or lay too long), once until it changes.</summary>
+        public event Action WouldGetUp;
 
         public bool IsDown => State == BodyState.Down;
 
@@ -104,11 +146,11 @@ namespace Rubickanov.Characters
         /// <summary>The ragdoll itself, null until the bones are built.</summary>
         public Ragdoll Ragdoll => _ragdoll ??= CreateRagdoll();
 
-        /// <summary>The ragdoll took over. Raised on the owner only.</summary>
+        /// <summary>The ragdoll took over. Raised where it is simulated (not on a replica).</summary>
         public event Action FellDown;
 
         /// <summary>The character starts getting up: lying face up or down, and the nearest-frame get-up's clip and
-        /// start (<see cref="CharacterGetUp.Classic"/> for the face up / down one). Raised on the owner only.</summary>
+        /// start (<see cref="CharacterGetUp.Classic"/> for the face up / down one). Raised where it is simulated.</summary>
         public event Action<CharacterGetUp> GettingUp;
 
         // The bones are left on in the prefab, so they can be seen and edited there; the character starts
@@ -205,7 +247,11 @@ namespace Rubickanov.Characters
         /// <summary>Gets a character that is down up now, whether or not it has come to rest.</summary>
         public void GetUp()
         {
-            if (State == BodyState.Down && !IsReplica)
+            if (State == BodyState.Down && !IsReplica && GetsUpElsewhere)
+            {
+                WouldGetUp?.Invoke();
+            }
+            else if (State == BodyState.Down && !IsReplica)
             {
                 _getUpPending = true;
             }
@@ -286,6 +332,68 @@ namespace Rubickanov.Characters
             }
         }
 
+        /// <summary>
+        /// This machine simulates the body from now on, from the state another machine simulated it in
+        /// (<see cref="Characters.Ragdoll.CaptureState"/>, world space), or with null from the pose shown here, at rest
+        /// on whatever carries it. A body shown upright goes down with it (<see cref="FellDown"/> is raised).
+        /// <paramref name="getUp"/> gets it up at once, as a body come to rest does. A body getting up is left as it is.
+        /// </summary>
+        public void TakeOver(IReadOnlyList<Vector3> positions, IReadOnlyList<Quaternion> rotations,
+            IReadOnlyList<Vector3> velocities, IReadOnlyList<Vector3> spins, bool getUp)
+        {
+            if (!isActiveAndEnabled || Ragdoll == null || State == BodyState.GettingUp)
+            {
+                IsReplica = false;
+                return;
+            }
+
+            IsReplica = false;
+            bool fell = State == BodyState.Upright;
+            if (fell)
+            {
+                _streamed = false;
+                _streamPending = false;
+                Character.Suspend();
+            }
+
+            if (positions == null || positions.Count != _ragdoll.Bones.Count)
+            {
+                if (_ragdoll.Mode == RagdollMode.Off)
+                {
+                    _ragdoll.Activate(Vector3.zero);
+                    _ragdoll.GoLimp();
+                }
+                else
+                {
+                    int n = _ragdoll.Bones.Count;
+                    var at = new Vector3[n];
+                    var turns = new Quaternion[n];
+                    var moves = new Vector3[n];
+                    var spinsNow = new Vector3[n];
+                    _ragdoll.CaptureState(at, turns, moves, spinsNow);
+                    for (int i = 0; i < n; i++)
+                    {
+                        moves[i] = Carrier?.Invoke(at[i]) ?? Vector3.zero;
+                        spinsNow[i] = Vector3.zero;
+                    }
+
+                    _ragdoll.Seed(at, turns, moves, spinsNow);
+                }
+            }
+            else
+            {
+                _ragdoll.Seed(positions, rotations, velocities, spins);
+            }
+
+            if (fell)
+            {
+                LieDown();
+                FellDown?.Invoke();
+            }
+
+            _getUpPending = getUp;
+        }
+
         /// <summary>A replicated character gets up; its capsule is already where the owner stood it.</summary>
         public void ShowGetUp(CharacterGetUp getUp)
         {
@@ -320,12 +428,22 @@ namespace Rubickanov.Characters
 
         private void FixedUpdate()
         {
+            float dt = Time.fixedDeltaTime;
             if (IsReplica)
             {
+                // The owner of a body simulated elsewhere: its capsule follows the hips shown, for its camera and the network.
+                if (State == BodyState.Down && Character.isActiveAndEnabled && Character.IsSuspended
+                    && _ragdoll.Mode != RagdollMode.Off)
+                {
+                    Vector3 shown = _ragdoll.Hips.transform.position;
+                    TryGroundUnder(shown, out Vector3 under, out _);
+                    bool afloat = InWater(shown, out float top, out _) && IsDeep(shown);
+                    FollowHips(shown, under, afloat, top, dt);
+                }
+
                 return;
             }
 
-            float dt = Time.fixedDeltaTime;
             if (State == BodyState.Upright)
             {
                 WatchFall(dt);
@@ -374,14 +492,28 @@ namespace Rubickanov.Characters
             _restTime = lying && slow ? _restTime + dt : 0f;
             bool rested = _lyingTime >= Config.MinDownTime && _restTime >= Config.RestTime;
             bool tooLong = Config.MaxDownTime > 0f && _lyingTime >= Config.MaxDownTime && lying;
-            if (rested || tooLong)
+            if ((rested || tooLong) && GetsUpElsewhere)
+            {
+                // Its owner gets it up: asked once, lying on meanwhile.
+                if (!_askedGetUp)
+                {
+                    _askedGetUp = true;
+                    WouldGetUp?.Invoke();
+                }
+            }
+            else if (rested || tooLong)
             {
                 _getUpPending = true;
             }
 
-            // The capsule stands where the hips lie, so the camera and the network stay with the body; in deep
-            // water it floats where a swimmer would. Thrown off a tilted seat, it turns upright as a standing
-            // character would, not at once, so the camera does not jerk.
+            FollowHips(hips, ground, floating, surface, dt);
+        }
+
+        // The capsule stands where the hips lie, so the camera and the network stay with the body; in deep water it
+        // floats where a swimmer would. Thrown off a tilted seat, it turns upright as a standing character would, not
+        // at once, so the camera does not jerk.
+        private void FollowHips(Vector3 hips, Vector3 ground, bool floating, float surface, float dt)
+        {
             if (floating)
             {
                 ground = new Vector3(hips.x, surface - Character.Settings.FloatDepth, hips.z);
@@ -506,9 +638,9 @@ namespace Rubickanov.Characters
             _getUpPending = false;
             _showPending = false;
             _followPosition = Character.transform.position;
-            if (IsReplica)
+            if (IsReplica || !Character.isActiveAndEnabled)
             {
-                // The owner's capsule collides with nothing while down; the replica's must not block others.
+                // The owner's capsule collides with nothing while down; one this machine does not move must not block others.
                 Character.Motor.Capsule.enabled = false;
             }
 
@@ -833,7 +965,7 @@ namespace Rubickanov.Characters
             _getUpClip = null;
             Animator.EndGetUp();
             Character.Resume();
-            if (IsReplica)
+            if (IsReplica || !Character.isActiveAndEnabled)
             {
                 Character.Motor.Capsule.enabled = true;
             }
