@@ -701,6 +701,75 @@ namespace Rubickanov.Characters
         }
 
         /// <summary>
+        /// The bodies as another machine needs them to simulate on (<see cref="Seed"/>): each bone's position, rotation,
+        /// velocity and spin in the world, from the bodies rather than the transforms.
+        /// </summary>
+        public void CaptureState(IList<Vector3> positions, IList<Quaternion> rotations, IList<Vector3> velocities,
+            IList<Vector3> spins)
+        {
+            for (int i = 0; i < _bones.Length; i++)
+            {
+                Rigidbody body = _bones[i].Body;
+                positions[i] = body.position;
+                rotations[i] = body.rotation;
+                velocities[i] = body.linearVelocity;
+                spins[i] = body.angularVelocity;
+            }
+        }
+
+        /// <summary>
+        /// Makes the ragdoll the body from a state simulated elsewhere (<see cref="CaptureState"/>): every bone where it
+        /// was, at its own velocity, limp, the muscles holding that pose, as on a body that has been down a while.
+        /// </summary>
+        public void Seed(IReadOnlyList<Vector3> positions, IReadOnlyList<Quaternion> rotations,
+            IReadOnlyList<Vector3> velocities, IReadOnlyList<Vector3> spins)
+        {
+            SwitchOn();
+            for (int i = 0; i < _bones.Length; i++)
+            {
+                RagdollBone bone = _bones[i];
+                Rigidbody body = bone.Body;
+                bone.transform.SetPositionAndRotation(positions[i], rotations[i]);
+                body.isKinematic = false;
+                body.interpolation = RigidbodyInterpolation.Interpolate;
+                body.position = positions[i];
+                body.rotation = rotations[i];
+                body.linearVelocity = velocities[i];
+                body.angularVelocity = spins[i];
+                body.WakeUp();
+            }
+
+            for (int i = 1; i < _bones.Length; i++)
+            {
+                RagdollBone bone = _bones[i];
+                int parent = _parents[i];
+                if (bone.Joint != null && parent >= 0)
+                {
+                    Quaternion local = Quaternion.Inverse(rotations[parent]) * rotations[i];
+                    _holdTargets[i] = RagdollMath.TargetRotation(bone.JointSpace, bone.RestLocal, local);
+                    bone.Joint.targetRotation = _holdTargets[i];
+                }
+            }
+
+            MuscleWeight = _config.LimpMuscleWeight;
+            _appliedSpring = _appliedDamper = -1f;
+            if (_flail != null)
+            {
+                _flail.Bind();
+                _flail.Reset();
+                TakeTouch();
+                Touch = 0f;
+                _wet = false;
+            }
+
+            Mode = RagdollMode.Active;
+            IsLimp = true;
+            SetLimits(ConfigurableJointMotion.Limited);
+            IgnoreOwnPairs(false);
+            SetMaterial(_config.LimpMaterial);
+        }
+
+        /// <summary>
         /// Shows the ragdoll on the visible skeleton at <paramref name="weight"/> between the animated pose (0)
         /// and the ragdoll's (1). Run after animation, on the bones as they will be drawn.
         /// </summary>
