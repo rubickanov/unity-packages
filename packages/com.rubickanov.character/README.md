@@ -204,6 +204,13 @@ knockdown goes to the simulator. While lent, the owner shows the poses like any 
 shown hips. A lent body that comes to rest down does not get up there (`CharacterRagdoll.GetsUpElsewhere`,
 `WouldGetUp`): the simulator hands it back with `GetUp` set, and the owner gets up from the pose it shows, so the body
 does not jump. `LentDown` (server) tells whether the lent body is down on its simulator.
+A simulator can give a body up at once with `HandUp()`, e.g. when the vehicle it rides is handed to another machine: it
+captures the state at that instant, parks it with the server and shows the body from its own last pose until the next
+simulator takes it; the server's `Lend(client, anew)` forwards the parked state (`anew` lends again to the machine that
+handed it up). The game's `IRagdollNetState` can make a taker wait for its own world (`CanTake`, at most `StateWait`,
+e.g. until the ride is simulated there) and go on itself from an upright live body's bones (`TakeUpright`). When the
+last simulator is gone without a state, an upright body shown from a stream goes on from the bones as they are drawn
+(`TakeUpright` with the world pose and no game bytes).
 `NetworkCharacter.Shown` fires on a replica after every playback update (before its first snapshot too), for a part that
 places the shown body, and `NetworkCharacter.Ragdoll` gives the ragdoll found at spawn.
 

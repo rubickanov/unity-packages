@@ -74,6 +74,13 @@ namespace Rubickanov.Characters.Netcode
         private RagdollState? _handed;
         // This machine simulates the body for its owner and it came to rest: the owner takes it back.
         private bool _returning;
+        // Simulated here and given up (HandUp): shown here, its state with the host, until the lend moves on.
+        private bool _handedUp;
+        // Host: a state handed up, for the next machine the body is lent to, and who handed it up.
+        private RagdollState? _parked;
+        private ulong _parkedFrom;
+        // The machine given it found the last one gone: the pose shown is all there is.
+        private bool _lastGone;
         private readonly Vector3[] _statePositions = new Vector3[RagdollSnapshot.BoneCount];
         private readonly Quaternion[] _stateRotations = new Quaternion[RagdollSnapshot.BoneCount];
         private readonly Vector3[] _stateVelocities = new Vector3[RagdollSnapshot.BoneCount];
@@ -106,7 +113,11 @@ namespace Rubickanov.Characters.Netcode
         /// or from the pose it shows should none come within <see cref="StateWait"/>. A lent body that comes to rest
         /// goes back to its owner, which gets it up.
         /// </summary>
-        public void Lend(ulong client)
+        /// <param name="anew">
+        /// A hand-over even to the machine that simulates it now, once that machine handed the body up
+        /// (<see cref="HandUp"/>), e.g. given back what it just let go of.
+        /// </param>
+        public void Lend(ulong client, bool anew = false)
         {
             if (!IsServer || !IsSpawned || _ragdoll == null)
             {
@@ -114,7 +125,7 @@ namespace Rubickanov.Characters.Netcode
             }
 
             ulong value = client == OwnerClientId ? ByOwner : client;
-            if (value == _lend.Value.Simulator)
+            if (value == _lend.Value.Simulator && !(anew && _parked.HasValue && _parkedFrom == client))
             {
                 return;
             }
@@ -122,6 +133,80 @@ namespace Rubickanov.Characters.Netcode
             LentDown = false;
             Log.Info($"{name}: ragdoll simulated by client {client} (owner {OwnerClientId})");
             _lend.Value = new RagdollLend { Simulator = value, Count = (ushort)(_lend.Value.Count + 1) };
+            if (_parked.HasValue)
+            {
+                RagdollState parked = _parked.Value;
+                _parked = null;
+                Forward(parked);
+            }
+        }
+
+        /// <summary>
+        /// The machine that simulates the ragdoll gives it up now, e.g. as it lets go of what the body is held on: the
+        /// bodies' state goes to the host for whichever machine it is lent to next (<see cref="Lend"/>), and until that
+        /// one's poses come the body is shown here holding its last pose. Nothing while down (a body in flight stays).
+        /// </summary>
+        public void HandUp()
+        {
+            if (!IsSpawned || _ragdoll == null || !SimulatesRagdoll || _handedUp || _ragdoll.State != BodyState.Upright
+                || _ragdoll.Ragdoll == null || _ragdoll.Ragdoll.Mode == RagdollMode.Off)
+            {
+                return;
+            }
+
+            RagdollState state = CaptureState(_lend.Value.Count);
+            _remoteRagdoll ??= new RemoteRagdoll(_ragdoll, _ragdollFrame);
+            if (TryPose(false, true, Time.fixedTimeAsDouble, out RagdollSnapshot last))
+            {
+                _remoteRagdoll.Add(last);
+            }
+
+            _handedUp = true;
+            _taking = -1;
+            _returning = false;
+            _ragdoll.GetsUpElsewhere = false;
+            _ragdoll.IsReplica = true;
+            Log.Info($"{name}: ragdoll handed up (lend {state.Lend}), shown here");
+            if (IsServer)
+            {
+                Park(state, NetworkManager.LocalClientId);
+            }
+            else
+            {
+                HandUpRpc(state);
+            }
+        }
+
+        // Host: keeps a handed-up state for the next lend, or passes it on to a lend that moved on already.
+        private void Park(RagdollState state, ulong from)
+        {
+            if (state.Lend != _lend.Value.Count)
+            {
+                if (RagdollSimulator != from)
+                {
+                    Forward(state);
+                }
+
+                return;
+            }
+
+            _parked = state;
+            _parkedFrom = from;
+        }
+
+        // Host: a handed-up state to the machine the body is lent to now, as part of this hand-over.
+        private void Forward(RagdollState state)
+        {
+            state.Lend = _lend.Value.Count;
+            if (RagdollSimulator == NetworkManager.LocalClientId)
+            {
+                _handed = state;
+                TakeOverWhenHanded();
+            }
+            else
+            {
+                StateRpc(state, RpcTarget.Single(RagdollSimulator, RpcTargetUse.Temp));
+            }
         }
 
         /// <summary>
@@ -141,6 +226,9 @@ namespace Rubickanov.Characters.Netcode
             _taking = -1;
             _handed = null;
             _returning = false;
+            _handedUp = false;
+            _parked = null;
+            _lastGone = false;
             LentDown = false;
             foreach (ICharacterNetPart part in _parts)
             {
@@ -288,12 +376,12 @@ namespace Rubickanov.Characters.Netcode
             {
                 _remote.Update(Time.deltaTime);
                 Shown?.Invoke();
-                if (!SimulatesRagdoll)
+                if (!SimulatesRagdoll || _handedUp)
                 {
                     _remoteRagdoll?.Update(_remote.Playback);
                 }
             }
-            else if (_remoteRagdoll != null && RagdollLent && !SimulatesRagdoll)
+            else if (_remoteRagdoll != null && (!SimulatesRagdoll || _handedUp))
             {
                 // The owner of a lent body shows it as everyone else does: its poses are on the game's frames' clocks.
                 _remoteRagdoll.Update(NetworkManager.ServerTime.Time - InterpolationDelay);
@@ -349,33 +437,42 @@ namespace Rubickanov.Characters.Netcode
             ulong local = NetworkManager.LocalClientId;
             ulong was = previous.Simulator == ByOwner ? OwnerClientId : previous.Simulator;
             ulong now = current.Simulator == ByOwner ? OwnerClientId : current.Simulator;
-            if (was == now || _ragdoll == null)
+            bool again = was == now && now == local && _handedUp;
+            if (was == now && !again || _ragdoll == null)
             {
                 return;
             }
 
             Log.Info($"{name}: ragdoll from client {was} to {now} (lend {current.Count})");
+            bool handedUp = _handedUp;
             if (was == local)
             {
-                // Handed on: its state to the next machine, shown here from now.
-                RagdollState state = CaptureState(current.Count);
-                _returning = false;
-                _ragdoll.GetsUpElsewhere = false;
-                _ragdoll.IsReplica = true;
-                StateRpc(state, RpcTarget.Single(now, RpcTargetUse.Temp));
+                _handedUp = false;
+                if (!handedUp)
+                {
+                    // Handed on: its state to the next machine, shown here from now.
+                    RagdollState state = CaptureState(current.Count);
+                    _returning = false;
+                    _ragdoll.GetsUpElsewhere = false;
+                    _ragdoll.IsReplica = true;
+                    StateRpc(state, RpcTarget.Single(now, RpcTargetUse.Temp));
+                }
             }
 
             if (now == local)
             {
+                // From a machine that is gone no state comes: on at once from the pose shown.
+                _lastGone = IsServer && was != NetworkManager.ServerClientId
+                    && !NetworkManager.ConnectedClients.ContainsKey(was);
                 _taking = current.Count;
-                _takingSince = Time.unscaledTime;
+                _takingSince = _lastGone ? float.NegativeInfinity : Time.unscaledTime;
             }
             else
             {
                 _taking = -1;
             }
 
-            if (IsOwner && now != local && _remote == null)
+            if (IsOwner && now != local && _remote == null && !handedUp)
             {
                 // The owner shows its own body from now: the stream starts anew.
                 _remoteRagdoll = new RemoteRagdoll(_ragdoll, _ragdollFrame);
@@ -441,7 +538,8 @@ namespace Rubickanov.Characters.Netcode
             }
 
             bool handed = _handed.HasValue && _handed.Value.Lend == (ushort)_taking;
-            if (!handed && Time.unscaledTime - _takingSince < StateWait)
+            bool waited = Time.unscaledTime - _takingSince >= StateWait;
+            if (!handed && !waited || handed && !waited && _ragdollState != null && !_ragdollState.CanTake(_handed.Value))
             {
                 return;
             }
@@ -450,14 +548,30 @@ namespace Rubickanov.Characters.Netcode
             _ragdoll.GetsUpElsewhere = !IsOwner;
             if (!handed)
             {
-                Log.Warn($"{name}: no ragdoll state handed within {StateWait:F2} s, going on from the pose shown", this);
+                if (_lastGone)
+                {
+                    Log.Info($"{name}: its last simulator is gone, going on from the pose shown");
+                }
+                else
+                {
+                    Log.Warn($"{name}: no ragdoll state handed within {StateWait:F2} s, going on from the pose shown", this);
+                }
+
+                _lastGone = false;
                 if (_ragdoll.IsDown)
                 {
                     _ragdoll.TakeOver(null, null, null, null, false);
                 }
                 else
                 {
+                    // A live body shown from the stream goes on from that pose, if the game takes it.
+                    bool shown = _ragdoll.ShowsStreamed && _ragdollState != null;
+                    RagdollState pose = shown ? ShownState() : default;
                     EndShown();
+                    if (shown)
+                    {
+                        _ragdollState.TakeUpright(pose);
+                    }
                 }
 
                 return;
@@ -473,6 +587,11 @@ namespace Rubickanov.Characters.Netcode
             if (!state.HasBody || !state.Down && !_ragdoll.IsDown)
             {
                 EndShown();
+                if (state.HasBody && _ragdollState != null)
+                {
+                    _ragdollState.TakeUpright(state);
+                }
+
                 return;
             }
 
@@ -504,6 +623,24 @@ namespace Rubickanov.Characters.Netcode
 
             Log.Info($"{name}: takes the ragdoll over ({(state.GetUp ? "rested, gets up" : state.Down ? "down" : "live")})");
             _ragdoll.TakeOver(_statePositions, _stateRotations, _stateVelocities, _stateSpins, state.GetUp);
+        }
+
+        // The pose shown here as a state in the world: the bones where they are drawn, at rest.
+        private RagdollState ShownState()
+        {
+            IReadOnlyList<RagdollBone> bones = _ragdoll.Ragdoll.Bones;
+            int n = bones.Count;
+            var state = new RagdollState
+            {
+                Lend = _lend.Value.Count, HasBody = true, Positions = new Vector3[n], Rotations = new Quaternion[n],
+                Velocities = new Vector3[n], Spins = new Vector3[n],
+            };
+            for (int i = 0; i < n; i++)
+            {
+                bones[i].transform.GetPositionAndRotation(out state.Positions[i], out state.Rotations[i]);
+            }
+
+            return state;
         }
 
         // Upright, simulated here from now: whatever stream it showed goes, and the game's own components take it on.
@@ -611,7 +748,7 @@ namespace Rubickanov.Characters.Netcode
             }
 
             SnapshotRpc(snapshot);
-            if (_ragdoll != null && SimulatesRagdoll)
+            if (_ragdoll != null && SimulatesRagdoll && !_handedUp)
             {
                 SendRagdoll(time, down, false);
             }
@@ -620,7 +757,7 @@ namespace Rubickanov.Characters.Netcode
         // A lent ragdoll is sent from the machine that simulates it, at the tick rate, in the game's frames only.
         private void FixedUpdate()
         {
-            if (!IsSpawned || IsOwner || _ragdoll == null || !RagdollLent || !SimulatesRagdoll)
+            if (!IsSpawned || IsOwner || _ragdoll == null || !RagdollLent || !SimulatesRagdoll || _handedUp)
             {
                 return;
             }
@@ -638,41 +775,52 @@ namespace Rubickanov.Characters.Netcode
 
         private void SendRagdoll(double time, bool down, bool framedOnly)
         {
-            // Down, or upright while the game streams a live body (in a frame of its own, never frame 0).
-            bool streams = !down && _ragdollFrame != null && _ragdollFrame.Streams;
-            if ((down || streams && _ragdoll.Ragdoll.Mode != RagdollMode.Off)
-                && _ragdoll.Ragdoll.Bones.Count == RagdollSnapshot.BoneCount)
+            if (TryPose(down, framedOnly, time, out RagdollSnapshot pose))
             {
-                var pose = new RagdollSnapshot { Time = time };
-                Vector3 framePosition = default;
-                Quaternion frameRotation = Quaternion.identity;
-                double frameTime = 0.0;
-                uint frame = _ragdollFrame != null
-                    ? _ragdollFrame.FrameOf(out framePosition, out frameRotation, out frameTime)
-                    : 0;
-                if (frame != 0)
-                {
-                    pose.Frame = frame;
-                    pose.Time = frameTime;
-                    _ragdoll.Ragdoll.CaptureIn(framePosition, frameRotation, out pose.Hips, _captured);
-                }
-                else if (streams || framedOnly)
-                {
-                    // Frame 0 is on the owner's clock: from anywhere else it could not be placed in time.
-                    return;
-                }
-                else
-                {
-                    _ragdoll.Ragdoll.Capture(out pose.Hips, _captured);
-                }
-
-                for (int i = 0; i < _captured.Length; i++)
-                {
-                    pose.SetRotation(i, _captured[i]);
-                }
-
                 RagdollRpc(pose);
             }
+        }
+
+        // The pose to send now: down, or upright while the game streams a live body (in a frame of its own, never 0).
+        private bool TryPose(bool down, bool framedOnly, double time, out RagdollSnapshot pose)
+        {
+            pose = default;
+            bool streams = !down && _ragdollFrame != null && _ragdollFrame.Streams;
+            if (!(down || streams && _ragdoll.Ragdoll.Mode != RagdollMode.Off)
+                || _ragdoll.Ragdoll.Bones.Count != RagdollSnapshot.BoneCount)
+            {
+                return false;
+            }
+
+            pose = new RagdollSnapshot { Time = time };
+            Vector3 framePosition = default;
+            Quaternion frameRotation = Quaternion.identity;
+            double frameTime = 0.0;
+            uint frame = _ragdollFrame != null
+                ? _ragdollFrame.FrameOf(out framePosition, out frameRotation, out frameTime)
+                : 0;
+            if (frame != 0)
+            {
+                pose.Frame = frame;
+                pose.Time = frameTime;
+                _ragdoll.Ragdoll.CaptureIn(framePosition, frameRotation, out pose.Hips, _captured);
+            }
+            else if (streams || framedOnly)
+            {
+                // Frame 0 is on the owner's clock: from anywhere else it could not be placed in time.
+                return false;
+            }
+            else
+            {
+                _ragdoll.Ragdoll.Capture(out pose.Hips, _captured);
+            }
+
+            for (int i = 0; i < _captured.Length; i++)
+            {
+                pose.SetRotation(i, _captured[i]);
+            }
+
+            return true;
         }
 
         // Unreliable: a lost pose is covered by interpolation, and the next one supersedes it anyway.
@@ -740,6 +888,15 @@ namespace Rubickanov.Characters.Netcode
         {
             _handed = state;
             TakeOverWhenHanded();
+        }
+
+        [Rpc(SendTo.Server)]
+        private void HandUpRpc(RagdollState state, RpcParams rpc = default)
+        {
+            if (rpc.Receive.SenderClientId == RagdollSimulator || state.Lend != _lend.Value.Count)
+            {
+                Park(state, rpc.Receive.SenderClientId);
+            }
         }
 
         [Rpc(SendTo.Server)]
