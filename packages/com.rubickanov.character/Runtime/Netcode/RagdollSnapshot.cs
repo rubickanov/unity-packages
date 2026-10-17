@@ -6,16 +6,22 @@ using UnityEngine;
 namespace Rubickanov.Characters.Netcode
 {
     /// <summary>
-    /// A downed character's ragdoll on one simulation step, as Rubickanov.Characters.Ragdoll.Capture gives it: the hips'
-    /// position in the root's space and every bone's rotation, each packed into four bytes.
+    /// A character's ragdoll on one simulation step, as Rubickanov.Characters.Ragdoll.Capture gives it: the hips'
+    /// position and rotation in a frame's space and every other bone's rotation, each packed into four bytes. Frame 0 is
+    /// the root's space on the owner's clock (a downed body); any other is the game's (<see cref="IRagdollNetFrame"/>).
     /// </summary>
     public struct RagdollSnapshot : INetworkSerializeByMemcpy
     {
         /// <summary>The bones RagdollBuilder builds; a ragdoll with another count is not replicated.</summary>
         public const int BoneCount = 12;
 
-        /// <summary>The owner's Time.fixedTime of the step, the same as the CharacterSnapshot sent with it.</summary>
+        /// <summary>
+        /// Frame 0: the owner's Time.fixedTime of the step, the same as the CharacterSnapshot sent with it; any other:
+        /// the time on the frame's clock.
+        /// </summary>
         public double Time;
+        /// <summary>The space the hips are in: 0 for the root's, any other the game's.</summary>
+        public uint Frame;
         public Vector3 Hips;
         // Fixed fields rather than an array, so the struct copies as it is and allocates nothing.
         private uint _r0, _r1, _r2, _r3, _r4, _r5, _r6, _r7, _r8, _r9, _r10, _r11;

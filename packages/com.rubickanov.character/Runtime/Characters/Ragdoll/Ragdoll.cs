@@ -643,15 +643,40 @@ namespace Rubickanov.Characters
             }
         }
 
+        /// <summary>
+        /// As <see cref="Capture"/>, the hips in the space of a frame at <paramref name="framePosition"/> and
+        /// <paramref name="frameRotation"/>, from the bodies rather than the transforms: in the physics step an
+        /// interpolated bone's transform is where it was drawn, not where its body is.
+        /// </summary>
+        public void CaptureIn(Vector3 framePosition, Quaternion frameRotation, out Vector3 hipsPosition,
+            IList<Quaternion> rotations)
+        {
+            Quaternion toFrame = Quaternion.Inverse(frameRotation);
+            Rigidbody hips = _bones[0].Body;
+            hipsPosition = toFrame * (hips.position - framePosition);
+            rotations[0] = toFrame * hips.rotation;
+            for (int i = 1; i < _bones.Length; i++)
+            {
+                rotations[i] = Quaternion.Inverse(_bones[_parents[i]].Body.rotation) * _bones[i].Body.rotation;
+            }
+        }
+
         /// <summary>Places kinematic bones on a pose from <see cref="Capture"/>, relative to the root as it is now.</summary>
         public void Place(Vector3 hipsPosition, IReadOnlyList<Quaternion> rotations)
+        {
+            _root.GetPositionAndRotation(out Vector3 rootPosition, out Quaternion rootRotation);
+            Place(rootPosition, rootRotation, hipsPosition, rotations);
+        }
+
+        /// <summary>Places kinematic bones on a pose from <see cref="CaptureIn"/>, in a frame where it is now.</summary>
+        public void Place(Vector3 rootPosition, Quaternion rootRotation, Vector3 hipsPosition,
+            IReadOnlyList<Quaternion> rotations)
         {
             if (Mode != RagdollMode.Kinematic)
             {
                 return;
             }
 
-            _root.GetPositionAndRotation(out Vector3 rootPosition, out Quaternion rootRotation);
             Vector3[] positions = _placePosition;
             Quaternion[] worldRotations = _placeRotation;
             positions[0] = rootPosition + rootRotation * hipsPosition;

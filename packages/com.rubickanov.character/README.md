@@ -66,7 +66,7 @@ Runtime/
     └── Hooks/              what the game implements: input source, mount, water, foot ground, footprints, solid
 └── Netcode/                optional module (NGO): NetworkCharacter, CharacterNetSnapshot, part writer/reader,
                             RemoteCharacterMotion, RagdollSnapshot, RemoteRagdoll, ICharacterNetPart/Frame,
-                            ICharacterSpace, INetworkCharacterSide
+                            IRagdollNetFrame, ICharacterSpace, INetworkCharacterSide
 Editor/Gasp/                GaspImport: GASP clips (UEFN Mannequin FBX) as humanoids on the game's model
 Editor/GetUp/               GetUpBaker: every frame of the config's get-ups on the game's character → GetUpPoses
 Editor/Strides/             StrideBaker: every frame of the config's locomotion loops on the game's character → StrideMarkers
@@ -151,7 +151,7 @@ on its own step whenever a jump, landing, knockdown, get-up, sitting down or sta
 or a part asks for it (unreliable RPC to everyone else). Other machines play the snapshots back `InterpolationDelay`
 behind (`Remote`, a `RemoteCharacterMotion` that drives the animator) and fire the events when playback reaches them.
 While the ragdoll is the body, its bones go too (`RagdollSnapshot`, 72 B per step, played by `RemoteRagdoll` on the same
-clock). `Knockdown(impulse, point)` works on any machine: a non-owner sends it to the owner (reliable). Ownership of a
+clock, or a ragdoll frame's, below). `Knockdown(impulse, point)` works on any machine: a non-owner sends it to the owner (reliable). Ownership of a
 character is fixed: neither spawn order nor despawn handles an owner change.
 
 What a snapshot carries is what the package simulates: 55 B written field by field — time (f64), position, rotation, aim,
@@ -179,6 +179,16 @@ public sealed class EmotePart : MonoBehaviour, ICharacterNetPart
 A frame part (`ICharacterNetFrame`, at most one) sends the pose in a moving space: `ToFrame` turns the owner's pose into
 it at send, `Space(reader)` gives the replica its own copy of that space (`ICharacterSpace`: `ToWorld`, `PointVelocity`),
 or null for the world. beach's deck is one: the vehicle's NetworkObjectId (1–2 B) and the pose in the deck's space.
+A ragdoll frame (`IRagdollNetFrame`, at most one, any component) does the same for the bones, and lets a live body be
+streamed while upright: `Streams` (owner, each upright step) sends the pose then too; `FrameOf` gives the frame id (0 =
+the root's space on the owner's clock, as without it), its pose on this machine and the time on its clock, and the hips
+go in that frame (`Ragdoll.CaptureIn`, from the bodies: an interpolated bone's transform lags in the physics step);
+`Resolve(frame)` gives the replica its copy of the space and the time it is shown at, and `RemoteRagdoll` plays the
+frame's poses on that clock. An upright replica shows such a stream on kinematic bones instead of its animation
+(`CharacterRagdoll.ShowStreamed`, placed in its LateUpdate after the root moved; `ShowsStreamed`), back to the animation
+`RemoteRagdoll.StreamTimeout` (0.25 s) after the last pose (`EndStreamed`); going down it carries on without turning
+the bones off. beach's ride is one: a rider live on a towed ride in the ride's space on the server's clock, then the
+world on the same clock after the throw. `RagdollSnapshot.Frame` (u32) keeps the snapshot at 72 B.
 `NetworkCharacter.Shown` fires on a replica after every playback update (before its first snapshot too), for a part that
 places the shown body, and `NetworkCharacter.Ragdoll` gives the ragdoll found at spawn.
 

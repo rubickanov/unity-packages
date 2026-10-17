@@ -10,7 +10,8 @@ namespace Rubickanov.Characters.Netcode
     /// Replicates a character, a player's or a bot's. The owner simulates it and sends snapshots of each step;
     /// everyone else plays them back, so movement feels instant for the owner and animations match what others
     /// actually see. Animations themselves are never sent. A downed character's ragdoll is sent bone by bone, since
-    /// physics does not come out the same twice; its get-up is replayed from an event. The game's data rides in the same
+    /// physics does not come out the same twice (a live one too while the game streams it, <see cref="IRagdollNetFrame"/>);
+    /// its get-up is replayed from an event. The game's data rides in the same
     /// snapshots through <see cref="ICharacterNetPart"/>s, and its glue (camera, input, spawn point) is an
     /// <see cref="INetworkCharacterSide"/>, both components anywhere on the character. Ownership never changes.
     /// </summary>
@@ -31,6 +32,7 @@ namespace Rubickanov.Characters.Netcode
         private readonly List<ICharacterNetPart> _parts = new();
         private readonly List<INetworkCharacterSide> _sides = new();
         private ICharacterNetFrame _frame;
+        private IRagdollNetFrame _ragdollFrame;
         private RemoteCharacterMotion _remote;
         private CharacterRagdoll _ragdoll;
         private RemoteRagdoll _remoteRagdoll;
@@ -68,6 +70,7 @@ namespace Rubickanov.Characters.Netcode
             GetComponentsInChildren(true, _parts);
             GetComponentsInChildren(true, _sides);
             _frame = null;
+            _ragdollFrame = GetComponentInChildren<IRagdollNetFrame>(true);
             foreach (ICharacterNetPart part in _parts)
             {
                 if (part is ICharacterNetFrame frame)
@@ -160,7 +163,7 @@ namespace Rubickanov.Characters.Netcode
             if (_ragdoll != null)
             {
                 _ragdoll.IsReplica = true;
-                _remoteRagdoll = new RemoteRagdoll(_ragdoll);
+                _remoteRagdoll = new RemoteRagdoll(_ragdoll, _ragdollFrame);
                 _remote.FellDown += _ragdoll.ShowDown;
                 _remote.GettingUp += _ragdoll.ShowGetUp;
             }
@@ -284,10 +287,33 @@ namespace Rubickanov.Characters.Netcode
 
             SnapshotRpc(snapshot);
 
-            if (down && _ragdoll.Ragdoll.Bones.Count == RagdollSnapshot.BoneCount)
+            // Down, or upright while the game streams a live body (in a frame of its own, never frame 0).
+            bool streams = !down && _ragdollFrame != null && _ragdollFrame.Streams;
+            if ((down || streams && _ragdoll.Ragdoll.Mode != RagdollMode.Off)
+                && _ragdoll.Ragdoll.Bones.Count == RagdollSnapshot.BoneCount)
             {
                 var pose = new RagdollSnapshot { Time = time };
-                _ragdoll.Ragdoll.Capture(out pose.Hips, _captured);
+                Vector3 framePosition = default;
+                Quaternion frameRotation = Quaternion.identity;
+                double frameTime = 0.0;
+                uint frame = _ragdollFrame != null
+                    ? _ragdollFrame.FrameOf(out framePosition, out frameRotation, out frameTime)
+                    : 0;
+                if (frame != 0)
+                {
+                    pose.Frame = frame;
+                    pose.Time = frameTime;
+                    _ragdoll.Ragdoll.CaptureIn(framePosition, frameRotation, out pose.Hips, _captured);
+                }
+                else if (streams)
+                {
+                    return;
+                }
+                else
+                {
+                    _ragdoll.Ragdoll.Capture(out pose.Hips, _captured);
+                }
+
                 for (int i = 0; i < _captured.Length; i++)
                 {
                     pose.SetRotation(i, _captured[i]);
