@@ -144,6 +144,12 @@ namespace Rubickanov.Characters
         /// <summary>The muscles' reflex in the air, null when the flail is off.</summary>
         public FlailReflex Flail => _flail;
 
+        /// <summary>
+        /// The force the bones pressed on anything not the character's own in the last driven step, N; 0 when the
+        /// flail is off.
+        /// </summary>
+        public float Touch { get; private set; }
+
         /// <summary>Whether the pose should be read every frame: the muscles reach for the flail clip playing.</summary>
         public bool ReadsFlailPose => _flail != null && _flail.State == FlailState.Flailing;
 
@@ -415,6 +421,7 @@ namespace Rubickanov.Characters
                 _flail.Bind();
                 _flail.Reset();
                 TakeTouch();
+                Touch = 0f;
                 _wet = false;
             }
 
@@ -466,6 +473,7 @@ namespace Rubickanov.Characters
             if (_flail != null)
             {
                 float touch = TakeTouch();
+                Touch = touch;
                 if (!_wet)
                 {
                     if (_flail.Step(touch, Asleep(), dt, out bool ended))

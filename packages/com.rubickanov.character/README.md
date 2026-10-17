@@ -126,6 +126,7 @@ Game-specific behaviour enters through these hooks; nothing in the package names
 | `ICharacterSolid` | component on a dynamic body | `StopsCharacters`: the capsule stops at it and does not stand on it |
 | `ICharacterMount`, `ClimbPoint` | `CharacterMotor.Mount` | Seat anchor, pose, hand/foot holds, hand shapes |
 | `IClimbable` | `Climbables.Add` / `Remove` | Answers a swimmer's `ClimbQuery` with a `ClimbEdge` to pull up onto (`ClimbPoint` is one; reach over the shoulders is `MovementConfig.ClimbReachUp`) |
+| `IRagdollWater` | `CharacterRagdoll.WaterHook` | Each step a downed body is simulated: `Float` as configured, or the game takes the water over (`Pushed` wet, `Carried` dry), e.g. a body skipping over the sea; `BodyGravity` is what pulls it, `Ragdoll.Touch` how hard it presses on anything else (flail on) |
 | `Carrier` | `CharacterRagdoll.Carrier` | Velocity of what the lying body rests on (a moving deck) |
 | `SpeedMultiplier`, `JumpScale`, `GravityOverride` | `CharacterMotor` | Per-game scaling of the walk, jump and gravity |
 
