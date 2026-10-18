@@ -36,6 +36,7 @@ namespace Rubickanov.Characters
         private IFootGround _footGround;
         private IFootGround _bodyGround;
         private IFootprints _footprints;
+        private int _ignoredGround;
 
         /// <summary>Told each time a foot is set down; null: no one.</summary>
         public IFootprints Footprints
@@ -61,6 +62,24 @@ namespace Rubickanov.Characters
                 if (_feet != null)
                 {
                     _feet.Ground = value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Layers the feet and the get-up contacts never take for ground, on top of the config's: e.g. the layer
+        /// of ragdoll shells, whose bones stand around the legs.
+        /// </summary>
+        public int IgnoredGroundLayers
+        {
+            get => _ignoredGround;
+            set
+            {
+                _ignoredGround = value;
+                if (_feet != null)
+                {
+                    _feet.IgnoredLayers = value;
+                    _contacts.IgnoredLayers = value;
                 }
             }
         }
@@ -107,8 +126,9 @@ namespace Rubickanov.Characters
 
             _body = Animator.Character.transform;
             _model = _animator.transform;
-            _feet = new FootPlacement(_animator, _body) { Ground = _footGround, Prints = _footprints };
-            _contacts = new GetUpContacts(_animator, _body) { Ground = _bodyGround };
+            _feet = new FootPlacement(_animator, _body)
+                { Ground = _footGround, Prints = _footprints, IgnoredLayers = _ignoredGround };
+            _contacts = new GetUpContacts(_animator, _body) { Ground = _bodyGround, IgnoredLayers = _ignoredGround };
             _look = new HeadLook(_animator, _model, Config.LookBones);
             _lean = new TurnLean(_animator, _model, Config.LeanBones);
             _limbs = new MountLimbs(_animator);

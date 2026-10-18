@@ -52,6 +52,9 @@ namespace Rubickanov.Characters
         /// <summary>Told each time a foot is set down; null: no one.</summary>
         public IFootprints Prints { get; set; }
 
+        /// <summary>Layers never taken for ground, on top of the config's.</summary>
+        public int IgnoredLayers { get; set; }
+
         public FootPlacement(Animator animator, Transform body)
         {
             _body = body;
@@ -200,7 +203,7 @@ namespace Rubickanov.Characters
             float lift = Vector3.Dot(point - root, up);
             Vector3 origin = point + up * (config.ProbeHeight - lift);
             float length = config.ProbeHeight + config.MaxStepDown;
-            int count = Physics.RaycastNonAlloc(origin, -up, _hits, length, config.GroundLayers,
+            int count = Physics.RaycastNonAlloc(origin, -up, _hits, length, config.GroundLayers & ~IgnoredLayers,
                 QueryTriggerInteraction.Ignore);
 
             IFootGround provider = Ground;

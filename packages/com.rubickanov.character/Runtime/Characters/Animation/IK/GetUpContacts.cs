@@ -39,6 +39,9 @@ namespace Rubickanov.Characters
         /// <summary>Ground besides what physics hits, taken where it is higher (like <see cref="FootPlacement.Ground"/>); null: physics alone.</summary>
         public IFootGround Ground { get; set; }
 
+        /// <summary>Layers never taken for ground, on top of the config's.</summary>
+        public int IgnoredLayers { get; set; }
+
         public GetUpContacts(Animator animator, Transform body)
         {
             _body = body;
@@ -162,7 +165,7 @@ namespace Rubickanov.Characters
             float ground = Vector3.Dot(_body.position, up);
             Vector3 origin = point + up * config.ProbeHeight;
             float length = config.ProbeHeight + config.MaxStepDown;
-            int count = Physics.RaycastNonAlloc(origin, -up, _hits, length, config.GroundLayers,
+            int count = Physics.RaycastNonAlloc(origin, -up, _hits, length, config.GroundLayers & ~IgnoredLayers,
                 QueryTriggerInteraction.Ignore);
             IFootGround provider = Ground;
             float nearest = float.PositiveInfinity;
