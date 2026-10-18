@@ -143,5 +143,10 @@ namespace Rubickanov.Characters
         [Min(0)] public float WaterRestSpeed = 0.5f;
         [Tooltip("Seconds the pose blends from the ragdoll into swimming.")]
         [Min(0)] public float SwimUpBlendTime = 0.5f;
+
+        [Header("Shell")]
+        [Tooltip("Layer of an upright body's shell: its bones kinematic on the animated pose, for other ragdolls to " +
+                 "hit (CharacterRagdoll.Shell). -1: no shell. The game sets which layers it meets.")]
+        [Range(-1, 31)] public int ShellLayer = -1;
     }
 }

@@ -81,6 +81,7 @@ namespace Rubickanov.Characters
         private bool _replica;
         private bool _getsUpElsewhere;
         private bool _askedGetUp;
+        private bool _shell;
 
         public BodyState State { get; private set; }
 
@@ -146,6 +147,31 @@ namespace Rubickanov.Characters
         /// <summary>The ragdoll itself, null until the bones are built.</summary>
         public Ragdoll Ragdoll => _ragdoll ??= CreateRagdoll();
 
+        /// <summary>
+        /// Whether the body wants a shell: its ragdoll bones kinematic on the animated pose, on
+        /// <see cref="RagdollConfig.ShellLayer"/>, for other ragdolls to hit. Shelled while upright with the bones
+        /// otherwise off and no stream shown, here or on a replica; a fall goes on from the shell's bones, and the shell
+        /// comes back once the body stands again while still wanted. Nothing without a shell layer.
+        /// </summary>
+        public bool Shell
+        {
+            get => _shell;
+            set
+            {
+                _shell = value;
+                if (!value && Shelled)
+                {
+                    _ragdoll.TurnOff();
+                }
+            }
+        }
+
+        /// <summary>Whether the body is a shell now (<see cref="Shell"/>).</summary>
+        public bool Shelled => _ragdoll != null && _ragdoll.Mode == RagdollMode.Shell;
+
+        /// <summary>A bone of the shell was hit, on whatever machine shows it.</summary>
+        public event Action<ShellHit> ShellHit;
+
         /// <summary>The ragdoll took over. Raised where it is simulated (not on a replica).</summary>
         public event Action FellDown;
 
@@ -172,6 +198,10 @@ namespace Rubickanov.Characters
         private void OnDisable()
         {
             Everyone.Remove(this);
+            if (Shelled)
+            {
+                _ragdoll.TurnOff();
+            }
             if (State != BodyState.Upright)
             {
                 Stand();
@@ -265,8 +295,9 @@ namespace Rubickanov.Characters
                 return;
             }
 
-            // Bones already showing a stream go on from where they are.
-            if (_ragdoll.Mode != RagdollMode.Off && !(_streamed && _ragdoll.Mode == RagdollMode.Kinematic))
+            // Bones already showing a stream, or a shell, go on from where they are.
+            if (_ragdoll.Mode != RagdollMode.Off && _ragdoll.Mode != RagdollMode.Shell
+                && !(_streamed && _ragdoll.Mode == RagdollMode.Kinematic))
             {
                 _ragdoll.TurnOff();
             }
@@ -358,7 +389,7 @@ namespace Rubickanov.Characters
 
             if (positions == null || positions.Count != _ragdoll.Bones.Count)
             {
-                if (_ragdoll.Mode == RagdollMode.Off)
+                if (_ragdoll.Mode == RagdollMode.Off || _ragdoll.Mode == RagdollMode.Shell)
                 {
                     _ragdoll.Activate(Vector3.zero);
                     _ragdoll.GoLimp();
@@ -429,6 +460,7 @@ namespace Rubickanov.Characters
         private void FixedUpdate()
         {
             float dt = Time.fixedDeltaTime;
+            StepShell();
             if (IsReplica)
             {
                 // The owner of a body simulated elsewhere: its capsule follows the hips shown, for its camera and the network.
@@ -509,6 +541,41 @@ namespace Rubickanov.Characters
             FollowHips(hips, ground, floating, surface, dt);
         }
 
+        // A wanted shell starts on an upright body whose bones are off and follows the pose each step; it ends when
+        // unwanted or once a stream shows.
+        private void StepShell()
+        {
+            if (_ragdoll == null || State != BodyState.Upright)
+            {
+                return;
+            }
+
+            bool wanted = _shell && !_streamed && Config.ShellLayer >= 0;
+            if (!wanted)
+            {
+                if (_ragdoll.Mode == RagdollMode.Shell)
+                {
+                    _ragdoll.TurnOff();
+                }
+
+                return;
+            }
+
+            if (_ragdoll.Mode == RagdollMode.Off)
+            {
+                _ragdoll.Shell(Config.ShellLayer, RaiseShellHit);
+            }
+
+            if (_ragdoll.Mode != RagdollMode.Shell)
+            {
+                return;
+            }
+
+            _ragdoll.FollowPose();
+        }
+
+        private void RaiseShellHit(ShellHit hit) => ShellHit?.Invoke(hit);
+
         // The capsule stands where the hips lie, so the camera and the network stay with the body; in deep water it
         // floats where a swimmer would. Thrown off a tilted seat, it turns upright as a standing character would, not
         // at once, so the camera does not jerk.
@@ -547,7 +614,7 @@ namespace Rubickanov.Characters
             {
                 case BodyState.Upright:
                     // What the ragdoll takes over from: the pose as drawn, and how fast it moves.
-                    if (!IsReplica)
+                    if (!IsReplica || _ragdoll.Mode == RagdollMode.Shell)
                     {
                         _ragdoll.SamplePose(Time.deltaTime);
                     }

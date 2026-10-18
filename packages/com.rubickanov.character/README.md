@@ -61,7 +61,7 @@ Runtime/
     ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape, GetUpPoses, PoseInertia, StrideMarkers
     │   └── IK/             CharacterRig + config, FootPlacement, HeadLook, TurnLean, GetUpContacts, MountLimbs
     ├── Ragdoll/            CharacterRagdoll (+ .GetUp: nearest-frame get-up), Ragdoll, RagdollBone, RagdollConfig,
-    │                       GetUpSpot, FlailReflex, RagdollTouch, CharacterGetUp
+    │                       GetUpSpot, FlailReflex, RagdollTouch, ShellContact (+ ShellHit), CharacterGetUp
     ├── Climb/              CharacterClimb, IClimbable, ClimbPoint
     └── Hooks/              what the game implements: input source, mount, water, foot ground, footprints, solid
 └── Netcode/                optional module (NGO): NetworkCharacter, CharacterNetSnapshot, part writer/reader,
@@ -80,7 +80,7 @@ Every tunable lives in a config asset the game owns: **MovementConfig** (speeds,
 (feet, head look, lean, seat grips, hand shapes), **CharacterAnimationsConfig** (clips), **RagdollConfig** (muscles,
 falling, get-up, water), **CharacterProportions** (build data for a game's character builder).
 
-A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Eight config fields are where games chose differently; their defaults are the conservative side:
+A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Nine config fields are where games chose differently; their defaults are the conservative side:
 
 | Field | Default | Other value |
 |---|---|---|
@@ -90,6 +90,7 @@ A feature is off until the game turns it on: swimming needs a `Water`, footprint
 | `RagdollConfig.Flail` | `false`: in the air the body holds the pose it fell in and fades to limp over `LimpTime` | `true` (with three `CharacterAnimationsConfig.Flails` clips: head first, along the fall, feet first): `FlailReflex` drives the joints toward the flail clip's pose (`FlailStrength` × peak torque, `FlailHz`), the clip chosen by the pelvis's up every `FlailChooseTime`; a touch over `FlailTouchForce` eases them to limp over `FlailEaseTime` (arms `FlailArmsTime`); water lets go at once. Bones get a `RagdollTouch` only then |
 | `CharacterAnimationsConfig.GetUps` (+ `GetUpPoses`) | empty: the body gets up by `GetUpFaceUp` / `GetUpFaceDown`, the clip held on the ragdoll's pose and blended in over `GetUpBlendTime` | a list of get-up clips and their baked `GetUpPoses`: the get-up starts from the frame, clip and heading nearest the lying body (see Nearest-frame get-up) |
 | `CharacterAnimationsConfig.InertialGetUp` (and `InertialJump`, `InertialLand`, `InertialTurn`, `InertialWaterEntry`) | `false`: clips cross-fade | `true` (with a `PoseInertia` on the model, `CharacterAnimator.Inertia`): the new clip plays at once and the offset to the old pose dies away over `GetUpInertia` / `SwitchInertia` s, keeping its velocity |
+| `RagdollConfig.ShellLayer` | `-1`: no shell; an upright body has no bones on, so nothing body-shaped for a flying ragdoll to hit | a layer (the game makes it meet only its ragdoll layer): `CharacterRagdoll.Shell = true` turns an upright body's bones on as a shell (see Shell) |
 | `RagdollConfig.SolverVelocityIterations` | `1` (the physics default) | e.g. `4`: stiffer bones on a moving deck |
 | `CharacterRigConfig.MountGrip` | `Wrist`: the wrist goes onto the hold, the hand keeps the clip's turn | `Palm`: the hand takes the hold's turn exactly (palm faces Z, fingers along Y), fingers shaped Fist/OpenPalm |
 
@@ -137,6 +138,31 @@ ragdoll.Throw(seatVelocity + Vector3.up * 2f);
 
 // What the player asked for this step, before walls and slopes (e.g. to push a ball).
 Vector3 wanted = motor.WantedVelocity;
+```
+
+## Shell
+
+An upright character's capsule is its body; its ragdoll bones are off, so a flying ragdoll passes through it. With
+`RagdollConfig.ShellLayer` set, `CharacterRagdoll.Shell = true` asks for a shell (`RagdollMode.Shell`): the bones on,
+kinematic, interpolation off, every bone collider on the shell layer (its own layer given back after), moved each
+physics step by `MovePosition` / `MoveRotation` onto the animated pose as drawn last frame (after animation and IK),
+put on the root as it is at the end of the step: the KCC's transient pose, the follow target when suspended (a seat),
+the drawn root on a replica. Moved, not placed, so contacts carry the body's real velocity; a pose jump
+(`Ragdoll.ClearSamples`) or a step over 2 m places it instead. The shell is a want: it starts on an upright body whose
+bones are otherwise off and that shows no stream, on any machine (a replica reads its drawn pose too), ends when
+unwanted, and comes back after a get-up while still wanted. `Shelled` says whether it is on now.
+
+- `ShellHit` (bone, other collider, first contact point, normal out of the other body into the bone, relative velocity,
+  impulse) is raised by `CharacterRagdoll.ShellHit` from a `ShellContact` that the bones carry only while shelled.
+- A fall (`Knockdown`, `Throw`, `TakeOver`, a replica's `ShowDown` / stream) goes on from the shell's bones where they are
+  (no rest-pose detour, no teleport), layers back, with the pose's velocity plus the capsule's as from an upright body;
+  if the pose was moved away from the shell meanwhile (over 0.3 m, e.g. the root put on a seat), from the pose as before.
+- `Ragdoll.ShowsBody` (active or kinematic) is "the bones are the body"; a shell is not. `Ragdoll.ShellOffset()` is the
+  farthest bone from the drawn pose, m. Profiler marker `Ragdoll.Shell`.
+
+```csharp
+ragdoll.Shell = nearFastRagdoll;          // the game decides who; the package keeps the shell on the pose
+ragdoll.ShellHit += hit => Decide(hit);   // hit.Other is the flyer's bone collider
 ```
 
 ## Netcode (optional)

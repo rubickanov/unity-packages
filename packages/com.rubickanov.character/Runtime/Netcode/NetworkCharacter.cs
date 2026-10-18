@@ -149,7 +149,7 @@ namespace Rubickanov.Characters.Netcode
         public void HandUp()
         {
             if (!IsSpawned || _ragdoll == null || !SimulatesRagdoll || _handedUp || _ragdoll.State != BodyState.Upright
-                || _ragdoll.Ragdoll == null || _ragdoll.Ragdoll.Mode == RagdollMode.Off)
+                || _ragdoll.Ragdoll == null || !_ragdoll.Ragdoll.ShowsBody)
             {
                 return;
             }
@@ -486,7 +486,7 @@ namespace Rubickanov.Characters.Netcode
         {
             var state = new RagdollState { Lend = lend, Down = _ragdoll.IsDown, GetUp = _returning };
             Ragdoll ragdoll = _ragdoll.Ragdoll;
-            if (ragdoll != null && ragdoll.Mode != RagdollMode.Off && ragdoll.Bones.Count == RagdollSnapshot.BoneCount)
+            if (ragdoll != null && ragdoll.ShowsBody && ragdoll.Bones.Count == RagdollSnapshot.BoneCount)
             {
                 int n = ragdoll.Bones.Count;
                 state.HasBody = true;
@@ -786,7 +786,7 @@ namespace Rubickanov.Characters.Netcode
         {
             pose = default;
             bool streams = !down && _ragdollFrame != null && _ragdollFrame.Streams;
-            if (!(down || streams && _ragdoll.Ragdoll.Mode != RagdollMode.Off)
+            if (!(down || streams && _ragdoll.Ragdoll.ShowsBody)
                 || _ragdoll.Ragdoll.Bones.Count != RagdollSnapshot.BoneCount)
             {
                 return false;
