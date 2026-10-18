@@ -150,7 +150,9 @@ put on the root as it is at the end of the step: the KCC's transient pose, the f
 the drawn root on a replica. Moved, not placed, so contacts carry the body's real velocity; a pose jump
 (`Ragdoll.ClearSamples`) or a step over 2 m places it instead. The shell is a want: it starts on an upright body whose
 bones are otherwise off and that shows no stream, on any machine (a replica reads its drawn pose too), ends when
-unwanted, and comes back after a get-up while still wanted. `Shelled` says whether it is on now.
+unwanted, and comes back after a get-up while still wanted. `Shelled` says whether it is on now. Asked for where it
+can start, it starts at once (its bones placed on the pose), so a caller in the physics step can, e.g., let bones
+already inside it pass through before the step is simulated.
 
 - `ShellHit` (bone, other collider, first contact point, normal out of the other body into the bone, relative velocity,
   impulse) is raised by `CharacterRagdoll.ShellHit` from a `ShellContact` that the bones carry only while shelled.

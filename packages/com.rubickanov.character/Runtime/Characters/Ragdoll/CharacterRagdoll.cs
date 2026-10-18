@@ -151,7 +151,8 @@ namespace Rubickanov.Characters
         /// Whether the body wants a shell: its ragdoll bones kinematic on the animated pose, on
         /// <see cref="RagdollConfig.ShellLayer"/>, for other ragdolls to hit. Shelled while upright with the bones
         /// otherwise off and no stream shown, here or on a replica; a fall goes on from the shell's bones, and the shell
-        /// comes back once the body stands again while still wanted. Nothing without a shell layer.
+        /// comes back once the body stands again while still wanted. Nothing without a shell layer. Asked for, it starts
+        /// at once where it can, so a caller in the physics step can see its bones before the step is simulated.
         /// </summary>
         public bool Shell
         {
@@ -162,6 +163,10 @@ namespace Rubickanov.Characters
                 if (!value && Shelled)
                 {
                     _ragdoll.TurnOff();
+                }
+                else if (value && !Shelled && isActiveAndEnabled)
+                {
+                    StepShell();
                 }
             }
         }
