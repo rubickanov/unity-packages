@@ -353,7 +353,13 @@ namespace Rubickanov.Characters.Netcode
         /// Knocks the character down with <paramref name="impulse"/> (N·s) at <paramref name="point"/>, from any
         /// machine: the ragdoll's simulator simulates the fall and everyone else sees it replicated.
         /// </summary>
-        public void Knockdown(Vector3 impulse, Vector3 point)
+        public void Knockdown(Vector3 impulse, Vector3 point) => Knockdown(impulse, point, NoStriker);
+
+        /// <summary>
+        /// As <see cref="Knockdown(Vector3, Vector3)"/>, naming the network object that struck it: the machine that
+        /// simulates the fall raises <see cref="KnockedBy"/> with it, so the two can pass through each other there.
+        /// </summary>
+        public void Knockdown(Vector3 impulse, Vector3 point, ulong striker)
         {
             if (!IsSpawned)
             {
@@ -362,11 +368,30 @@ namespace Rubickanov.Characters.Netcode
 
             if (!SimulatesRagdoll)
             {
-                KnockdownRpc(impulse, point, RpcTarget.Single(RagdollSimulator, RpcTargetUse.Temp));
+                KnockdownRpc(impulse, point, striker, RpcTarget.Single(RagdollSimulator, RpcTargetUse.Temp));
             }
             else if (_ragdoll != null)
             {
-                _ragdoll.Knockdown(impulse, point);
+                Knock(impulse, point, striker);
+            }
+        }
+
+        /// <summary>No striker named with a knockdown.</summary>
+        public const ulong NoStriker = ulong.MaxValue;
+
+        /// <summary>
+        /// The ragdoll was just knocked down here, on its simulator, by a knockdown that named its striker (a
+        /// <see cref="NetworkObject.NetworkObjectId"/>); raised after the fall has started.
+        /// </summary>
+        public event Action<ulong> KnockedBy;
+
+        private void Knock(Vector3 impulse, Vector3 point, ulong striker)
+        {
+            bool wasDown = _ragdoll.IsDown;
+            _ragdoll.Knockdown(impulse, point);
+            if (striker != NoStriker && !wasDown && _ragdoll.IsDown)
+            {
+                KnockedBy?.Invoke(striker);
             }
         }
 
@@ -840,7 +865,7 @@ namespace Rubickanov.Characters.Netcode
 
         // Reliable: a hit must not be lost. The ragdoll's simulator simulates it wherever the character is by now.
         [Rpc(SendTo.SpecifiedInParams)]
-        private void KnockdownRpc(Vector3 impulse, Vector3 point, RpcParams rpc)
+        private void KnockdownRpc(Vector3 impulse, Vector3 point, ulong striker, RpcParams rpc)
         {
             if (_ragdoll == null)
             {
@@ -849,12 +874,12 @@ namespace Rubickanov.Characters.Netcode
 
             if (SimulatesRagdoll)
             {
-                _ragdoll.Knockdown(impulse, point);
+                Knock(impulse, point, striker);
             }
             else if (RagdollSimulator != rpc.Receive.SenderClientId)
             {
                 // Handed on meanwhile: on to the machine that simulates it now.
-                KnockdownRpc(impulse, point, RpcTarget.Single(RagdollSimulator, RpcTargetUse.Temp));
+                KnockdownRpc(impulse, point, striker, RpcTarget.Single(RagdollSimulator, RpcTargetUse.Temp));
             }
         }
 
