@@ -197,6 +197,12 @@ namespace Rubickanov.Characters
                 return;
             }
 
+            // Shell bones stand around the legs: the feet would take their own or a neighbour's for ground.
+            if (Rig != null && Config.ShellLayer >= 0)
+            {
+                Rig.IgnoredGroundLayers |= 1 << Config.ShellLayer;
+            }
+
             Everyone.Add(this);
         }
 

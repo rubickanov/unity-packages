@@ -159,6 +159,9 @@ already inside it pass through before the step is simulated.
 - A fall (`Knockdown`, `Throw`, `TakeOver`, a replica's `ShowDown` / stream) goes on from the shell's bones where they are
   (no rest-pose detour, no teleport), layers back, with the pose's velocity plus the capsule's as from an upright body;
   if the pose was moved away from the shell meanwhile (over 0.3 m, e.g. the root put on a seat), from the pose as before.
+- With a shell layer set, `CharacterRagdoll` adds it to `CharacterRig.IgnoredGroundLayers`: the foot and get-up
+  rays never take shell bones (its own around the legs, a neighbour's) for ground. Without it the feet climb onto the
+  own shins and the legs fold up step by step.
 - `Ragdoll.ShowsBody` (active or kinematic) is "the bones are the body"; a shell is not. `Ragdoll.ShellOffset()` is the
   farthest bone from the drawn pose, m. Profiler marker `Ragdoll.Shell`.
 
