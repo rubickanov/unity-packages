@@ -1,0 +1,20 @@
+{
+    "name": "com.rubickanov.settings",
+    "version": "1.0.0",
+    "license": "MIT",
+    "displayName": "Settings",
+    "description": "Player settings the game declares: live values kept by id in one save document, ready-made display, volume, look and key settings, and a menu model for a settings screen; the drawing stays the game's.",
+    "unity": "6000.0",
+    "dependencies": {
+        "com.rubickanov.save": "1.0.0"
+    },
+    "keywords": [
+        "settings",
+        "options",
+        "preferences",
+        "menu"
+    ],
+    "author": {
+        "name": "rubickanov"
+    }
+}

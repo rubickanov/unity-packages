@@ -138,12 +138,16 @@ namespace Rubickanov.Input
 
         public bool IsDefault(RebindSlot slot) => Same(Current(slot), Default(slot));
 
-        /// <summary>The other slot of <paramref name="slot"/>'s scheme that has <paramref name="path"/>; null for none.</summary>
+        /// <summary>
+        /// The other slot of <paramref name="slot"/>'s scheme that has <paramref name="path"/>, not counting maps
+        /// <see cref="RebindOptions.Apart"/> from its own; null for none.
+        /// </summary>
         public RebindSlot? Holder(RebindSlot slot, string path)
         {
             foreach (RebindSlot other in _slots)
             {
-                if (other != slot && other.Scheme == slot.Scheme && Same(Current(other), path))
+                if (other != slot && other.Scheme == slot.Scheme && Same(Current(other), path) &&
+                    !_options.AreApart(NameOf(slot.Action), NameOf(other.Action)))
                 {
                     return other;
                 }
@@ -567,6 +571,9 @@ namespace Rubickanov.Input
             }
         }
 
+        private static string NameOf(InputAction action) =>
+            action.actionMap != null ? action.actionMap.name + "/" + action.name : action.name;
+
         private static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
         // A path that is one of the patterns; a pattern ending in * takes any control below it.
@@ -585,11 +592,22 @@ namespace Rubickanov.Input
             return false;
         }
 
-        // A stick or the d-pad bound whole moves its action; no button could stand in for it.
-        private static bool IsWholeStick(string path) =>
-            path.EndsWith("/leftStick", StringComparison.OrdinalIgnoreCase) ||
-            path.EndsWith("/rightStick", StringComparison.OrdinalIgnoreCase) ||
-            path.EndsWith("/dpad", StringComparison.OrdinalIgnoreCase);
+        // A stick or the d-pad bound whole, or one of its axes (leftStick/x steers both ways), moves its action; no
+        // button could stand in for it.
+        private static bool IsWholeStick(string path)
+        {
+            foreach (string stick in new[] { "/leftStick", "/rightStick", "/dpad" })
+            {
+                if (path.EndsWith(stick, StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(stick + "/x", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(stick + "/y", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
         private static List<RebindSlot> BuildSlots(IInputActionCollection2 input, RebindOptions options)
         {
