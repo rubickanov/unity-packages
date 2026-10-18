@@ -15,6 +15,12 @@ namespace Rubickanov.Characters
 
         /// <summary>The bones are simulated, their muscles fading from the pose the character fell in to limp.</summary>
         Active,
+
+        /// <summary>
+        /// An upright body's shell: the bones kinematic on the animated pose, moved there every physics step, on the
+        /// config's shell layer, for other ragdolls to hit. Not the body: the capsule still is.
+        /// </summary>
+        Shell,
     }
 
     /// <summary>
@@ -35,6 +41,15 @@ namespace Rubickanov.Characters
         public const int ChestIndex = 2;
 
         private static readonly ProfilerMarker DriveMarker = new("Ragdoll.Drive");
+        private static readonly ProfilerMarker ShellMarker = new("Ragdoll.Shell");
+
+        // How far a shell's bone may be from the pose for a fall to go on from the shell rather than the pose, m.
+        private const float ShellKeepDistance = 0.3f;
+
+        // A read faster than ShellJumpSpeed (m/s) is a jump and is not carried on; a shell farther than
+        // ShellPlaceDistance (m) from its pose is placed.
+        private const float ShellJumpSpeed = 50f;
+        private const float ShellPlaceDistance = 2f;
 
         private readonly RagdollConfig _config;
         private readonly Transform _root;
@@ -55,6 +70,18 @@ namespace Rubickanov.Characters
         private readonly Vector3[] _lastPosition;
         private readonly Quaternion[] _lastRotation;
         private float _sampleDt;
+        private float _sampleTime;
+
+        // The last read in the world, and an older one at least a physics step before it, for a shell to go on from:
+        // close frames would make the pose's velocity mostly noise.
+        private readonly Vector3[] _worldPosition;
+        private readonly Quaternion[] _worldRotation;
+        private readonly Vector3[] _lastWorldPosition;
+        private readonly Quaternion[] _lastWorldRotation;
+        private float _lastWorldTime;
+        private readonly Vector3[] _midWorldPosition;
+        private readonly Quaternion[] _midWorldRotation;
+        private float _midWorldTime;
         private int _samples;
 
         // A replicated pose in the world, rebuilt by Place.
@@ -71,6 +98,11 @@ namespace Rubickanov.Characters
         private readonly FlailReflex _flail;
         private readonly RagdollTouch[] _touch;
         private bool _wet;
+
+        // Only while shelled: each collider's own layer, given back when the shell ends, and the bones' contacts.
+        private readonly int[][] _layers;
+        private readonly ShellContact[] _contacts;
+        private bool _shellPlace;
 
         /// <param name="flail">Whether the muscles flail in the air (<see cref="FlailReflex"/>): the caller has the
         /// clips for it and the config turns it on.</param>
@@ -111,13 +143,22 @@ namespace Rubickanov.Characters
             _lastPosition = new Vector3[_bones.Length];
             _lastRotation = new Quaternion[_bones.Length];
             _placePosition = new Vector3[_bones.Length];
+            _worldPosition = new Vector3[_bones.Length];
+            _worldRotation = new Quaternion[_bones.Length];
+            _lastWorldPosition = new Vector3[_bones.Length];
+            _lastWorldRotation = new Quaternion[_bones.Length];
+            _midWorldPosition = new Vector3[_bones.Length];
+            _midWorldRotation = new Quaternion[_bones.Length];
             _placeRotation = new Quaternion[_bones.Length];
             _pushHops = new int[_bones.Length];
             _pushSpeeds = new float[_bones.Length];
             _holdTargets = new Quaternion[_bones.Length];
+            _layers = new int[_bones.Length][];
+            _contacts = new ShellContact[_bones.Length];
             for (int i = 0; i < _bones.Length; i++)
             {
                 _holdTargets[i] = Quaternion.identity;
+                _layers[i] = new int[_colliders[i].Length];
             }
 
             if (!flail)
@@ -238,6 +279,9 @@ namespace Rubickanov.Characters
 
         public RagdollMode Mode { get; private set; }
 
+        /// <summary>Whether the bones are the body, simulated or shown: active or kinematic, not off or a shell.</summary>
+        public bool ShowsBody => Mode == RagdollMode.Active || Mode == RagdollMode.Kinematic;
+
         /// <summary>Whether the ragdoll is limp: its limits and its own collisions on, muscles fading.</summary>
         public bool IsLimp { get; private set; }
 
@@ -305,13 +349,16 @@ namespace Rubickanov.Characters
         {
             _root.GetPositionAndRotation(out Vector3 rootPosition, out Quaternion rootRotation);
             Quaternion toRoot = Quaternion.Inverse(rootRotation);
+            float now = Time.time;
             for (int i = 0; i < _bones.Length; i++)
             {
                 RagdollBone bone = _bones[i];
                 _lastPosition[i] = _position[i];
                 _lastRotation[i] = _rotation[i];
-                _position[i] = toRoot * (bone.Visible.position - rootPosition);
-                _rotation[i] = toRoot * (bone.Visible.rotation * bone.Offset);
+                _worldPosition[i] = bone.Visible.position;
+                _worldRotation[i] = bone.Visible.rotation * bone.Offset;
+                _position[i] = toRoot * (_worldPosition[i] - rootPosition);
+                _rotation[i] = toRoot * _worldRotation[i];
             }
 
             // The first read has nothing before it: the pose stands still.
@@ -319,14 +366,34 @@ namespace Rubickanov.Characters
             {
                 System.Array.Copy(_position, _lastPosition, _bones.Length);
                 System.Array.Copy(_rotation, _lastRotation, _bones.Length);
+                System.Array.Copy(_worldPosition, _lastWorldPosition, _bones.Length);
+                System.Array.Copy(_worldRotation, _lastWorldRotation, _bones.Length);
+                System.Array.Copy(_worldPosition, _midWorldPosition, _bones.Length);
+                System.Array.Copy(_worldRotation, _midWorldRotation, _bones.Length);
+                _lastWorldTime = _midWorldTime = now;
+            }
+            else if (now - _midWorldTime >= Time.fixedDeltaTime)
+            {
+                // The older read moves on to one at least a physics step before this one.
+                System.Array.Copy(_midWorldPosition, _lastWorldPosition, _bones.Length);
+                System.Array.Copy(_midWorldRotation, _lastWorldRotation, _bones.Length);
+                System.Array.Copy(_worldPosition, _midWorldPosition, _bones.Length);
+                System.Array.Copy(_worldRotation, _midWorldRotation, _bones.Length);
+                _lastWorldTime = _midWorldTime;
+                _midWorldTime = now;
             }
 
             _sampleDt = dt;
+            _sampleTime = now;
             _samples++;
         }
 
-        /// <summary>Forgets the reads, for when the pose jumps: a teleport, getting up.</summary>
-        public void ClearSamples() => _samples = 0;
+        /// <summary>Forgets the reads, for when the pose jumps: a teleport, getting up. A shell is placed, not moved, next.</summary>
+        public void ClearSamples()
+        {
+            _samples = 0;
+            _shellPlace = true;
+        }
 
         /// <summary>
         /// Has the bones that are on ignore <paramref name="other"/>, or collide with it again, e.g. the vehicle a body
@@ -371,6 +438,7 @@ namespace Rubickanov.Characters
         /// <summary>Switches the bones off: inactive, nothing simulated.</summary>
         public void TurnOff()
         {
+            LeaveShell();
             for (int i = _bones.Length - 1; i >= 0; i--)
             {
                 _bones[i].gameObject.SetActive(false);
@@ -398,9 +466,16 @@ namespace Rubickanov.Characters
                 SamplePose(0f);
             }
 
+            // A shell's bones are already on the pose, at most a step behind: they go on from where they are, unless
+            // the pose was moved away from them meanwhile (the root put on a seat, another clip).
+            bool inPlace = Mode == RagdollMode.Shell && ShellOffset() < ShellKeepDistance;
+            LeaveShell();
             SwitchOn();
             Quaternion rootRotation = _root.rotation;
-            PlaceOnPose();
+            if (!inPlace)
+            {
+                PlaceOnPose();
+            }
             for (int i = 0; i < _bones.Length; i++)
             {
                 Rigidbody body = _bones[i].Body;
@@ -601,6 +676,7 @@ namespace Rubickanov.Characters
                 return;
             }
 
+            LeaveShell();
             foreach (RagdollBone bone in _bones)
             {
                 bone.Body.interpolation = RigidbodyInterpolation.None;
@@ -614,6 +690,7 @@ namespace Rubickanov.Characters
         /// <summary>Switches the bones on as kinematic bodies, for a pose replicated from elsewhere.</summary>
         public void BeKinematic()
         {
+            LeaveShell();
             SwitchOn();
             foreach (RagdollBone bone in _bones)
             {
@@ -623,6 +700,93 @@ namespace Rubickanov.Characters
 
             IsLimp = true;
             Mode = RagdollMode.Kinematic;
+        }
+
+        /// <summary>
+        /// Switches bones that are off on as a shell: kinematic, on <paramref name="layer"/>, placed on the animated pose
+        /// as last read (read now if never), each bone reporting what hits it to <paramref name="hit"/>. Moved with the
+        /// body by <see cref="FollowPose"/>; <see cref="TurnOff"/> ends it, <see cref="Activate(Vector3)"/> falls from it.
+        /// </summary>
+        public void Shell(int layer, System.Action<ShellHit> hit)
+        {
+            if (Mode != RagdollMode.Off || layer < 0 || layer > 31)
+            {
+                return;
+            }
+
+            if (_samples == 0)
+            {
+                SamplePose(0f);
+            }
+
+            SwitchOn();
+            for (int i = 0; i < _bones.Length; i++)
+            {
+                RagdollBone bone = _bones[i];
+                bone.Body.isKinematic = true;
+                bone.Body.interpolation = RigidbodyInterpolation.None;
+                Collider[] colliders = _colliders[i];
+                for (int c = 0; c < colliders.Length; c++)
+                {
+                    _layers[i][c] = colliders[c].gameObject.layer;
+                    colliders[c].gameObject.layer = layer;
+                }
+
+                _contacts[i] = bone.gameObject.AddComponent<ShellContact>();
+                _contacts[i].Construct(bone, hit);
+            }
+
+            PlaceOnPose();
+            _shellPlace = true;
+            Mode = RagdollMode.Shell;
+        }
+
+        /// <summary>
+        /// Moves a shell to where the animated pose will be at the end of this physics step: the pose as last drawn in the
+        /// world, carried on by each bone's own velocity between the last two reads (a root that turns under a pose that
+        /// lags it, as an inertial turn does, moves no bone). Moved, not placed, so its contacts carry the body's
+        /// velocity; placed after a pose jump, a read over 50 m/s or a step over 2 m.
+        /// </summary>
+        public void FollowPose()
+        {
+            if (Mode != RagdollMode.Shell)
+            {
+                return;
+            }
+
+            using ProfilerMarker.AutoScope scope = ShellMarker.Auto();
+            float span = _sampleTime - _lastWorldTime;
+            float ahead = span > 0f && _samples > 1
+                ? Mathf.Clamp(Time.time - _sampleTime, 0f, Time.maximumDeltaTime) / span
+                : 0f;
+            if (ahead > 0f && (_worldPosition[0] - _lastWorldPosition[0]).sqrMagnitude
+                > ShellJumpSpeed * ShellJumpSpeed * span * span)
+            {
+                ahead = 0f;
+            }
+
+            bool place = _shellPlace
+                         || (_worldPosition[0] - _bones[0].Body.position).sqrMagnitude > ShellPlaceDistance * ShellPlaceDistance;
+            for (int i = 0; i < _bones.Length; i++)
+            {
+                Vector3 position = Vector3.LerpUnclamped(_worldPosition[i], _worldPosition[i] * 2f - _lastWorldPosition[i], ahead);
+                Quaternion rotation = ahead > 0f
+                    ? Quaternion.SlerpUnclamped(_lastWorldRotation[i], _worldRotation[i], 1f + ahead)
+                    : _worldRotation[i];
+                Rigidbody body = _bones[i].Body;
+                if (place)
+                {
+                    body.position = position;
+                    body.rotation = rotation;
+                }
+                else
+                {
+                    body.MovePosition(position);
+                    body.MoveRotation(rotation);
+                }
+            }
+
+            _shellPlace = false;
         }
 
         /// <summary>
@@ -724,6 +888,7 @@ namespace Rubickanov.Characters
         public void Seed(IReadOnlyList<Vector3> positions, IReadOnlyList<Quaternion> rotations,
             IReadOnlyList<Vector3> velocities, IReadOnlyList<Vector3> spins)
         {
+            LeaveShell();
             SwitchOn();
             for (int i = 0; i < _bones.Length; i++)
             {
@@ -794,6 +959,55 @@ namespace Rubickanov.Characters
                         default, Quaternion.identity, default, Quaternion.identity, Quaternion.identity, weight);
                 visible.SetPositionAndRotation(mappedPosition, mappedRotation);
             }
+        }
+
+        /// <summary>
+        /// The farthest a bone that is on is from the animated pose as last read, on the root as it is now, m: how far a
+        /// shell lags the body it follows.
+        /// </summary>
+        public float ShellOffset()
+        {
+            if (Mode == RagdollMode.Off || _samples == 0)
+            {
+                return 0f;
+            }
+
+            _root.GetPositionAndRotation(out Vector3 rootPosition, out Quaternion rootRotation);
+            float farthest = 0f;
+            for (int i = 0; i < _bones.Length; i++)
+            {
+                farthest = Mathf.Max(farthest, (rootPosition + rootRotation * _position[i] - _bones[i].Body.position).magnitude);
+            }
+
+            return farthest;
+        }
+
+        // Ends a shell where it is: the colliders back on their layers, the contacts gone, the bones on and kinematic
+        // where they are, for the caller to switch off or make the body without a detour through the rest pose.
+        private void LeaveShell()
+        {
+            if (Mode != RagdollMode.Shell)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _bones.Length; i++)
+            {
+                Collider[] colliders = _colliders[i];
+                for (int c = 0; c < colliders.Length; c++)
+                {
+                    colliders[c].gameObject.layer = _layers[i][c];
+                }
+
+                if (_contacts[i] != null)
+                {
+                    _contacts[i].Construct(null, null);
+                    Object.Destroy(_contacts[i]);
+                    _contacts[i] = null;
+                }
+            }
+
+            Mode = RagdollMode.Kinematic;
         }
 
         // The animated pose's velocity at bone index in the root's space, from the last two reads.
