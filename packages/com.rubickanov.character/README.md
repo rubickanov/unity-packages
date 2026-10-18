@@ -179,7 +179,7 @@ on its own step whenever a jump, landing, knockdown, get-up, sitting down or sta
 or a part asks for it (unreliable RPC to everyone else). Other machines play the snapshots back `InterpolationDelay`
 behind (`Remote`, a `RemoteCharacterMotion` that drives the animator) and fire the events when playback reaches them.
 While the ragdoll is the body, its bones go too (`RagdollSnapshot`, 72 B per step, played by `RemoteRagdoll` on the same
-clock, or a ragdoll frame's, below). `Knockdown(impulse, point)` works on any machine: a non-owner sends it to the owner (reliable). Ownership of a
+clock, or a ragdoll frame's, below). `Knockdown(impulse, point)` works on any machine: a non-owner sends it to the owner (reliable). `Knockdown(impulse, point, striker)` names the striker's `NetworkObjectId`: the machine that simulates the fall raises `KnockedBy(striker)` there, so a game can let the fall pass through the striker's replica, which shows the hit up to a round trip later. Ownership of a
 character is fixed: neither spawn order nor despawn handles an owner change.
 
 What a snapshot carries is what the package simulates: 55 B written field by field — time (f64), position, rotation, aim,
