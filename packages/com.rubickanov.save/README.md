@@ -1,6 +1,6 @@
 # Save
 
-One store for everything a game keeps of the player's, named by game-declared area and name instead of a path: async like console saves, every write whole or not at all, swapped as one piece when the game moves to another platform.
+One store for everything a game keeps of the player's, named by game-declared area and name instead of a path: async like console saves, every write whole or not at all, swapped as one piece when the game moves to another platform; beside it, versioned documents of a game's own state that every later build can still read.
 
 ## Dependencies
 
@@ -19,7 +19,19 @@ ISaveStore                — read, write, delete, find, list, decode a picture;
 SaveKey = SaveArea + name    SaveArea is declared by the game: InFolder("Replays"), AtRoot("Settings", "settings")
 SaveDocument              — one small text document over a store: read once, written whole after each change
 SaveText                  — UTF-8 text over bytes (ReadTextAsync / WriteTextAsync)
+
+Rubickanov.Save.Data (no store reference):
+text ─SaveFormat.Read─▶ SaveJson ─▶ SaveNode ─header check, SaveMigrations v1→…→current─▶ SaveReader ─▶ system
+system ─SaveWriter over a copy of the base─▶ SaveNode (next base) ─SaveFormat.Write─▶ canonical JSON text
 ```
+
+## Assemblies
+
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **Rubickanov.Save.Runtime** | Yes | The store: areas, keys, desktop and memory stores, `SaveDocument`, pictures |
+| **Rubickanov.Save.Data** | Yes (vectors, colours) | Versioned documents: `SaveNode`, `SaveJson`, `SaveWriter`/`SaveReader`, `SaveFormat`, `SaveMigrations`, `SaveFixtures` (editor only) |
+| **Rubickanov.Save.Tests** | Editor | Store and document tests, golden files in `Tests/Fixtures/` |
 
 Game code never builds a path. A console port writes its own `ISaveStore` (save containers per area) and registers it in place of `DesktopSaveStore`; nothing else changes.
 
@@ -28,6 +40,14 @@ Game code never builds a path. A console port writes its own `ISaveStore` (save 
 **SaveArea** — What a piece of data is (settings, progress, replays). The game declares its areas once as static fields. An area also carries its desktop layout: `InFolder(name)` keeps it in a folder of its own, `AtRoot(name, stem)` keeps it as single files at the root that start with `stem.` — the layout most games already have for `settings.json`.
 
 **SaveKey** — An area and a relative name in it, parts split by `/` (`s01/cover.jpg`). The constructor rejects `..`, `\`, `:`, empty parts, and names an area at the root does not own.
+
+**Document** — An object whose header says what it is (`$kind`), its format version (`$version`) and the build that wrote it (`$build`); the other keys are data. Kept as a `SaveNode` tree: an integer in the text (`-` and digits only) that fits 64 bits stays a `long`, any other number is a `double`.
+
+**Canonical text** — `SaveJson.Write` gives the same bytes for the same tree: two-space indent, `\n`, keys in ordinal order, arrays of scalars on one line, each number in the fewest digits that read back exactly (`0.1f` is `0.1`, `-0.0` keeps its sign). Diffs read well; capture → restore → capture changes nothing.
+
+**Migration chain** — The classes that wrote an old version are gone, so a step v-1 → v works on the tree: rename, move, remove, set, or own code over a node. Any released version walks the chain to the current one; a file of a newer version is refused (`Newer`), never read and never written over.
+
+**Base** — A system writes over a copy of what was read (its base), not over an empty object: keys it does not write stay, so a field a newer build added survives an older build's save. The written tree is the next base, so what the system removed stays removed.
 
 **Atomic writes** — `WriteAsync` replaces the old data whole or leaves it as it was. `DesktopSaveStore` writes `<file>.tmp` and then replaces the file; listings never show a `.tmp`.
 
@@ -136,6 +156,113 @@ var file = new SaveDocument(store, Key, message => Log.Error(message));
 string written = await file.WriteAsync(() => changed ? Text() : null); // null writes nothing; result null on failure
 ```
 
+### Versioned Documents
+
+A format names the document and its migration chain; a system reads and writes its values by key.
+
+```csharp
+// v1: whole dollars; v2: cents under a new name; v3: tips beside the cash.
+static readonly SaveFormat TillFormat = new("till", new SaveMigrations()
+    .Step(2, m => m.Rename("money", "cash").Edit("cash", n => SaveNode.Of(n.Long * 100)))
+    .Step(3, m => m.Move("cash", "till/cash").Set("till/tips", SaveNode.Of(0))));
+
+private SaveNode _base; // what was read; after each save, what was written
+
+public void Load(string text)
+{
+    SaveRead read = TillFormat.Read(text);
+    switch (read.Status)
+    {
+        case SaveReadStatus.Ok:
+            _base = read.Data; // already v3
+            var notes = new List<string>();
+            SaveReader till = SaveReader.Of(read.Data, notes).Object("till");
+            Cash = till.Long("cash");
+            Tips = till.Long("tips");
+            break;
+        case SaveReadStatus.Newer:
+            _refused = true; // "made by 0.9.0 with till v4; this build knows v3": do not write over it
+            break;
+        default:
+            _file.KeepBrokenAsync(text).Forget(); // Broken or WrongKind: kept aside
+            break;
+    }
+}
+
+public string Save()
+{
+    SaveWriter w = SaveWriter.Over(_base);
+    SaveWriter till = w.Object("till");     // written into the old object: unknown keys stay
+    till.Long("cash", Cash);
+    till.Long("tips", Tips);
+    _base = w.Tree;
+    return TillFormat.Write(w.Tree, Application.version);
+}
+```
+
+```json
+{
+  "$build": "0.3.0",
+  "$kind": "till",
+  "$version": 3,
+  "till": {
+    "cash": 12000,
+    "tips": 250
+  }
+}
+```
+
+The writer has `Int`, `Long`, `Float`, `Double`, `String`, `Bool`, `Enum` (by name), `Vector2`, `Vector3`, `Quaternion`, `Color`, `Time` (UTC text), `Object`, `List`, `Map`, `Node` and `Remove`; the reader the same with fallbacks. A missing key gives the fallback quietly; a value of the wrong kind gives the fallback and a note (`clock/day: a number expected, "three" found`).
+
+```csharp
+SaveMapWriter kept = w.Map("kept");            // entries by id: one not written is gone (the guest left)...
+kept.Entry(guest.Id).String("name", guest.Name); // ...one written keeps its fields this build does not know
+
+SaveListWriter links = w.List("links");        // a list is written whole
+links.Add().String("to", "jetski");
+
+foreach (SaveEntryReader e in r.Map("kept"))
+{
+    Spawn(e.Id, e.Value.String("name"));
+}
+```
+
+Keep records that live longer than one save (people, players, things) in a map by a stable id rather than a list. A field goes away for good only by a `Remove` step with a new version.
+
+### Migrations
+
+```csharp
+new SaveMigrations()
+    .Step(2, m => m
+        .Rename("money", "cash")                          // in the same object
+        .Move("cash", "till/cash")                        // anywhere; objects on the way are made
+        .Remove("legacy")
+        .Set("till/tips", SaveNode.Of(0))
+        .Edit("cash", n => SaveNode.Of(n.Long * 100))     // own code over a node; null removes it
+        .Each("kept", e => e.Rename("hp", "health"))      // the same in every entry of a map or list
+        .Run(root => root["seen"] = SaveNode.Of(true)));  // own code over the whole data
+```
+
+An operation on a path that is not there does nothing. A step that throws makes the read `Broken` for this build; the text read is not changed.
+
+### Golden Files
+
+Every released version of a document stays in the tests as a file forever: `v<N>.json` is what a build of version N really wrote, `v<N>.expected.json` what it must become now (with `$build` `fixture`). The current version's file must come out as itself, byte for byte.
+
+```
+Tests/Fixtures/till/v1.json  v1.expected.json  v2.json  v2.expected.json  v3.json
+```
+
+```csharp
+[Test]
+public void Till_EveryReleasedVersion_ReadsAsExpected()
+{
+    Assert.That(SaveFixtures.Check(Path.GetFullPath("Packages/com.game/Tests/Fixtures/till"), TillFormat), Is.Empty);
+}
+```
+
+A missing expected file is written beside its version and reported: review the diff and commit it. When v4 comes, every expected file changes (that diff is the review of the migration), `v3.json` gets its own expected file, and a new `v4.json` is taken from the game. A released `v<N>.json` is never edited.
+
 ### Tests
 
 ```csharp
@@ -149,4 +276,7 @@ var settings = new CrewSettings(store);
 - **The key checks its area's names** — `new SaveKey(Settings, "progress.json")` throws in every store, not only on desktop.
 - **Async everywhere, though desktop finishes at once** — console save APIs are asynchronous; game code written against `UniTask` ports without changes.
 - **`SaveDocument` takes an `Action<string>` for errors** — no dependency on a logging package; a game passes its own channel in one lambda.
-- **No serializer** — stores keep bytes and text; JSON, binary or anything else stays the game's choice.
+- **No serializer in the store** — stores keep bytes and text; JSON, binary or anything else stays the game's choice. `Rubickanov.Save.Data` is one such choice, in its own assembly, with no reference to the store.
+- **Explicit code by keys, no reflection or attributes** — a saved field is a line a system writes and reads; renaming a C# field changes no file, and code stripping cannot break it.
+- **Migrations over the tree, not over classes** — a class an old version was read into does not survive refactors; the tree does.
+- **Our own JSON** — no new dependency (no Newtonsoft); exact 64-bit integers, a canonical text that diffs well, and lenience for `JsonUtility` text (NaN and Infinity read as null with a note).
