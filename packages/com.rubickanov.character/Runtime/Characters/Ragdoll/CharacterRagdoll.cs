@@ -129,6 +129,19 @@ namespace Rubickanov.Characters
 
         public bool IsDown => State == BodyState.Down;
 
+        /// <summary>
+        /// A body down stays down while true: it does not get up when it comes to rest or lies too long, nor asks
+        /// <see cref="WouldGetUp"/>; a <see cref="GetUp"/> waits until it is false again (on a body that
+        /// <see cref="GetsUpElsewhere"/> it is dropped). False: as before.
+        /// </summary>
+        public bool StayDown { get; set; }
+
+        /// <summary>
+        /// A body down lies limp while true: the flail lets go at once and does not start, the muscles fade to
+        /// nothing. False: as before.
+        /// </summary>
+        public bool Limp { get; set; }
+
         /// <summary>An upright replica whose bones show a streamed pose (<see cref="ShowStreamed"/>) instead of the animation.</summary>
         public bool ShowsStreamed => _streamed && State == BodyState.Upright;
 
@@ -290,7 +303,10 @@ namespace Rubickanov.Characters
         {
             if (State == BodyState.Down && !IsReplica && GetsUpElsewhere)
             {
-                WouldGetUp?.Invoke();
+                if (!StayDown)
+                {
+                    WouldGetUp?.Invoke();
+                }
             }
             else if (State == BodyState.Down && !IsReplica)
             {
@@ -499,6 +515,7 @@ namespace Rubickanov.Characters
             }
 
             _downTime += dt;
+            _ragdoll.Limp = Limp;
             _ragdoll.Drive(dt);
             RagdollWaterStep step = WaterHook?.Step(this, dt) ?? RagdollWaterStep.Float;
             _ragdoll.SetWet(step == RagdollWaterStep.Float ? Float() : step == RagdollWaterStep.Pushed);
@@ -535,7 +552,11 @@ namespace Rubickanov.Characters
             _restTime = lying && slow ? _restTime + dt : 0f;
             bool rested = _lyingTime >= Config.MinDownTime && _restTime >= Config.RestTime;
             bool tooLong = Config.MaxDownTime > 0f && _lyingTime >= Config.MaxDownTime && lying;
-            if ((rested || tooLong) && GetsUpElsewhere)
+            if (StayDown)
+            {
+                // Lies on: nothing asked, so it gets up (or asks) once let go.
+            }
+            else if ((rested || tooLong) && GetsUpElsewhere)
             {
                 // Its owner gets it up: asked once, lying on meanwhile.
                 if (!_askedGetUp)
@@ -643,7 +664,7 @@ namespace Rubickanov.Characters
                         break;
                     }
 
-                    if (_getUpPending)
+                    if (_getUpPending && !StayDown)
                     {
                         _getUpPending = false;
                         if (UsesNearest())

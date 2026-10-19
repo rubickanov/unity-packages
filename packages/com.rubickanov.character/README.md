@@ -130,6 +130,7 @@ Game-specific behaviour enters through these hooks; nothing in the package names
 | `IRagdollWater` | `CharacterRagdoll.WaterHook` | Each step a downed body is simulated: `Float` as configured, or the game takes the water over (`Pushed` wet, `Carried` dry), e.g. a body skipping over the sea; `BodyGravity` is what pulls it, `Ragdoll.Touch` how hard it presses on anything else (flail on) |
 | `Carrier` | `CharacterRagdoll.Carrier` | Velocity of what the lying body rests on (a moving deck) |
 | `SpeedMultiplier`, `JumpScale`, `GravityOverride` | `CharacterMotor` | Per-game scaling of the walk, jump and gravity |
+| `StayDown`, `Limp` | `CharacterRagdoll` | A body down does not get up by itself (a `GetUp` waits) / lies limp, no flail and no muscles; both off by default, set them on every machine (only the simulating one acts), e.g. asleep or dead |
 
 ```csharp
 // Knocked down by a hit, or thrown off a vehicle with the vehicle's velocity.

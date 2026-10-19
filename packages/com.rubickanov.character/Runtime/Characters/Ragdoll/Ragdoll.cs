@@ -98,6 +98,7 @@ namespace Rubickanov.Characters
         private readonly FlailReflex _flail;
         private readonly RagdollTouch[] _touch;
         private bool _wet;
+        private bool _limp;
 
         // Only while shelled: each collider's own layer, given back when the shell ends, and the bones' contacts.
         private readonly int[][] _layers;
@@ -193,6 +194,24 @@ namespace Rubickanov.Characters
 
         /// <summary>Whether the pose should be read every frame: the muscles reach for the flail clip playing.</summary>
         public bool ReadsFlailPose => _flail != null && _flail.State == FlailState.Flailing;
+
+        /// <summary>
+        /// Limp while true: the flail lets go at once and does not start again, as in water, and the muscles fade to
+        /// nothing instead of the limp weight that holds the pose the body fell in.
+        /// </summary>
+        public bool Limp
+        {
+            get => _limp;
+            set
+            {
+                _limp = value;
+                if (value && _flail != null && _flail.HoldsMuscles)
+                {
+                    _flail.Reset();
+                    ReleaseMuscles();
+                }
+            }
+        }
 
         /// <summary>
         /// Whether a bone is in water, set every physics step: the flail lets go at once and does not start again
@@ -549,7 +568,7 @@ namespace Rubickanov.Characters
             {
                 float touch = TakeTouch();
                 Touch = touch;
-                if (!_wet)
+                if (!_wet && !_limp)
                 {
                     if (_flail.Step(touch, Asleep(), dt, out bool ended))
                     {
@@ -572,10 +591,11 @@ namespace Rubickanov.Characters
         {
             if (IsLimp)
             {
+                // Limp by the caller holds no pose at all.
+                float floor = _limp ? 0f : _config.LimpMuscleWeight;
                 MuscleWeight = _config.LimpTime > 0f
-                    ? Mathf.MoveTowards(MuscleWeight, _config.LimpMuscleWeight,
-                        (1f - _config.LimpMuscleWeight) / _config.LimpTime * dt)
-                    : _config.LimpMuscleWeight;
+                    ? Mathf.MoveTowards(MuscleWeight, floor, (1f - _config.LimpMuscleWeight) / _config.LimpTime * dt)
+                    : floor;
             }
 
             float spring = _config.Spring * MuscleWeight;
