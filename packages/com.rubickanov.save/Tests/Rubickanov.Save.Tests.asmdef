@@ -3,6 +3,7 @@
     "rootNamespace": "Rubickanov.Save.Tests",
     "references": [
         "Rubickanov.Save.Runtime",
+        "Rubickanov.Save.Data",
         "UniTask",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
