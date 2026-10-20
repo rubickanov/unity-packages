@@ -12,6 +12,13 @@
   - `SaveMigrations` — a chain of steps over the tree: `Rename`, `Move`, `Remove`, `Set`, `Edit`, `Each`, `Run`.
   - `SaveFixtures.Check` (editor) — golden files: every released version walks the chain and must equal its expected file.
 - Golden files of the example till document in `Tests/Fixtures/till/`.
+- `Rubickanov.Save.World`, a new assembly over the store: world slots.
+  - `SaveSlots` — slots in an area of their own folder: `ListAsync`, `FindAsync` (read only), `CreateAsync` (8-hex id), `RenameAsync`, `DeleteAsync`, `Open`.
+  - `SaveWorld` — `LoadAsync` (newest whole generation, fallback past broken ones with copies aside, whole-slot refusal of newer data, restore in the game's order), `Save`, `SaveAsync`, `SaveNow`, `Tick`, `Close`.
+  - `ISaveSection` / `SaveSection.Of`, `ISaveSectionCheck` with `SaveCheck` (Ok / Broken / Newer), `ISaveSectionKinds` (kinds with versions listed in the manifest), `SlotInfo`, `SaveReport`.
+  - Generations: section files, then the manifest (`$kind` `slot`, v1) as the commit, with length and CRC-32 of every file; unchanged text names the old file; 3 whole generations kept.
+  - Attachments: `SaveWriter.Attach` / `SaveReader.Attachment`, binary files beside a section (`SaveAttachments`).
+- `FaultySaveStore` in the tests; golden file of the slot manifest in `Tests/Fixtures/slot/`.
 
 ### Unchanged
 

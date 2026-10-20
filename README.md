@@ -87,7 +87,7 @@ git commit && git push                    # 3. here
 | `eqs` | 2.0.0 | Environment Query System |
 | `input` | 1.1.0 | Input System helpers each game needs |
 | `log` | 1.2.0 | Named log channels |
-| `save` | 1.1.0 | Player data store; versioned documents with migrations |
+| `save` | 1.1.0 | Player data store; versioned documents with migrations; world slots committed by generation |
 | `ui` | 4.1.0 | UI Toolkit framework |
 
 ## Running package tests from a consumer project

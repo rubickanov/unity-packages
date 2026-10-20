@@ -14,8 +14,13 @@ namespace Rubickanov.Save.Data
         internal const string TimeFormat = "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'";
 
         private readonly SaveNode _node;
+        private readonly SaveAttachments _attachments;
 
-        internal SaveWriter(SaveNode node) => _node = node;
+        internal SaveWriter(SaveNode node, SaveAttachments attachments = null)
+        {
+            _node = node;
+            _attachments = attachments;
+        }
 
         /// <summary>
         /// A writer over a copy of <paramref name="baseTree"/>, which is not changed; over a new object when it is null
@@ -23,6 +28,10 @@ namespace Rubickanov.Save.Data
         /// </summary>
         public static SaveWriter Over(SaveNode baseTree) =>
             new(baseTree != null && baseTree.IsObject ? baseTree.Clone() : SaveNode.NewObject());
+
+        /// <summary>As <see cref="Over(SaveNode)"/>, and <see cref="Attach"/> keeps its payloads in <paramref name="attachments"/>.</summary>
+        public static SaveWriter Over(SaveNode baseTree, SaveAttachments attachments) =>
+            new(baseTree != null && baseTree.IsObject ? baseTree.Clone() : SaveNode.NewObject(), attachments);
 
         /// <summary>The object this writer writes: after a capture, the new tree and the next base.</summary>
         public SaveNode Tree => _node;
@@ -86,6 +95,20 @@ namespace Rubickanov.Save.Data
         public void Node(string key, SaveNode node) => _node[key] = node ?? SaveNode.Null();
 
         public void Remove(string key) => _node.Remove(key);
+
+        /// <summary>
+        /// A binary payload kept as a file beside the section (names <c>[a-z0-9-]</c>); only a section's own writer has
+        /// them, nested writers throw.
+        /// </summary>
+        public void Attach(string name, byte[] bytes)
+        {
+            if (_attachments == null)
+            {
+                throw new InvalidOperationException("Attach from the section's own writer: this one keeps no files.");
+            }
+
+            _attachments.Set(name, bytes);
+        }
 
         private static SaveNode Floats(params float[] values)
         {
