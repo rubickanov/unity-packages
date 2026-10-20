@@ -27,7 +27,7 @@ namespace Rubickanov.Characters
         /// <summary>Optional per-character gravity. Does not modify shared settings.</summary>
         public Vector3? GravityOverride { get; set; }
         public Vector3 Gravity => GravityOverride ?? Settings.Gravity;
-        /// <summary>Scales the top speed on the ground, for whatever slows the character down. 1 is no change.</summary>
+        /// <summary>Scales controlled ground, air and swim speed. 1 is no change.</summary>
         public float SpeedMultiplier { get; set; } = 1f;
         /// <summary>
         /// The velocity the input asks for along the ground, world space, at the top speed it allows; zero without input
@@ -119,6 +119,9 @@ namespace Rubickanov.Characters
         private bool _sprint;
         private Vector3 _addedVelocity;
         private bool _pendingJump;
+        private bool _jumpHeld;
+        private bool _risingJump;
+        private bool _jumpCut;
         private bool _jumpRequested;
         private bool _jumpConsumed;
         private bool _jumped;
@@ -173,6 +176,7 @@ namespace Rubickanov.Characters
             _addedVelocity = Vector3.zero;
             WantedVelocity = Vector3.zero;
             _jumpConsumed = false;
+            _risingJump = false;
             _timeSinceCanJump = float.PositiveInfinity;
             _swimming = false;
             if (Motor != null)
@@ -206,6 +210,12 @@ namespace Rubickanov.Characters
             _faceLook = input.FirstPerson && Settings.FirstPersonTurn == BodyTurn.AtOnce;
             _sprint = input.Sprint;
             _pendingJump |= input.JumpPressed;
+            _jumpHeld = input.JumpHeld;
+            // Keep even a release between physics steps; pressing again cannot restore the full jump.
+            if (_risingJump && !_jumpHeld)
+            {
+                _jumpCut = true;
+            }
         }
 
         /// <summary>
@@ -226,6 +236,8 @@ namespace Rubickanov.Characters
             _move = _look = _aim = Vector3.zero;
             _sprint = _faceLook = _facing = false;
             _pendingJump = _jumpRequested = false;
+            _jumpHeld = false;
+            _jumpCut = true;
         }
 
         /// <summary>Queue a world-space velocity change for the next simulation step.</summary>
@@ -261,6 +273,7 @@ namespace Rubickanov.Characters
 
             ClearInput();
             _suspended = true;
+            _risingJump = false;
             _swimming = false;
             _addedVelocity = Vector3.zero;
             _followPosition = Motor.TransientPosition;
@@ -390,6 +403,7 @@ namespace Rubickanov.Characters
 
             if (UpdateSwimming(deltaTime, out float surface, out Vector3 water))
             {
+                _risingJump = false;
                 Swim(ref currentVelocity, move, surface, water, deltaTime);
                 currentVelocity += _addedVelocity;
                 _addedVelocity = Vector3.zero;
@@ -398,6 +412,7 @@ namespace Rubickanov.Characters
 
             if (Motor.GroundingStatus.IsStableOnGround)
             {
+                _risingJump = false;
                 Vector3 normal = Motor.GroundingStatus.GroundNormal;
                 currentVelocity = Motor.GetDirectionTangentToSurface(currentVelocity, normal) * currentVelocity.magnitude;
                 Vector3 right = Vector3.Cross(move, Motor.CharacterUp);
@@ -408,16 +423,13 @@ namespace Rubickanov.Characters
             }
             else
             {
-                Vector3 added = move * Settings.AirAccelerationSpeed * deltaTime;
                 Vector3 planarVelocity = Vector3.ProjectOnPlane(currentVelocity, Motor.CharacterUp);
-                if (planarVelocity.magnitude < Settings.MaxAirMoveSpeed)
-                {
-                    added = Vector3.ClampMagnitude(planarVelocity + added, Settings.MaxAirMoveSpeed) - planarVelocity;
-                }
-                else if (Vector3.Dot(planarVelocity, added) > 0f)
-                {
-                    added = Vector3.ProjectOnPlane(added, planarVelocity.normalized);
-                }
+                Vector3 target = move * Mathf.Min(maxSpeed, Settings.MaxAirMoveSpeed);
+                bool braking = target.sqrMagnitude < planarVelocity.sqrMagnitude
+                               || Vector3.Dot(target, planarVelocity) < 0f;
+                float acceleration = braking ? Settings.AirDecelerationSpeed : Settings.AirAccelerationSpeed;
+                // Approach the ordinary movement speed, without snapping away momentum from a deck or impulse.
+                Vector3 added = Vector3.MoveTowards(planarVelocity, target, acceleration * deltaTime) - planarVelocity;
 
                 // Prevent input from pushing the character up unstable slopes.
                 if (Motor.GroundingStatus.FoundAnyGround && Vector3.Dot(currentVelocity + added, added) > 0f)
@@ -426,8 +438,17 @@ namespace Rubickanov.Characters
                         Motor.GroundingStatus.GroundNormal), Motor.CharacterUp).normalized;
                     added = Vector3.ProjectOnPlane(added, obstruction);
                 }
-                currentVelocity += added + Gravity * deltaTime;
-                currentVelocity /= 1f + Settings.Drag * deltaTime;
+                float rise = Vector3.Dot(currentVelocity, Motor.CharacterUp);
+                if (rise <= 0f)
+                {
+                    _risingJump = false;
+                }
+                float gravityScale = rise < 0f ? Settings.FallGravityMultiplier
+                    : _risingJump && _jumpCut ? Settings.JumpReleaseGravityMultiplier : 1f;
+                currentVelocity += added;
+                Vector3 planar = Vector3.ProjectOnPlane(currentVelocity, Motor.CharacterUp);
+                currentVelocity += planar / (1f + Settings.Drag * deltaTime) - planar;
+                currentVelocity += Gravity * (gravityScale * deltaTime);
             }
 
             bool canJump = CanJumpFromGround();
@@ -451,6 +472,8 @@ namespace Rubickanov.Characters
                 currentVelocity += move * Settings.JumpScalableForwardSpeed;
                 _jumpRequested = false;
                 _jumpConsumed = _jumped = true;
+                _risingJump = true;
+                _jumpCut = !_jumpHeld;
             }
             currentVelocity += _addedVelocity;
             _addedVelocity = Vector3.zero;

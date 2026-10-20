@@ -16,6 +16,8 @@ namespace Rubickanov.Characters
         public bool FirstPerson;
         /// <summary>A press edge, not a held button. Latched until the next simulation step.</summary>
         public bool JumpPressed;
+        /// <summary>Held. Releasing during ascent shortens a jump when configured; it never starts another jump.</summary>
+        public bool JumpHeld;
         /// <summary>Held. Raises the ground speed limit to the sprint speed.</summary>
         public bool Sprint;
     }

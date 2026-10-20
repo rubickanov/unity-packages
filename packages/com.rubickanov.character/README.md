@@ -109,10 +109,22 @@ motor.SetInput(new CharacterInput
     Aim = cameraForward,      // world direction the head looks at
     Sprint = sprintHeld,
     JumpPressed = jumpPressed,
+    JumpHeld = jumpHeld,
 });
 
 motor.InputSource = playerInput;   // or: an ICharacterInputSource read in the motor's Update
 ```
+
+Air control approaches the walking or sprinting speed, capped by `MaxAirMoveSpeed`, at
+`AirAccelerationSpeed` m/s². `AirDecelerationSpeed` brakes when slowing, releasing movement or reversing;
+external momentum is reduced gradually, never clamped to the control limit. `SpeedMultiplier` applies in
+the air too. `Drag` affects horizontal velocity only.
+
+`FallGravityMultiplier` makes descent faster. `JumpReleaseGravityMultiplier` shortens ascent after
+releasing `JumpHeld`; pressing again cannot restore that jump. Both default to 1 (ordinary gravity).
+Only a ground/coyote jump is shortened: upward impulses and swimming use their own motion.
+`JumpPressed` is still a latched press edge with the pre/post-grounding grace windows; holding the button
+does not jump again on landing. An already released buffered press produces a short jump.
 
 ## Usage
 
