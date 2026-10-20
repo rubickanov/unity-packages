@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 — 2026-10-20
+
+- `ListMetadataAsync` and `FindMetadataAsync` read manifests on the pool without section or attachment reads. `SlotInfo.IntegrityChecked` distinguishes metadata from a verified result. Existing `ListAsync` and `FindAsync` keep their verification behavior.
+- `FindAsync(id, background: true)` checks one slot on the pool.
+- `LoadInBackgroundAsync` reads files and checks CRCs on the pool; migrations, section checks and restore run on Unity’s main thread. Cancellation or closing before restore prevents restoration; fallback and newer-format refusal are preserved. Existing `LoadAsync` keeps its calling-thread behavior.
+- `SaveReport.ReadMs` measures reading/checking separately from `RestoreMs`.
+
 ## 1.1.0 — 2026-10-20
 
 ### Added

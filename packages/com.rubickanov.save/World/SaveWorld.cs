@@ -63,8 +63,33 @@ namespace Rubickanov.Save.World
         /// refuses it whole when anything in it is newer than this build, then restores every section the slot has, in the
         /// game's order, on the calling thread. Once per world.
         /// </summary>
-        public async UniTask<SaveReport> LoadAsync(string slot)
+        public UniTask<SaveReport> LoadAsync(string slot) => LoadCoreAsync(slot, false, default);
+
+        /// <summary>
+        /// Loads with file reads and CRCs on the pool, game migrations, checks and restore on Unity's main thread.
+        /// Cancellation or Close before restore prevents any section from being restored. Call from the main thread.
+        /// </summary>
+        public async UniTask<SaveReport> LoadInBackgroundAsync(string slot, CancellationToken ct = default)
         {
+            try
+            {
+                return await LoadCoreAsync(slot, true, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                Close();
+                throw;
+            }
+        }
+
+        private async UniTask<SaveReport> LoadCoreAsync(string slot, bool background, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (_closed)
+            {
+                throw new ObjectDisposedException(nameof(SaveWorld));
+            }
+
             if (Slot != null)
             {
                 throw new InvalidOperationException($"This world already loaded {Slot}.");
@@ -83,14 +108,23 @@ namespace Rubickanov.Save.World
             }
 
             var report = new SaveReport { Notes = Array.Empty<string>() };
+            var reading = Stopwatch.StartNew();
             Picked picked;
             try
             {
-                picked = await SlotReading.ReadAsync(_slots.Store, _slots.Area, slot, Known, true);
+                picked = await SlotReading.ReadAsync(_slots.Store, _slots.Area, slot, Known, true,
+                    background: background, ct: ct);
             }
             catch (SaveStoreException e)
             {
                 return Fail(report, $"{slot} could not be read: {e.Message}");
+            }
+
+            report.ReadMs = (float)reading.Elapsed.TotalMilliseconds;
+            ct.ThrowIfCancellationRequested();
+            if (_closed)
+            {
+                throw new OperationCanceledException("The world closed while loading.");
             }
 
             report.Generation = picked.Generation;
@@ -103,7 +137,22 @@ namespace Rubickanov.Save.World
                 return report;
             }
 
-            await KeepBrokenAsync(picked);
+            if (background && picked.BrokenFiles.Count > 0)
+            {
+                await UniTask.RunOnThreadPool(() => KeepBrokenAsync(picked, true), cancellationToken: ct);
+                Tick();
+            }
+            else
+            {
+                await KeepBrokenAsync(picked);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            if (_closed)
+            {
+                throw new OperationCanceledException("The world closed while loading.");
+            }
+
             if (picked.Error != null)
             {
                 return Fail(report, picked.Error);
@@ -283,7 +332,7 @@ namespace Rubickanov.Save.World
             return true;
         }
 
-        private async UniTask KeepBrokenAsync(Picked picked)
+        private async UniTask KeepBrokenAsync(Picked picked, bool background = false)
         {
             lock (_state.Gate)
             {
@@ -311,7 +360,15 @@ namespace Rubickanov.Save.World
                 }
                 catch (SaveStoreException e)
                 {
-                    _slots.LogError($"{Slot}: {broken.File} could not be kept aside: {e.Message}");
+                    string message = $"{Slot}: {broken.File} could not be kept aside: {e.Message}";
+                    if (background)
+                    {
+                        Post(message);
+                    }
+                    else
+                    {
+                        _slots.LogError(message);
+                    }
                 }
             }
         }

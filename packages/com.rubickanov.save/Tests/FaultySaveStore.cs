@@ -25,6 +25,10 @@ namespace Rubickanov.Save.Tests
         /// <summary>How long each write sleeps before it lands.</summary>
         public int DelayMs { get; set; }
 
+        public Action<SaveKey> OnRead { get; set; }
+
+        public Action<string> OnList { get; set; }
+
         /// <summary>The <paramref name="k"/>-th write from now (1-based) and everything after it fail.</summary>
         public void FailFrom(int k) => _failFrom = Writes + k;
 
@@ -38,7 +42,11 @@ namespace Rubickanov.Save.Tests
             Inner.WriteAsync(key, bytes).GetAwaiter().GetResult();
         }
 
-        public UniTask<byte[]> ReadAsync(SaveKey key, CancellationToken ct = default) => Inner.ReadAsync(key, ct);
+        public UniTask<byte[]> ReadAsync(SaveKey key, CancellationToken ct = default)
+        {
+            OnRead?.Invoke(key);
+            return Inner.ReadAsync(key, ct);
+        }
 
         public UniTask<byte[]> ReadStartAsync(SaveKey key, int count, CancellationToken ct = default) => Inner.ReadStartAsync(key, count, ct);
 
@@ -70,8 +78,11 @@ namespace Rubickanov.Save.Tests
 
         public UniTask<SaveEntry?> FindAsync(SaveKey key, CancellationToken ct = default) => Inner.FindAsync(key, ct);
 
-        public UniTask<IReadOnlyList<SaveEntry>> ListAsync(SaveArea area, string prefix = "", CancellationToken ct = default) =>
-            Inner.ListAsync(area, prefix, ct);
+        public UniTask<IReadOnlyList<SaveEntry>> ListAsync(SaveArea area, string prefix = "", CancellationToken ct = default)
+        {
+            OnList?.Invoke(prefix);
+            return Inner.ListAsync(area, prefix, ct);
+        }
 
         public UniTask<Texture2D> ReadPictureAsync(SaveKey key, CancellationToken ct = default) => Inner.ReadPictureAsync(key, ct);
 
