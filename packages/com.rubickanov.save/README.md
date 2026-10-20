@@ -28,6 +28,7 @@ Rubickanov.Save.World (over a store, in an area of its own folder):
 SaveSlots                 — list, find, create, rename, delete slots; Open(sections in restore order) ─▶ SaveWorld
 SaveWorld                 — LoadAsync once; Save: capture on the main thread ─▶ text + CRC + files on the pool
 Saves/<slot>/             — <section>.<N>.json files, then manifest.<N>.json (the commit); newest whole N is the slot
+SavePieces                — section "pieces": things by SaveId, spawned by Kind, linked in a second pass, orphans kept
 ```
 
 ## Assemblies
@@ -36,7 +37,7 @@ Saves/<slot>/             — <section>.<N>.json files, then manifest.<N>.json (
 |----------|-------------|-------------|
 | **Rubickanov.Save.Runtime** | Yes | The store: areas, keys, desktop and memory stores, `SaveDocument`, pictures |
 | **Rubickanov.Save.Data** | Yes (vectors, colours) | Versioned documents: `SaveNode`, `SaveJson`, `SaveWriter`/`SaveReader`, `SaveFormat`, `SaveMigrations`, `SaveFixtures` (editor only) |
-| **Rubickanov.Save.World** | Yes | World slots: `SaveSlots`, `SaveWorld`, `ISaveSection`/`SaveSection`, `ISaveSectionCheck`, `ISaveSectionKinds`, `SlotInfo`, `SaveReport` |
+| **Rubickanov.Save.World** | Yes | World slots: `SaveSlots`, `SaveWorld`, `ISaveSection`/`SaveSection`, `ISaveSectionCheck`, `ISaveSectionKinds`, `SlotInfo`, `SaveReport`; pieces of the world (`Pieces/`): `SaveId`, `ISavePiece`, `ISavePieceLinks`, `PieceKind`, `SavePieces`, `PieceFixtures` (editor only) |
 | **Rubickanov.Save.Tests** | Editor | Store, document and slot tests, golden files in `Tests/Fixtures/`, `FaultySaveStore` |
 
 Game code never builds a path. A console port writes its own `ISaveStore` (save containers per area) and registers it in place of `DesktopSaveStore`; nothing else changes.
@@ -307,6 +308,54 @@ Saves/3f9a2c71/
 - **Attachments.** `w.Attach("chunk-12", bytes)` in `Capture` keeps a file `<section>.chunk-12.<N>.bin` beside the section; `r.Attachment("chunk-12")` gives it back in `Restore`.
 - A crash during a desktop write can leave a `*.tmp` beside the file: the store never lists it and the slot never reads it, so it is harmless.
 
+### Pieces of the World
+
+Things the world holds — sunbeds, boats, a rope clipped to one — are one section, `SavePieces` (`pieces`). Each thing has a `Kind` (a stable string of the game's catalog) and a `SaveId` given once when it is first created; the game adds a `PieceKind` per kind with its factory and its own migrations.
+
+```csharp
+var pieces = new SavePieces(log.Error);
+pieces.Add(new PieceKind("boat", (id, r) => fleet.Spawn(id, r.Vector3("p"), r.Quaternion("r"))));
+pieces.Add(new PieceKind("rope", (id, r) => ropes.Spawn(id, r.Vector3("p")),
+    new SaveMigrations().Step(2, s => s.Rename("to", "end")))); // the rope's own v2
+SaveWorld world = slots.Open(new ISaveSection[] { clock, pieces, wallet });
+
+sealed class Rope : ISavePiece, ISavePieceLinks
+{
+    public SaveId SaveId { get; }               // SaveId.New() when first made, the saved one when loaded
+    public string Kind => "rope";
+    SaveId _end;                                // kept as read, so a link to a piece that did not load survives
+
+    public void Capture(SaveWriter w)
+    {
+        w.Vector3("p", transform.position);
+        if (!_end.IsEmpty) w.String("end", _end.ToString());
+    }
+
+    public void Link(SaveReader r, SavePieces pieces) // after every piece is spawned
+    {
+        SaveId.TryParse(r.String("end"), out _end);
+        Boat boat = pieces.Resolve<Boat>(r, "end"); // null and a note when it is not in the world
+        if (boat != null) ClipTo(boat);
+    }
+}
+
+pieces.Track(rope);   // a thing appears (made by default or by the player); loaded ones are tracked already
+pieces.Forget(rope);  // it is gone: the next save drops it
+```
+
+```json
+{ "pieces": {
+    "3f9a…": { "$v": 1, "kind": "boat", "p": [12, 0, 4], "r": [0, 0, 0, 1] },
+    "8c01…": { "$v": 2, "kind": "rope", "end": "3f9a…", "p": [12, 0, 6] },
+    "d2e7…": { "$v": 1, "kind": "kite", "length": 4.5 } } }   ← a kind this build does not know: an orphan
+```
+
+- **Check before any restore.** While the slot loads, every record of a known kind walks its kind's chain in place; a step that throws makes the generation broken (the previous one loads, every section with it), a record newer than its kind refuses the slot.
+- **Spawn, then link.** Restore spawns each record through its kind's factory, then calls `Link` on every piece that has it, so a rope finds a boat saved after it. A link to a piece that is not there is a note in `SaveReport.Notes`.
+- **Orphans.** A kind the build does not know, or a factory that returns null, keeps the record raw (`Orphans`, `OrphanRecords`) and writes it back unchanged; a build that knows the kind spawns it again.
+- **Kinds in the manifest.** A save lists each kind with its highest version, orphans too: a build that knows `kite` only at v1 refuses a slot that a kite-less build carried a `kite` v2 through.
+- **Golden files per kind.** `PieceFixtures.Check(folder, kind)` walks `v<N>.json` (one record each) through the kind's chain and compares with `v<N>.expected.json`, as `SaveFixtures` does for documents.
+
 ### Tests
 
 ```csharp
@@ -327,4 +376,5 @@ var settings = new CrewSettings(store);
 - **Migrations over the tree, not over classes** — a class an old version was read into does not survive refactors; the tree does.
 - **A manifest per generation, written last** — the same write-new-then-switch commit databases use; no journal, no rename of folders, and the previous generations are the backups.
 - **Capture on the main thread, the rest off it, never back** — a capture is reading fields into a tree; text, checksums and files cost the pool. Nothing in the write waits for the main thread, so `SaveNow` may block it on quit without a deadlock.
+- **Pieces by kind and SaveId, not by scene path or network id** — a scene path changes with the scene and a network id with the session; a guid given once and a catalog string survive both. References between pieces are SaveIds resolved after every piece is spawned, so the order of records never matters.
 - **Our own JSON** — no new dependency (no Newtonsoft); exact 64-bit integers, a canonical text that diffs well, and lenience for `JsonUtility` text (NaN and Infinity read as null with a note).
