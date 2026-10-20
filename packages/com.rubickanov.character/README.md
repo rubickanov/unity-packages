@@ -27,7 +27,7 @@ input (game) ──► CharacterMotor ──► CharacterMotion ──► Charac
                  (KCC motor:                              │
                   walk, sprint, jump,                     ▼
                   swim, follow)                    CharacterRig (LateUpdate)
-                      ▲                             FootPlacement, HeadLook, TurnLean,
+                      ▲                             FootPlacement, HeadLook, TurnLean, SwimPose,
                       │ Suspend / Follow            MountLimbs (seat holds, item grips)
                  CharacterRagdoll ──► Ragdoll (bones, pins, push) + GetUpContacts
                  CharacterClimb (IClimbable: ClimbPoint, game edges)
@@ -59,7 +59,7 @@ Runtime/
     ├── CharacterProportions.cs
     ├── Motor/              CharacterMotor, input, motion, MovementConfig
     ├── Animation/          CharacterAnimator, CharacterAnimationsConfig, HandShape, GetUpPoses, PoseInertia, StrideMarkers
-    │   └── IK/             CharacterRig + config, FootPlacement, HeadLook, TurnLean, GetUpContacts, MountLimbs
+    │   └── IK/             CharacterRig + config, FootPlacement, HeadLook, TurnLean, SwimPose, GetUpContacts, MountLimbs
     ├── Ragdoll/            CharacterRagdoll (+ .GetUp: nearest-frame get-up), Ragdoll, RagdollBone, RagdollConfig,
     │                       GetUpSpot, FlailReflex, RagdollTouch, ShellContact (+ ShellHit), CharacterGetUp
     ├── Climb/              CharacterClimb, IClimbable, ClimbPoint
@@ -77,7 +77,7 @@ Tests/Netcode/
 ## Core Concepts
 
 Every tunable lives in a config asset the game owns: **MovementConfig** (speeds, jump, swimming), **CharacterRigConfig**
-(feet, head look, lean, seat grips, hand shapes), **CharacterAnimationsConfig** (clips), **RagdollConfig** (muscles,
+(feet, head look, lean, swimming pose, seat grips, hand shapes), **CharacterAnimationsConfig** (clips), **RagdollConfig** (muscles,
 falling, get-up, water), **CharacterProportions** (build data for a game's character builder).
 
 A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Nine config fields are where games chose differently; their defaults are the conservative side:

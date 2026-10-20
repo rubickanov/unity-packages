@@ -84,6 +84,19 @@ namespace Rubickanov.Characters
         [Tooltip("Fingers flat on a big round thing, such as a ball.")]
         public HandShapePose OpenPalm = new(-5f, 0f, 30f);
 
+        [Header("Swimming")]
+        [Tooltip("A swimmer's body rises by this much over the swimming clips, metres, so the chin clears the water " +
+                 "treading it.")]
+        [Min(0)] public float TreadLift = 0.08f;
+        [Tooltip("Swimming forward at swimming speed, the body rises by this much more, metres: the crawling clips " +
+                 "lie lower than the upright treading one. Slower takes a share.")]
+        [Min(0)] public float CrawlLift = 0.18f;
+        [Tooltip("Swimming forward at swimming speed, the body tilts nose up around the hips by this much, degrees, " +
+                 "so the head comes out of the water and the legs sink. Slower takes a share.")]
+        [Range(0, 60)] public float CrawlPitch = 26f;
+        [Tooltip("How quickly the swimming pose follows the speed, and comes and goes with swimming, seconds.")]
+        [Min(0)] public float SwimPoseTime = 0.15f;
+
         [Header("Look")]
         public bool Look = true;
         [Tooltip("Farthest the chain turns to either side. Past it, the head holds there until the legs turn the body.")]

@@ -4,8 +4,8 @@ using UnityEngine;
 namespace Rubickanov.Characters
 {
     /// <summary>
-    /// Procedural touches on top of the animated pose: leaning into turns, looking where the player
-    /// looks, feet on the ground, and hands and feet held where they touch down while getting up. Reads the same motion as the CharacterAnimator, so remote
+    /// Procedural touches on top of the animated pose: leaning into turns, a head-up crawl swimming forward
+    /// (<see cref="SwimPose"/>), looking where the player looks, feet on the ground, and hands and feet held where they touch down while getting up. Reads the same motion as the CharacterAnimator, so remote
     /// characters get it too without any bones sent over the network. While the character rides
     /// (<see cref="CharacterMotor.Mount"/>) only the look stays, and the hands and feet go to the seat's holds.
     /// </summary>
@@ -29,6 +29,7 @@ namespace Rubickanov.Characters
         private GetUpContacts _contacts;
         private HeadLook _look;
         private TurnLean _lean;
+        private SwimPose _swim;
         private MountLimbs _limbs;
         // The seat the limbs reach for; changing it starts the reach over, leaving it resets what it held back.
         private ICharacterMount _mount;
@@ -132,6 +133,7 @@ namespace Rubickanov.Characters
             _look = new HeadLook(_animator, _model, Config.LookBones);
             _lean = new TurnLean(_animator, _model, Config.LeanBones);
             _limbs = new MountLimbs(_animator);
+            _swim = new SwimPose(_animator, _model);
 
             CharacterMotion motion = Animator.Source?.Motion ?? default;
             _feet.Reset(motion.IsGrounded);
@@ -139,6 +141,7 @@ namespace Rubickanov.Characters
             _look.Reset();
             _lean.Reset(motion.PlanarSpeed);
             _limbs.Reset();
+            _swim.Reset();
             _mount = Animator.Character.Mount;
             _lastTurnOffset = Animator.TurnOffset;
         }
@@ -185,6 +188,14 @@ namespace Rubickanov.Characters
             if (_lean.IsValid && !mounted)
             {
                 _lean.Apply(Config, motion.PlanarSpeed, motion.IsGrounded, Weight, deltaTime);
+            }
+
+            if (_swim.IsValid)
+            {
+                // Before the look, so the head still turns where the character looks from the tilted body.
+                bool swimming = motion.IsSwimming && !mounted && !Animator.IsDown && !Animator.IsGettingUp;
+                _swim.Apply(Config, swimming, motion.PlanarSpeed, Animator.Character.Settings.SwimSpeed, Weight,
+                    deltaTime);
             }
 
             float modelTurn = Mathf.DeltaAngle(_lastTurnOffset, Animator.TurnOffset);
