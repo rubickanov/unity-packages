@@ -55,9 +55,20 @@ namespace Rubickanov.Save.World
         internal int Keep { get; }
 
         /// <summary>Every slot, the last saved first. Reads only; a refused or broken slot is listed with why.</summary>
-        public async UniTask<IReadOnlyList<SlotInfo>> ListAsync()
+        public UniTask<IReadOnlyList<SlotInfo>> ListAsync() => ListCoreAsync(false, false, default);
+
+        /// <summary>
+        /// Lists manifest metadata without reading sections or attachments. File work runs on the pool; returns on
+        /// Unity's main thread. Integrity is unknown until FindAsync or a load checks the slot.
+        /// </summary>
+        public UniTask<IReadOnlyList<SlotInfo>> ListMetadataAsync(CancellationToken ct = default) =>
+            ListCoreAsync(true, true, ct);
+
+        private async UniTask<IReadOnlyList<SlotInfo>> ListCoreAsync(bool metadataOnly, bool background, CancellationToken ct)
         {
-            IReadOnlyList<SaveEntry> entries = await Store.ListAsync(Area);
+            IReadOnlyList<SaveEntry> entries = background
+                ? await UniTask.RunOnThreadPool(() => Store.ListAsync(Area, ct: ct), cancellationToken: ct)
+                : await Store.ListAsync(Area, ct: ct);
             var ids = new List<string>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             for (int i = 0; i < entries.Count; i++)
@@ -73,7 +84,9 @@ namespace Rubickanov.Save.World
             var slots = new List<SlotInfo>(ids.Count);
             for (int i = 0; i < ids.Count; i++)
             {
-                slots.Add(Info(ids[i], await SlotReading.ReadAsync(Store, Area, ids[i], _known, false)));
+                ct.ThrowIfCancellationRequested();
+                slots.Add(Info(ids[i], await SlotReading.ReadAsync(Store, Area, ids[i], _known, false,
+                    metadataOnly, background, ct), !metadataOnly));
             }
 
             slots.Sort((a, b) => b.Saved.CompareTo(a.Saved));
@@ -81,15 +94,26 @@ namespace Rubickanov.Save.World
         }
 
         /// <summary>The slot <paramref name="slot"/>; null when there is none. Reads only.</summary>
-        public async UniTask<SlotInfo> FindAsync(string slot)
+        public UniTask<SlotInfo> FindAsync(string slot) => FindCoreAsync(slot, false, false, default);
+
+        /// <summary>Checks a slot's file integrity, optionally on the pool with completion on Unity's main thread.</summary>
+        public UniTask<SlotInfo> FindAsync(string slot, bool background, CancellationToken ct = default) =>
+            FindCoreAsync(slot, false, background, ct);
+
+        /// <summary>A slot's manifest metadata only; file work on the pool, completion on Unity's main thread.</summary>
+        public UniTask<SlotInfo> FindMetadataAsync(string slot, CancellationToken ct = default) =>
+            FindCoreAsync(slot, true, true, ct);
+
+        private async UniTask<SlotInfo> FindCoreAsync(string slot, bool metadataOnly, bool background, CancellationToken ct)
         {
+            ct.ThrowIfCancellationRequested();
             if (!IsSlotId(slot))
             {
                 return null;
             }
 
-            Picked picked = await SlotReading.ReadAsync(Store, Area, slot, _known, false);
-            return picked.Error == $"{slot}: no such slot" ? null : Info(slot, picked);
+            Picked picked = await SlotReading.ReadAsync(Store, Area, slot, _known, false, metadataOnly, background, ct);
+            return picked.Error == $"{slot}: no such slot" ? null : Info(slot, picked, !metadataOnly);
         }
 
         /// <summary>A new empty slot (generation 1, no sections) with a new 8-hex id.</summary>
@@ -345,7 +369,7 @@ namespace Rubickanov.Save.World
 
         private static bool IsSlotId(string slot) => SaveAttachments.IsPlain(slot);
 
-        private SlotInfo Info(string id, Picked picked)
+        private SlotInfo Info(string id, Picked picked, bool integrityChecked = true)
         {
             SaveNode manifest = picked.Manifest ?? picked.RawManifest;
             SaveReader r = SaveReader.Of(manifest);
@@ -375,6 +399,7 @@ namespace Rubickanov.Save.World
                 Refused = picked.Refused,
                 FellBack = picked.FellBack,
                 Error = picked.Error,
+                IntegrityChecked = integrityChecked,
             };
         }
     }

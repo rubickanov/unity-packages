@@ -4,7 +4,7 @@ using Rubickanov.Save.Data;
 
 namespace Rubickanov.Save.World
 {
-    /// <summary>A slot as a list shows it, read from its newest whole manifest without reading its sections' data.</summary>
+    /// <summary>A slot's metadata. IntegrityChecked distinguishes a verified listing from manifest metadata only.</summary>
     public sealed class SlotInfo
     {
         public string Id { get; internal set; }
@@ -45,6 +45,9 @@ namespace Rubickanov.Save.World
         /// <summary>Why nothing of the slot could be read (no whole generation); null when something could.</summary>
         public string Error { get; internal set; }
 
+        /// <summary>Whether this result came from an integrity check, rather than a metadata-only read.</summary>
+        public bool IntegrityChecked { get; internal set; }
+
         public override string ToString() => $"{Id} \"{Name}\" gen {Generation}";
     }
 
@@ -67,6 +70,9 @@ namespace Rubickanov.Save.World
 
         /// <summary>Main-thread time of every section's restore.</summary>
         public float RestoreMs { get; internal set; }
+
+        /// <summary>Elapsed time of reading and checking generations, excluding restore.</summary>
+        public float ReadMs { get; internal set; }
 
         public bool Ok => Refused == null && Error == null;
 

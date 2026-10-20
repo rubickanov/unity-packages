@@ -282,8 +282,8 @@ SaveWorld world = slots.Open(new[]
     SaveSection.Of("wallet", null, w => w.Long("cash", Cash), r => Cash = r.Long("cash")),
 }, describe: w => w.Int("day", Day)); // what a slot list shows, kept in the manifest
 
-SlotInfo beach = (await slots.ListAsync()).FirstOrDefault() ?? await slots.CreateAsync("Hotel beach");
-SaveReport report = await world.LoadAsync(beach.Id); // restores every section the slot has, in that order
+SlotInfo beach = (await slots.ListMetadataAsync()).FirstOrDefault() ?? await slots.CreateAsync("Hotel beach");
+SaveReport report = await world.LoadInBackgroundAsync(beach.Id, cancellationToken); // restores every section the slot has, in that order
 if (report.Refused != null) { /* made by a newer build: neither loaded nor written */ }
 
 world.Save();              // capture now (main thread), write on the pool; call world.Tick() every frame
@@ -307,6 +307,12 @@ Saves/3f9a2c71/
 - **Saves in flight.** One write per slot at a time (renames queue behind it); a save asked meanwhile is captured at once and waits, a newer one replaces it.
 - **Attachments.** `w.Attach("chunk-12", bytes)` in `Capture` keeps a file `<section>.chunk-12.<N>.bin` beside the section; `r.Attachment("chunk-12")` gives it back in `Restore`.
 - A crash during a desktop write can leave a `*.tmp` beside the file: the store never lists it and the slot never reads it, so it is harmless.
+
+`ListMetadataAsync` and `FindMetadataAsync(id)` read only manifests, with file work on the pool and completion on Unity's main thread. Their `SlotInfo.IntegrityChecked` is false: a listed slot may still have corrupt sections or attachments. Use `FindAsync(id, background: true)` for file integrity, or load the chosen slot for full validation. For an automatic choice, check candidates in saved-time order; a fallback can move a candidate behind another slot.
+
+`LoadInBackgroundAsync(id, cancellationToken)` must be called from Unity's main thread. It reads files, decodes section text and computes CRCs on the pool, then runs game migrations, section checks and restores on the main thread. Cancellation or `Close()` before restoration prevents restoring any section. Pass a token tied to the scene/session lifetime and await completion without blocking the main thread. `SaveReport.ReadMs` includes reading/checking and scheduling; `RestoreMs` measures only section restoration. Neither is a frame-stall measurement.
+
+The existing `ListAsync`, `FindAsync(id)` and `LoadAsync` retain their calling-thread behavior for tools and existing consumers. The low-level store API is unchanged.
 
 ### Pieces of the World
 

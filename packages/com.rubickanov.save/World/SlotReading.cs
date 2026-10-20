@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using Rubickanov.Save.Data;
 
@@ -24,6 +25,7 @@ namespace Rubickanov.Save.World
     /// <summary>A known section as a deep read found it: checked, migrated, ready to restore.</summary>
     internal sealed class ReadSection
     {
+        public byte[] Bytes;
         public SaveNode Data;
         public string Text;
         public FileRef File;
@@ -71,10 +73,32 @@ namespace Rubickanov.Save.World
     internal static class SlotReading
     {
         public static async UniTask<Picked> ReadAsync(ISaveStore store, SaveArea area, string slot, IReadOnlyList<KnownSection> known,
-            bool deep)
+            bool deep, bool metadataOnly = false, bool background = false, CancellationToken ct = default)
         {
+            try
+            {
+                return await ReadCoreAsync(store, area, slot, known, deep, metadataOnly, background, ct);
+            }
+            finally
+            {
+                if (background)
+                {
+                    await UniTask.SwitchToMainThread();
+                }
+            }
+        }
+
+        private static async UniTask<Picked> ReadCoreAsync(ISaveStore store, SaveArea area, string slot,
+            IReadOnlyList<KnownSection> known, bool deep, bool metadataOnly, bool background, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (background)
+            {
+                await UniTask.SwitchToThreadPool();
+            }
+
             var picked = new Picked();
-            IReadOnlyList<SaveEntry> entries = await store.ListAsync(area, slot + "/");
+            IReadOnlyList<SaveEntry> entries = await store.ListAsync(area, slot + "/", ct);
             var manifests = new List<int>();
             for (int i = 0; i < entries.Count; i++)
             {
@@ -95,9 +119,15 @@ namespace Rubickanov.Save.World
             var broken = new List<string>();
             for (int m = manifests.Count - 1; m >= 0; m--)
             {
+                ct.ThrowIfCancellationRequested();
+                if (background)
+                {
+                    await UniTask.SwitchToThreadPool();
+                }
+
                 int generation = manifests[m];
                 string file = SlotFiles.Manifest(generation);
-                byte[] bytes = await store.ReadAsync(new SaveKey(area, slot + "/" + file));
+                byte[] bytes = await store.ReadAsync(new SaveKey(area, slot + "/" + file), ct);
                 if (bytes == null)
                 {
                     continue;
@@ -126,6 +156,12 @@ namespace Rubickanov.Save.World
                     continue;
                 }
 
+                if (background)
+                {
+                    await UniTask.SwitchToMainThread();
+                }
+
+                ct.ThrowIfCancellationRequested();
                 string refused = Newer(read.Data, sections, known, read.Build);
                 if (refused != null)
                 {
@@ -138,40 +174,34 @@ namespace Rubickanov.Save.World
                 picked.Known.Clear();
                 var notes = new List<string>();
                 bool whole = true;
-                for (int s = 0; s < sections.Count && whole; s++)
+                Dictionary<string, ReadSection> files = null;
+                if (!metadataOnly)
                 {
+                    if (background)
+                    {
+                        await UniTask.SwitchToThreadPool();
+                    }
+
+                    files = await ReadFilesAsync(store, area, slot, sections, picked, broken, generation, deep, ct);
+                    if (background)
+                    {
+                        await UniTask.SwitchToMainThread();
+                    }
+
+                    ct.ThrowIfCancellationRequested();
+                    if (files == null)
+                    {
+                        continue;
+                    }
+                }
+
+                for (int s = 0; !metadataOnly && s < sections.Count && whole; s++)
+                {
+                    ct.ThrowIfCancellationRequested();
                     SectionEntry entry = sections[s];
                     KnownSection section = Find(known, entry.Id);
-                    byte[] data = await store.ReadAsync(new SaveKey(area, slot + "/" + entry.File.File));
-                    if (!entry.File.Matches(data))
-                    {
-                        Broken(picked, broken, generation, entry.File.File, data, data == null ? "missing" : "its length or CRC is not the manifest's");
-                        whole = false;
-                        break;
-                    }
-
-                    var readSection = new ReadSection { File = entry.File, Generation = SlotFiles.Generation(entry.File.File) };
-                    for (int a = 0; a < entry.Attachments.Count && whole; a++)
-                    {
-                        FileRef bin = entry.Attachments[a].Value;
-                        byte[] payload = await store.ReadAsync(new SaveKey(area, slot + "/" + bin.File));
-                        if (!bin.Matches(payload))
-                        {
-                            Broken(picked, broken, generation, bin.File, payload, payload == null ? "missing" : "its length or CRC is not the manifest's");
-                            whole = false;
-                        }
-                        else
-                        {
-                            readSection.Attachments.Set(entry.Attachments[a].Key, payload);
-                            readSection.AttachmentFiles[entry.Attachments[a].Key] = bin;
-                        }
-                    }
-
-                    if (!whole)
-                    {
-                        break;
-                    }
-
+                    ReadSection readSection = files[entry.Id];
+                    byte[] data = readSection.Bytes;
                     if (section == null)
                     {
                         notes.Add($"section {entry.Id} (v{entry.Version}) is unknown to this build: kept as it is");
@@ -183,7 +213,6 @@ namespace Rubickanov.Save.World
                         continue;
                     }
 
-                    readSection.Text = SlotFiles.Utf8.GetString(data);
                     SaveRead sectionRead = section.Format.Read(readSection.Text);
                     if (sectionRead.Status == SaveReadStatus.Newer)
                     {
@@ -232,6 +261,7 @@ namespace Rubickanov.Save.World
                     }
 
                     readSection.Data = sectionRead.Data;
+                    readSection.Bytes = null;
                     picked.Known[entry.Id] = readSection;
                 }
 
@@ -258,6 +288,54 @@ namespace Rubickanov.Save.World
             picked.Known.Clear();
             picked.Error = broken.Count > 0 ? $"{slot}: no whole generation ({string.Join("; ", broken)})" : $"{slot}: no manifest";
             return picked;
+        }
+
+        // Only bytes, text and CRCs here. Game-owned formats, checks and kind catalogs stay on the caller's thread.
+        private static async UniTask<Dictionary<string, ReadSection>> ReadFilesAsync(ISaveStore store, SaveArea area,
+            string slot, List<SectionEntry> sections, Picked picked, List<string> broken, int generation, bool deep, CancellationToken ct)
+        {
+            var files = new Dictionary<string, ReadSection>(StringComparer.Ordinal);
+            foreach (SectionEntry entry in sections)
+            {
+                ct.ThrowIfCancellationRequested();
+                byte[] data = await store.ReadAsync(new SaveKey(area, slot + "/" + entry.File.File), ct);
+                if (!entry.File.Matches(data))
+                {
+                    Broken(picked, broken, generation, entry.File.File, data,
+                        data == null ? "missing" : "its length or CRC is not the manifest's");
+                    return null;
+                }
+
+                var section = new ReadSection
+                {
+                    Bytes = deep ? data : null,
+                    Text = deep ? SlotFiles.Utf8.GetString(data) : null,
+                    File = entry.File,
+                    Generation = SlotFiles.Generation(entry.File.File),
+                };
+                foreach (KeyValuePair<string, FileRef> attachment in entry.Attachments)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    FileRef bin = attachment.Value;
+                    byte[] payload = await store.ReadAsync(new SaveKey(area, slot + "/" + bin.File), ct);
+                    if (!bin.Matches(payload))
+                    {
+                        Broken(picked, broken, generation, bin.File, payload,
+                            payload == null ? "missing" : "its length or CRC is not the manifest's");
+                        return null;
+                    }
+
+                    if (deep)
+                    {
+                        section.Attachments.Set(attachment.Key, payload);
+                        section.AttachmentFiles[attachment.Key] = bin;
+                    }
+                }
+
+                files[entry.Id] = section;
+            }
+
+            return files;
         }
 
         public static string Leaf(SaveEntry entry, string slot) => entry.Key.Name.Substring(slot.Length + 1);
