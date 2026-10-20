@@ -1,6 +1,6 @@
 # Save
 
-One store for everything a game keeps of the player's, named by game-declared area and name instead of a path: async like console saves, every write whole or not at all, swapped as one piece when the game moves to another platform; beside it, versioned documents of a game's own state that every later build can still read.
+One store for everything a game keeps of the player's, named by game-declared area and name instead of a path: async like console saves, every write whole or not at all, swapped as one piece when the game moves to another platform; beside it, versioned documents of a game's own state that every later build can still read, and world slots that survive a crash at any moment of a save.
 
 ## Dependencies
 
@@ -23,6 +23,11 @@ SaveText                  — UTF-8 text over bytes (ReadTextAsync / WriteTextAs
 Rubickanov.Save.Data (no store reference):
 text ─SaveFormat.Read─▶ SaveJson ─▶ SaveNode ─header check, SaveMigrations v1→…→current─▶ SaveReader ─▶ system
 system ─SaveWriter over a copy of the base─▶ SaveNode (next base) ─SaveFormat.Write─▶ canonical JSON text
+
+Rubickanov.Save.World (over a store, in an area of its own folder):
+SaveSlots                 — list, find, create, rename, delete slots; Open(sections in restore order) ─▶ SaveWorld
+SaveWorld                 — LoadAsync once; Save: capture on the main thread ─▶ text + CRC + files on the pool
+Saves/<slot>/             — <section>.<N>.json files, then manifest.<N>.json (the commit); newest whole N is the slot
 ```
 
 ## Assemblies
@@ -31,7 +36,8 @@ system ─SaveWriter over a copy of the base─▶ SaveNode (next base) ─SaveF
 |----------|-------------|-------------|
 | **Rubickanov.Save.Runtime** | Yes | The store: areas, keys, desktop and memory stores, `SaveDocument`, pictures |
 | **Rubickanov.Save.Data** | Yes (vectors, colours) | Versioned documents: `SaveNode`, `SaveJson`, `SaveWriter`/`SaveReader`, `SaveFormat`, `SaveMigrations`, `SaveFixtures` (editor only) |
-| **Rubickanov.Save.Tests** | Editor | Store and document tests, golden files in `Tests/Fixtures/` |
+| **Rubickanov.Save.World** | Yes | World slots: `SaveSlots`, `SaveWorld`, `ISaveSection`/`SaveSection`, `ISaveSectionCheck`, `ISaveSectionKinds`, `SlotInfo`, `SaveReport` |
+| **Rubickanov.Save.Tests** | Editor | Store, document and slot tests, golden files in `Tests/Fixtures/`, `FaultySaveStore` |
 
 Game code never builds a path. A console port writes its own `ISaveStore` (save containers per area) and registers it in place of `DesktopSaveStore`; nothing else changes.
 
@@ -263,12 +269,52 @@ public void Till_EveryReleasedVersion_ReadsAsExpected()
 
 A missing expected file is written beside its version and reported: review the diff and commit it. When v4 comes, every expected file changes (that diff is the review of the migration), `v3.json` gets its own expected file, and a new `v4.json` is taken from the game. A released `v<N>.json` is never edited.
 
+### World Slots
+
+A slot is one world (one beach): a folder of generations. Each system declares a section; the game lists them once, in the order they restore.
+
+```csharp
+var slots = new SaveSlots(store, SaveArea.InFolder("Saves"), BuildVersion.Text, log.Error); // keeps 3 generations
+SaveWorld world = slots.Open(new[]
+{
+    SaveSection.Of("clock", null, w => w.Int("day", Day), r => Day = r.Int("day")),
+    SaveSection.Of("wallet", null, w => w.Long("cash", Cash), r => Cash = r.Long("cash")),
+}, describe: w => w.Int("day", Day)); // what a slot list shows, kept in the manifest
+
+SlotInfo beach = (await slots.ListAsync()).FirstOrDefault() ?? await slots.CreateAsync("Hotel beach");
+SaveReport report = await world.LoadAsync(beach.Id); // restores every section the slot has, in that order
+if (report.Refused != null) { /* made by a newer build: neither loaded nor written */ }
+
+world.Save();              // capture now (main thread), write on the pool; call world.Tick() every frame
+await world.SaveAsync();   // the same, true once the generation is in (completes in Tick)
+world.SaveNow();           // on quit: waits for the write in flight (5 s at most), writes on this thread
+```
+
+```
+Saves/3f9a2c71/
+  manifest.000041.json  manifest.000042.json  manifest.000043.json   ← the newest whole one is the slot
+  clock.000043.json  clock.000042.json
+  wallet.000040.json         ← unchanged since 40: newer manifests name this file
+  radio.000012.json          ← a section this build does not know: carried, never rewritten
+  manifest.000039.broken.json
+```
+
+- **Commit by generation.** A save writes new files `<section>.<N>.json` (unchanged text names the old file), then `manifest.<N>.json` last: before that write generation N does not exist, so a crash leaves N-1 whole. N is one more than the highest number in any file of the slot, so a number is never reused.
+- **Fallback.** A load takes the newest manifest that reads and whose every file has its length and CRC-32, whose known sections parse and migrate and pass their `ISaveSectionCheck`; a broken one is copied to `*.broken.json`, told in `SaveReport.Notes` and the log, and the previous generation loads. A store failure while reading is an error, not a broken file.
+- **Newer is refused.** A manifest, a known section or a known kind newer than the build refuses the whole slot: no restore, and saves, `RenameAsync` and `DeleteAsync` leave every byte as it was. Unknown sections and unknown fields are kept.
+- **Sweep.** After a commit the 3 newest whole manifests stay; older ones and those a load found broken go, then every file no kept manifest names. Copies of broken files stay.
+- **Saves in flight.** One write per slot at a time (renames queue behind it); a save asked meanwhile is captured at once and waits, a newer one replaces it.
+- **Attachments.** `w.Attach("chunk-12", bytes)` in `Capture` keeps a file `<section>.chunk-12.<N>.bin` beside the section; `r.Attachment("chunk-12")` gives it back in `Restore`.
+- A crash during a desktop write can leave a `*.tmp` beside the file: the store never lists it and the slot never reads it, so it is harmless.
+
 ### Tests
 
 ```csharp
 var store = new MemorySaveStore(); // keeps copies; every write is later than the one before
 var settings = new CrewSettings(store);
 ```
+
+`FaultySaveStore` (in the package's tests) wraps a store and dies like a process at the k-th write: every write and delete from it on throws. It can also sleep on each write and corrupt a file.
 
 ## Design Decisions
 
@@ -279,4 +325,6 @@ var settings = new CrewSettings(store);
 - **No serializer in the store** — stores keep bytes and text; JSON, binary or anything else stays the game's choice. `Rubickanov.Save.Data` is one such choice, in its own assembly, with no reference to the store.
 - **Explicit code by keys, no reflection or attributes** — a saved field is a line a system writes and reads; renaming a C# field changes no file, and code stripping cannot break it.
 - **Migrations over the tree, not over classes** — a class an old version was read into does not survive refactors; the tree does.
+- **A manifest per generation, written last** — the same write-new-then-switch commit databases use; no journal, no rename of folders, and the previous generations are the backups.
+- **Capture on the main thread, the rest off it, never back** — a capture is reading fields into a tree; text, checksums and files cost the pool. Nothing in the write waits for the main thread, so `SaveNow` may block it on quit without a deadlock.
 - **Our own JSON** — no new dependency (no Newtonsoft); exact 64-bit integers, a canonical text that diffs well, and lenience for `JsonUtility` text (NaN and Infinity read as null with a note).

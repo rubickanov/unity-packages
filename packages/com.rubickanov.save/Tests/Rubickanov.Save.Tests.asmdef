@@ -4,6 +4,7 @@
     "references": [
         "Rubickanov.Save.Runtime",
         "Rubickanov.Save.Data",
+        "Rubickanov.Save.World",
         "UniTask",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"

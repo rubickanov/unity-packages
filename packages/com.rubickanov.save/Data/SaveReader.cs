@@ -17,18 +17,24 @@ namespace Rubickanov.Save.Data
         private readonly SaveNode _node;
         private readonly string _path;
         private readonly List<string> _notes;
+        private readonly SaveAttachments _attachments;
 
-        private SaveReader(SaveNode node, string path, List<string> notes)
+        private SaveReader(SaveNode node, string path, List<string> notes, SaveAttachments attachments = null)
         {
             _node = node != null && node.IsObject ? node : null;
             _path = path;
             _notes = notes;
+            _attachments = attachments;
         }
 
         /// <param name="node">The object to read; anything else reads as empty.</param>
         /// <param name="notes">Where values of the wrong kind are told; null drops them.</param>
         /// <param name="path">What the notes' key paths start with, as the section's id.</param>
         public static SaveReader Of(SaveNode node, List<string> notes = null, string path = null) => new(node, path, notes);
+
+        /// <summary>As <see cref="Of(SaveNode, List{string}, string)"/>, with the section's payloads for <see cref="Attachment"/>.</summary>
+        public static SaveReader Of(SaveNode node, List<string> notes, string path, SaveAttachments attachments) =>
+            new(node, path, notes, attachments);
 
         public bool IsEmpty => _node == null || _node.Count == 0;
 
@@ -158,6 +164,9 @@ namespace Rubickanov.Save.Data
 
         /// <summary>The raw value under <paramref name="key"/>, null when there is none; not a copy: do not change it.</summary>
         public SaveNode Node(string key) => _node?[key];
+
+        /// <summary>The section's payload named <paramref name="name"/>; null when there is none or this is a nested reader.</summary>
+        public byte[] Attachment(string name) => _attachments?.Get(name);
 
         /// <summary>Tells a note about <paramref name="key"/> to the load's notes.</summary>
         public void Note(string key, string what) => _notes?.Add($"{Join(key)}: {what}");
