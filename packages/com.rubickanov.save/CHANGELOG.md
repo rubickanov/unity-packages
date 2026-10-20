@@ -18,6 +18,12 @@
   - `ISaveSection` / `SaveSection.Of`, `ISaveSectionCheck` with `SaveCheck` (Ok / Broken / Newer), `ISaveSectionKinds` (kinds with versions listed in the manifest), `SlotInfo`, `SaveReport`.
   - Generations: section files, then the manifest (`$kind` `slot`, v1) as the commit, with length and CRC-32 of every file; unchanged text names the old file; 3 whole generations kept.
   - Attachments: `SaveWriter.Attach` / `SaveReader.Attachment`, binary files beside a section (`SaveAttachments`).
+- Pieces of the world in `Rubickanov.Save.World` (`World/Pieces/`).
+  - `SaveId` — a guid given once to a thing, 32 hex digits as text (`New`, `TryParse`, `IsEmpty`).
+  - `ISavePiece` (`SaveId`, `Kind`, `Capture`), `ISavePieceLinks` (`Link`, a second pass after every piece is spawned).
+  - `PieceKind` — a kind's factory and its own migrations.
+  - `SavePieces` — the `pieces` section: records `{"$v", "kind", …}` by SaveId; `Add`, `Track`, `Forget`, `Find`, `Resolve<T>`, `Count`, `Orphans`, `OrphanRecords`. The load's check migrates records in place (a failing step makes the generation broken, a newer record refuses the slot); kinds the build cannot spawn are kept and written back unchanged; the manifest's `kinds` lists every record's kind, orphans included.
+  - `PieceFixtures.Check` (editor) — golden files of a kind; the example `kite` in `Tests/Fixtures/pieces/kite/`.
 - `FaultySaveStore` in the tests; golden file of the slot manifest in `Tests/Fixtures/slot/`.
 
 ### Unchanged
