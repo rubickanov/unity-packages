@@ -40,6 +40,9 @@ namespace Rubickanov.Characters
         private const float MaxBodyTurnPerFrame = 90f;
         // Rising faster than this, m/s, a swimmer lunges out of the water; waves never lift one that fast.
         private const float LungeRiseSpeed = 2f;
+        // A blend parameter this close to its target holds still: a mixer recalculates its weights whenever its
+        // parameter is set, so one left alone costs nothing. A thousandth of the range does not show in the pose.
+        private const float Settled = 1e-3f;
         private Phase _phase;
         // Blends downhill (-1), flat (0) and uphill (1) locomotion by the grade along the movement.
         private LinearMixerState _locomotion;
@@ -332,8 +335,17 @@ namespace Rubickanov.Characters
             }
 
             Vector2 target = PlanarVelocity(motion);
-            _moveParameter = Vector2.Lerp(_moveParameter, target, Smoothing(Animations.ParameterSharpness));
-            _slope = Mathf.Lerp(_slope, SlopeAlongMovement(motion), Smoothing(Animations.SlopeSharpness));
+            if ((target - _moveParameter).sqrMagnitude > Settled * Settled)
+            {
+                _moveParameter = Vector2.Lerp(_moveParameter, target, Smoothing(Animations.ParameterSharpness));
+            }
+
+            float slope = SlopeAlongMovement(motion);
+            if (Mathf.Abs(slope - _slope) > Settled)
+            {
+                _slope = Mathf.Lerp(_slope, slope, Smoothing(Animations.SlopeSharpness));
+            }
+
             if (!IsHeld)
             {
                 bool swimming = motion.IsSwimming && Animations.Swim.IsValid;
@@ -570,6 +582,11 @@ namespace Rubickanov.Characters
 
         private void UpdateLocomotion()
         {
+            if (_flat.Parameter.Equals(_moveParameter) && _locomotion.Parameter.Equals(_slope))
+            {
+                return;
+            }
+
             float speed = _moveParameter.magnitude;
             _flat.Parameter = _moveParameter;
             if (_uphill != null)
@@ -1125,6 +1142,11 @@ namespace Rubickanov.Characters
             }
 
             if (_lunging)
+            {
+                return;
+            }
+
+            if (_swim.Parameter.Equals(_moveParameter))
             {
                 return;
             }
