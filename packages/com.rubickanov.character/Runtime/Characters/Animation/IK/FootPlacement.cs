@@ -11,6 +11,9 @@ namespace Rubickanov.Characters
     /// </summary>
     public sealed class FootPlacement
     {
+        // m: the least knee offset a placed foot's leg bends by, so a near-straight leg still has a side to bend to.
+        private const float PlacedBend = 0.1f;
+
         private sealed class Leg
         {
             public Transform Upper, Lower, Foot;
@@ -168,8 +171,8 @@ namespace Rubickanov.Characters
             }
 
             _hips.position += up * (pelvis * weight);
-            Place(_left, config, root, up, weight);
-            Place(_right, config, root, up, weight);
+            Place(_left, config, root, up, _body.forward, weight);
+            Place(_right, config, root, up, _body.forward, weight);
         }
 
         public void DrawGizmos()
@@ -390,10 +393,29 @@ namespace Rubickanov.Characters
             }
         }
 
-        private static void Place(Leg leg, CharacterRigConfig config, Vector3 root, Vector3 up, float weight)
+        private static void Place(Leg leg, CharacterRigConfig config, Vector3 root, Vector3 up, Vector3 forward,
+            float weight)
         {
             Vector3 target = leg.AnimatedFoot + up * leg.Offset.Value;
             Vector3 hint = leg.Lower.position + leg.KneeBend;
+            if (leg.Placed > 0f)
+            {
+                // A foot the game moved off the animation: the animated knee belongs to another line and can sit
+                // behind this one once the foot steps across, behind or apart; the knee bends ahead of the body,
+                // from the middle of the new line, handing back to the animated bend only from ahead.
+                Vector3 line = target - leg.Upper.position;
+                Vector3 across = line.sqrMagnitude > 1e-8f ? line.normalized : up;
+                Vector3 ahead = Vector3.ProjectOnPlane(forward, across).normalized;
+                float size = Mathf.Max(leg.KneeBend.magnitude, PlacedBend);
+                Vector3 bend = Vector3.Lerp(Vector3.ProjectOnPlane(leg.KneeBend, across), ahead * size, leg.Placed);
+                if (Vector3.Dot(bend, ahead) < 0.5f * size)
+                {
+                    bend = Vector3.ProjectOnPlane(bend, ahead) + ahead * (0.5f * size);
+                }
+
+                hint = leg.Upper.position + 0.5f * line + bend;
+            }
+
             TwoBoneIK.Solve(leg.Upper, leg.Lower, leg.Foot, target, hint, weight);
 
             // A planted foot lies on the surface; one in the air keeps its animated angle.
