@@ -46,6 +46,27 @@ namespace Rubickanov.Characters
         /// </summary>
         public RigSway Sway { get; set; }
 
+        /// <summary>
+        /// A foot the game places in the world, set each frame (e.g. a drunk's catch step); default: the animated
+        /// foot, the rig as before. Ignored while the character rides.
+        /// </summary>
+        public RigFoot LeftFoot { get; set; }
+
+        /// <inheritdoc cref="LeftFoot"/>
+        public RigFoot RightFoot { get; set; }
+
+        /// <summary>The animated ankle as last captured (with the stance spread), before a placed foot.</summary>
+        public Vector3 AnimatedFoot(bool left) => _feet != null && _feet.IsValid ? _feet.Animated(left) : transform.position;
+
+        /// <summary>The ankle as last placed.</summary>
+        public Vector3 Ankle(bool left) => _feet != null && _feet.IsValid ? _feet.Ankle(left) : transform.position;
+
+        /// <summary>The knee as last placed.</summary>
+        public Vector3 Knee(bool left) => _feet != null && _feet.IsValid ? _feet.Knee(left) : transform.position;
+
+        /// <summary>Hip to knee to ankle, metres; 0 without legs.</summary>
+        public float LegLength(bool left) => _feet != null && _feet.IsValid ? _feet.LegLength(left) : 0f;
+
         /// <summary>Told each time a foot is set down; null: no one.</summary>
         public IFootprints Footprints
         {
@@ -196,6 +217,15 @@ namespace Rubickanov.Characters
                 else
                 {
                     _feet.Capture();
+                }
+
+                if (mounted)
+                {
+                    _feet.Place(default, default);
+                }
+                else
+                {
+                    _feet.Place(LeftFoot, RightFoot);
                 }
             }
 
