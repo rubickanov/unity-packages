@@ -83,6 +83,20 @@ namespace Rubickanov.Characters
             CaptureLeg(_right);
         }
 
+        /// <summary>As <see cref="Capture"/>, the feet set this far further apart, each to its own side.</summary>
+        public void Capture(Vector3 halfSpread)
+        {
+            Capture();
+            Spread(_left, -halfSpread);
+            Spread(_right, halfSpread);
+        }
+
+        private static void Spread(Leg leg, Vector3 offset)
+        {
+            leg.AnimatedFoot += offset;
+            leg.AnimatedToes += offset;
+        }
+
         public void Apply(CharacterRigConfig config, bool grounded, float weight, float deltaTime)
         {
             float feetWeight = _weight.Step(config.Feet && grounded ? 1f : 0f, config.FeetWeightSpring, deltaTime);

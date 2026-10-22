@@ -38,6 +38,13 @@ namespace Rubickanov.Characters
         private IFootGround _bodyGround;
         private IFootprints _footprints;
         private int _ignoredGround;
+        private Transform _head;
+
+        /// <summary>
+        /// An extra sway on the animated pose, set by the game each frame (e.g. a drunk's balance); default: none,
+        /// the rig as before. Ignored while the character rides.
+        /// </summary>
+        public RigSway Sway { get; set; }
 
         /// <summary>Told each time a foot is set down; null: no one.</summary>
         public IFootprints Footprints
@@ -134,6 +141,7 @@ namespace Rubickanov.Characters
             _lean = new TurnLean(_animator, _model, Config.LeanBones);
             _limbs = new MountLimbs(_animator);
             _swim = new SwimPose(_animator, _model);
+            _head = _animator.GetBoneTransform(HumanBodyBones.Head);
 
             CharacterMotion motion = Animator.Source?.Motion ?? default;
             _feet.Reset(motion.IsGrounded);
@@ -174,10 +182,21 @@ namespace Rubickanov.Characters
             }
 
             bool mounted = mount != null;
+            RigSway sway = mounted ? default : Sway;
+            bool swaying = !sway.IsZero;
             // Feet go last so they land where the animation put them, whatever the passes before did to the body.
             if (_feet.IsValid)
             {
-                _feet.Capture();
+                if (swaying && sway.Stance > 0f && motion.IsGrounded)
+                {
+                    Vector3 up = _body.up;
+                    Vector3 right = Vector3.ProjectOnPlane(_model.right, up).normalized;
+                    _feet.Capture(right * (sway.Stance * 0.5f * Weight));
+                }
+                else
+                {
+                    _feet.Capture();
+                }
             }
 
             if (_contacts.IsValid)
@@ -187,7 +206,7 @@ namespace Rubickanov.Characters
 
             if (_lean.IsValid && !mounted)
             {
-                _lean.Apply(Config, motion.PlanarSpeed, motion.IsGrounded, Weight, deltaTime);
+                _lean.Apply(Config, motion.PlanarSpeed, motion.IsGrounded, Weight, deltaTime, sway);
             }
 
             if (_swim.IsValid)
@@ -218,6 +237,12 @@ namespace Rubickanov.Characters
                 }
 
                 return;
+            }
+
+            if (swaying && _head != null && sway.HeadLean.sqrMagnitude > 0f)
+            {
+                // After the look, so aiming the head does not take its roll back.
+                _head.rotation = RigSway.Tip(sway.HeadLean * Weight, _body.up) * _head.rotation;
             }
 
             if (_feet.IsValid)

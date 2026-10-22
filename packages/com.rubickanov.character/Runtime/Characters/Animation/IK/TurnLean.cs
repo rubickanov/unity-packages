@@ -23,6 +23,8 @@ namespace Rubickanov.Characters
         private readonly Transform _body;
         private readonly Transform _hips;
         private readonly Transform _head;
+        private readonly Transform _leftArm;
+        private readonly Transform _rightArm;
         private readonly List<Bone> _bones = new();
         private Vector3 _lastForward;
         private FloatSpring _speed;
@@ -38,6 +40,8 @@ namespace Rubickanov.Characters
             _body = body;
             _hips = animator.GetBoneTransform(HumanBodyBones.Hips);
             _head = animator.GetBoneTransform(HumanBodyBones.Head);
+            _leftArm = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+            _rightArm = animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
             for (int i = 0; i < bones.Length; i++)
             {
                 Transform transform = animator.GetBoneTransform(bones[i].Bone);
@@ -56,7 +60,15 @@ namespace Rubickanov.Characters
             _pitch.Reset(0f);
         }
 
-        public void Apply(CharacterRigConfig config, float planarSpeed, bool grounded, float weight, float deltaTime)
+        public void Apply(CharacterRigConfig config, float planarSpeed, bool grounded, float weight, float deltaTime) =>
+            Apply(config, planarSpeed, grounded, weight, deltaTime, default);
+
+        /// <summary>
+        /// As above, with an extra <paramref name="sway"/> added to the lean after its springs: the same bones and
+        /// shares, the pelvis around the feet; the upper arms take its <see cref="RigSway.ArmHang"/> back.
+        /// </summary>
+        public void Apply(CharacterRigConfig config, float planarSpeed, bool grounded, float weight, float deltaTime,
+            in RigSway sway)
         {
             if (deltaTime <= 0f)
             {
@@ -82,17 +94,34 @@ namespace Rubickanov.Characters
             float pitchTarget = leaning ? LeanAngle(onward, config.PitchScale, config.MaxPitch, config) : 0f;
             float roll = _roll.Step(rollTarget, config.LeanSpring, deltaTime) * weight;
             float pitch = _pitch.Step(pitchTarget, config.LeanSpring, deltaTime) * weight;
+            Vector3 right = Vector3.Cross(up, forward);
+            bool swaying = !sway.IsZero;
+            float swayRoll = 0f, swayPitch = 0f;
+            if (swaying)
+            {
+                swayRoll = Vector3.Dot(sway.Lean, right) * weight;
+                swayPitch = Vector3.Dot(sway.Lean, forward) * weight;
+                roll += swayRoll;
+                pitch += swayPitch;
+            }
+
             if (Mathf.Abs(roll) < 1e-3f && Mathf.Abs(pitch) < 1e-3f)
             {
                 return;
             }
 
-            Vector3 right = Vector3.Cross(up, forward);
             if (_hips != null && config.HipShift > 0f)
             {
                 // Leaning around the feet would carry the pelvis into the turn by this much.
                 float height = Vector3.Dot(_hips.position - _body.position, up);
                 _hips.position += right * (height * Mathf.Sin(roll * Mathf.Deg2Rad) * config.HipShift);
+                if (swaying)
+                {
+                    // The sway tips forward and back about the feet too, and the pelvis sinks so the far leg reaches.
+                    float tip = Mathf.Sqrt(swayRoll * swayRoll + swayPitch * swayPitch) * Mathf.Deg2Rad;
+                    _hips.position += forward * (height * Mathf.Sin(swayPitch * Mathf.Deg2Rad) * config.HipShift)
+                        - up * (height * (1f - Mathf.Cos(tip)) * config.HipShift);
+                }
             }
 
             foreach (Bone bone in _bones)
@@ -110,6 +139,21 @@ namespace Rubickanov.Characters
             {
                 float keep = -config.HeadStabilize;
                 _head.rotation = Lean(roll * keep, pitch * keep, forward, right) * _head.rotation;
+            }
+
+            if (swaying && sway.ArmHang > 0f)
+            {
+                // The arms hang from the leaning shoulders: turned back by a share of the sway they fall plumb.
+                Quaternion back = Lean(-swayRoll * sway.ArmHang, -swayPitch * sway.ArmHang, forward, right);
+                if (_leftArm != null)
+                {
+                    _leftArm.rotation = back * _leftArm.rotation;
+                }
+
+                if (_rightArm != null)
+                {
+                    _rightArm.rotation = back * _rightArm.rotation;
+                }
             }
         }
 
