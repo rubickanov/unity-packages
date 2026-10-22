@@ -77,6 +77,12 @@ namespace Rubickanov.Characters
         /// <summary>Read the shown pose every frame, for switches begun from it (jump, land, turn, water entry).</summary>
         public bool Tracking { get; set; }
 
+        /// <summary>
+        /// The Animator left the bones as drawn this frame (<see cref="CharacterAnimator.Culled"/>): nothing is laid
+        /// over them and the pose is read afresh once it writes again.
+        /// </summary>
+        public bool Paused { get; set; }
+
         /// <summary>An offset is being laid over the pose.</summary>
         public bool Active => _active;
 
@@ -102,6 +108,12 @@ namespace Rubickanov.Characters
 
         private void LateUpdate()
         {
+            if (Paused)
+            {
+                OnDisable();
+                return;
+            }
+
             if (!_active && _pendingLength <= 0f && !Tracking)
             {
                 _hasLast = false;

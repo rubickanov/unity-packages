@@ -1,3 +1,4 @@
+using System.Linq;
 using Animancer;
 using Rubickanov.Rig;
 using Rubickanov.Log;
@@ -90,12 +91,31 @@ namespace Rubickanov.Characters
         private float _reachRate;
         private bool _reachKnown;
         private bool _strideStaleWarned;
+        // Culling: the renderers whose sight keeps the bones written, and bones as last drawn, read before the Animator
+        // runs, to tell whether it wrote them this frame.
+        private Renderer[] _renderers;
+        private Transform[] _watched;
+        private Vector3 _watchedHips;
+        private readonly Quaternion[] _watchedTurns = new Quaternion[4];
 
         /// <summary>
         /// Degrees the model is turned from the body while it turns in place, positive to the right.
         /// Changes when a turn animation or settling turns the model, not when the body turns under it.
         /// </summary>
         public float TurnOffset => _turn.Value;
+
+        /// <summary>
+        /// The Animator may skip writing the bones while none of the character's renderers is drawn (shadows count):
+        /// time, events and root motion go on. The game turns it off for whatever reads the drawn pose; never while
+        /// lying or getting up. Off by default.
+        /// </summary>
+        public bool MayCull { get; set; }
+
+        /// <summary>
+        /// The Animator left the bones as last drawn this frame: whatever poses on top of the clip skips the frame,
+        /// or its offsets would pile up.
+        /// </summary>
+        public bool Culled { get; private set; }
 
         /// <summary>The ragdoll is the body: nothing here plays until a get-up.</summary>
         public bool IsDown => _phase == Phase.Down;
@@ -238,6 +258,15 @@ namespace Rubickanov.Characters
             Character.MountChanged += OnMountChanged;
 
             _locomotion ??= CreateLocomotion();
+            Animator animator = Animancer.Animator;
+            _renderers = animator.GetComponentsInChildren<Renderer>(true)
+                .OrderBy(r => r is SkinnedMeshRenderer ? 0 : 1).ToArray();
+            _watched = new[]
+            {
+                animator.GetBoneTransform(HumanBodyBones.Hips), animator.GetBoneTransform(HumanBodyBones.Head),
+                animator.GetBoneTransform(HumanBodyBones.LeftLowerLeg), animator.GetBoneTransform(HumanBodyBones.RightLowerArm),
+            };
+            Culled = false;
             _rightShoulder = Animancer.Animator.GetBoneTransform(HumanBodyBones.RightShoulder);
             _leftShoulder = Animancer.Animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
             _holdRight ??= CreateHold(1, Animations.RightArmMask, "Hold Right");
@@ -265,6 +294,12 @@ namespace Rubickanov.Characters
 
         private void OnDisable()
         {
+            Culled = false;
+            if (Animancer != null && Animancer.Animator != null)
+            {
+                Animancer.Animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
+
             if (_model != null && _rootMotion)
             {
                 Animancer.Animator.applyRootMotion = false;
@@ -341,11 +376,101 @@ namespace Rubickanov.Characters
 
                     break;
             }
+
+            ChooseCulling();
+        }
+
+        // Before the Animator runs: may it skip the bones this frame, and how they stand as last drawn.
+        private void ChooseCulling()
+        {
+            bool cull = MayCull && !IsLyingOrRising && _watched[0] != null;
+            Animator animator = Animancer.Animator;
+            AnimatorCullingMode mode = cull ? AnimatorCullingMode.CullUpdateTransforms : AnimatorCullingMode.AlwaysAnimate;
+            if (animator.cullingMode != mode)
+            {
+                animator.cullingMode = mode;
+            }
+
+            if (!cull)
+            {
+                return;
+            }
+
+            _watchedHips = _watched[0].localPosition;
+            for (int i = 0; i < _watched.Length; i++)
+            {
+                _watchedTurns[i] = _watched[i] != null ? _watched[i].localRotation : Quaternion.identity;
+            }
+        }
+
+        /// <summary>
+        /// Writes the pose the clips are at now onto bones left as last drawn (<see cref="Culled"/>), for whatever is
+        /// about to take the pose over (a fall). Nothing happens when the bones are written already.
+        /// </summary>
+        public void Redraw()
+        {
+            if (!Culled)
+            {
+                return;
+            }
+
+            AnimateAlways();
+            Animancer.Evaluate();
+            Culled = false;
+        }
+
+        // A manual evaluation writes the bones whether the character is seen or not.
+        private void AnimateAlways()
+        {
+            Animator animator = Animancer.Animator;
+            if (animator.cullingMode != AnimatorCullingMode.AlwaysAnimate)
+            {
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
+        }
+
+        // After the Animator: culled when it may cull, nothing of the character was drawn last frame and the bones are
+        // still exactly as drawn. The two together, so a still clip on a seen character never counts as culled.
+        private bool CheckCulled()
+        {
+            if (Animancer.Animator.cullingMode != AnimatorCullingMode.CullUpdateTransforms
+                || _watched[0].localPosition != _watchedHips)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < _watched.Length; i++)
+            {
+                if (_watched[i] != null && _watched[i].localRotation != _watchedTurns[i])
+                {
+                    return false;
+                }
+            }
+
+            foreach (Renderer r in _renderers)
+            {
+                if (r != null && r.isVisible)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void LateUpdate()
         {
-            HoldShoulders();
+            Culled = CheckCulled();
+            if (Inertia != null)
+            {
+                Inertia.Paused = Culled;
+            }
+
+            if (!Culled)
+            {
+                HoldShoulders();
+            }
+
             if (!_rootMotion)
             {
                 return;
@@ -645,6 +770,7 @@ namespace Rubickanov.Characters
 
             Animancer.Graph.UnpauseGraph();
             Animancer.Play(Animations.Flails[kind], fade, FadeMode.FromStart);
+            AnimateAlways();
             Animancer.Evaluate();
         }
 
@@ -683,6 +809,7 @@ namespace Rubickanov.Characters
             }
 
             _phase = Phase.GettingUp;
+            AnimateAlways();
             Animancer.Evaluate();
             return state;
         }
@@ -715,11 +842,13 @@ namespace Rubickanov.Characters
             {
                 const float step = 1f / 60f;
                 state.Time = time + step;
-                Animancer.Evaluate();
+                AnimateAlways();
+            Animancer.Evaluate();
                 inertia.TargetBefore(-step);
             }
 
             state.Time = time;
+            AnimateAlways();
             Animancer.Evaluate();
             _getUpMovesBody = moveBody && _rootMotion;
             return state;
@@ -783,6 +912,7 @@ namespace Rubickanov.Characters
             _swim = (MixerState<Vector2>)Animancer.Play(Animations.Swim, 0f);
             _swim.Parameter = Vector2.zero;
             _phase = Phase.GettingUp;
+            AnimateAlways();
             Animancer.Evaluate();
             return true;
         }

@@ -262,6 +262,11 @@ namespace Rubickanov.Characters
                 carrier = Vector3.zero;
             }
 
+            else if (Animator.Culled)
+            {
+                FreshPose();
+            }
+
             Character.Suspend();
             if (inFlight)
             {
@@ -279,6 +284,14 @@ namespace Rubickanov.Characters
             FellDown?.Invoke();
         }
 
+        // Bones left as last drawn by a culled Animator: the clip's pose now, standing still.
+        private void FreshPose()
+        {
+            Animator.Redraw();
+            _ragdoll.ForgetPose();
+            _ragdoll.SamplePose(0f);
+        }
+
         /// <summary>
         /// Throws a standing character down with its whole body going at <paramref name="velocity"/>, e.g. off a
         /// vehicle: the bones take that velocity rather than the capsule's, and no push is added, so how fast it
@@ -289,6 +302,11 @@ namespace Rubickanov.Characters
             if (!isActiveAndEnabled || IsReplica || Ragdoll == null || State != BodyState.Upright)
             {
                 return;
+            }
+
+            if (Animator.Culled)
+            {
+                FreshPose();
             }
 
             Character.Suspend();

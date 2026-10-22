@@ -360,6 +360,9 @@ namespace Rubickanov.Characters
             return bone.transform.rotation * Quaternion.Inverse(bone.RestRotation);
         }
 
+        /// <summary>Forgets the poses read so far: the next <see cref="SamplePose"/> stands still.</summary>
+        public void ForgetPose() => _samples = 0;
+
         /// <summary>
         /// Reads the visible skeleton's pose in the root's space, keeping the read before it for the pose's
         /// velocity. <paramref name="dt"/> is the time since that read.
