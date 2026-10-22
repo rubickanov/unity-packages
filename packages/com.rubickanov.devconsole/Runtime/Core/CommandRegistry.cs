@@ -524,12 +524,32 @@ namespace Rubickanov.DevConsole
                 args = merged;
             }
 
+            // So does a [Remainder] parameter, before the filter, which then sees the arguments the command gets
+            if (cmd.HasRemainder && args.Length >= cmd.Parameters.Length)
+            {
+                var last = cmd.Parameters.Length - 1;
+                var merged = new string[last + 1];
+                Array.Copy(args, merged, last);
+                merged[last] = line.Remainder(nameWords + last);
+                args = merged;
+            }
+
             if (PreExecuteFilter != null)
             {
                 var overrideResult = PreExecuteFilter(cmd, args);
                 if (overrideResult.HasValue) return overrideResult.Value;
             }
 
+            return Execute(cmd, args);
+        }
+
+        /// <summary>
+        /// Runs a resolved command with the arguments a <see cref="PreExecuteFilter"/> is given, as a typed line runs
+        /// after the filter: the same parsing, defaults and errors. The filter is not consulted. Words past a
+        /// [Remainder] parameter are joined with spaces.
+        /// </summary>
+        public ExecutionResult Execute(RegisteredCommand cmd, string[] args)
+        {
             if (cmd.ManualHandler != null)
             {
                 try
@@ -547,10 +567,10 @@ namespace Rubickanov.DevConsole
                 }
             }
 
-            return ExecuteAttributeCommand(cmd, line, nameWords, args);
+            return ExecuteAttributeCommand(cmd, args);
         }
 
-        private ExecutionResult ExecuteAttributeCommand(RegisteredCommand cmd, CommandLine line, int nameWords, string[] args)
+        private ExecutionResult ExecuteAttributeCommand(RegisteredCommand cmd, string[] args)
         {
             var parameters = cmd.Parameters;
             var parsedArgs = new object?[parameters.Length];
@@ -563,7 +583,7 @@ namespace Rubickanov.DevConsole
             for (int i = 0; i < parameters.Length; i++)
             {
                 if (cmd.HasRemainder && i == parameters.Length - 1 && i < args.Length)
-                    parsedArgs[i] = line.Remainder(nameWords + i);
+                    parsedArgs[i] = args.Length == parameters.Length ? args[i] : string.Join(" ", args, i, args.Length - i);
                 else if (i < args.Length)
                 {
                     if (!TryParseArg(args[i], parameters[i].Type, out parsedArgs[i]))

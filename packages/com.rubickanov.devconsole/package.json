@@ -1,6 +1,6 @@
 {
     "name": "com.rubickanov.devconsole",
-    "version": "5.0.0",
+    "version": "5.1.0",
     "license": "MIT",
     "displayName": "Dev Console",
     "description": "In-game developer console window (IMGUI) with attribute commands registered by a source generator, autocomplete, subcommands, and persistent history.",
