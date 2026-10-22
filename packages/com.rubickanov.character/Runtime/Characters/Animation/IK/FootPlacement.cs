@@ -32,6 +32,11 @@ namespace Rubickanov.Characters
             public float Low, High = float.MaxValue;
             // How far ahead of the body it was last frame, along the way the body goes.
             public float Reach;
+            // The animated foot as captured, before the game's placed foot; how much of that is laid on.
+            public Vector3 Captured;
+            public float Placed;
+            // Hip to knee to ankle in the bind pose.
+            public float Length;
         }
 
         private readonly Transform _body;
@@ -54,6 +59,18 @@ namespace Rubickanov.Characters
 
         /// <summary>Layers never taken for ground, on top of the config's.</summary>
         public int IgnoredLayers { get; set; }
+
+        /// <summary>The animated ankle as last captured (with the stance spread), before a placed foot.</summary>
+        public Vector3 Animated(bool left) => (left ? _left : _right).Captured;
+
+        /// <summary>The ankle as last placed.</summary>
+        public Vector3 Ankle(bool left) => (left ? _left : _right).Foot.position;
+
+        /// <summary>The knee as last placed.</summary>
+        public Vector3 Knee(bool left) => (left ? _left : _right).Lower.position;
+
+        /// <summary>Hip to knee to ankle, metres.</summary>
+        public float LegLength(bool left) => (left ? _left : _right).Length;
 
         public FootPlacement(Animator animator, Transform body)
         {
@@ -91,6 +108,28 @@ namespace Rubickanov.Characters
             Spread(_right, halfSpread);
         }
 
+        /// <summary>After <see cref="Capture()"/>: lays the game's placed feet over the captured ones.</summary>
+        public void Place(RigFoot left, RigFoot right)
+        {
+            PlaceLeg(_left, left);
+            PlaceLeg(_right, right);
+        }
+
+        private void PlaceLeg(Leg leg, RigFoot foot)
+        {
+            leg.Captured = leg.AnimatedFoot;
+            leg.Placed = Mathf.Clamp01(foot.Weight);
+            if (leg.Placed <= 0f)
+            {
+                return;
+            }
+
+            // As an animated ankle: the probe sets it on the ground under the point.
+            Vector3 delta = (foot.Point - leg.AnimatedFoot) * leg.Placed;
+            leg.AnimatedFoot += delta;
+            leg.AnimatedToes += delta;
+        }
+
         private static void Spread(Leg leg, Vector3 offset)
         {
             leg.AnimatedFoot += offset;
@@ -115,7 +154,14 @@ namespace Rubickanov.Characters
 
             Step(_left, config, root, up, grounded, true);
             Step(_right, config, root, up, grounded, false);
-            float pelvis = _pelvis.Step(Mathf.Min(left, right, 0f), config.PelvisSpring, deltaTime);
+            float reach = Mathf.Min(Reach(_left, up), Reach(_right, up));
+            float pelvis = _pelvis.Step(Mathf.Min(left, right, 0f, reach), config.PelvisSpring, deltaTime);
+            // A placed foot is pinned: the hips never lag so far that its leg falls short of it.
+            if (reach < 0f)
+            {
+                pelvis = Mathf.Min(pelvis, reach);
+            }
+
             if (weight <= 0f)
             {
                 return;
@@ -143,6 +189,23 @@ namespace Rubickanov.Characters
             }
         }
 
+        // A placed foot set wide may be out of the leg's reach from the hips: how far they sink so it reaches
+        // (negative), by its weight; 0 for an animated foot, so the old pose is untouched.
+        private static float Reach(Leg leg, Vector3 up)
+        {
+            if (leg.Placed <= 0f || leg.Length <= 0f)
+            {
+                return 0f;
+            }
+
+            Vector3 line = leg.AnimatedFoot + up * leg.Offset.Value - leg.Upper.position;
+            float below = -Vector3.Dot(line, up);
+            float across = Vector3.ProjectOnPlane(line, up).magnitude;
+            float length = leg.Length * 0.97f;
+            float need = across < length ? Mathf.Sqrt(length * length - across * across) : 0f;
+            return Mathf.Clamp(need - below, -0.5f * leg.Length, 0f) * leg.Placed;
+        }
+
         private static Leg CreateLeg(Animator animator, HumanBodyBones upper, HumanBodyBones lower,
             HumanBodyBones foot, HumanBodyBones toes, float soleHeight)
         {
@@ -154,7 +217,14 @@ namespace Rubickanov.Characters
                 Toes = animator.GetBoneTransform(toes),
                 SoleHeight = soleHeight,
             };
-            return leg.Upper != null && leg.Lower != null && leg.Foot != null ? leg : null;
+            if (leg.Upper == null || leg.Lower == null || leg.Foot == null)
+            {
+                return null;
+            }
+
+            leg.Length = Vector3.Distance(leg.Upper.position, leg.Lower.position)
+                         + Vector3.Distance(leg.Lower.position, leg.Foot.position);
+            return leg;
         }
 
         private static void CaptureLeg(Leg leg)
