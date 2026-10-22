@@ -147,7 +147,7 @@ namespace Rubickanov.Characters
                 return;
             }
 
-            if (_animator.cullingMode != AnimatorCullingMode.AlwaysAnimate)
+            if (!Animator.MayCull && _animator.cullingMode != AnimatorCullingMode.AlwaysAnimate)
             {
                 // A culled Animator stops rewriting the bones, and the rig's rotations would pile up on them.
                 Log.Warn("CharacterRig expects the Animator to always animate.", this);
@@ -164,7 +164,12 @@ namespace Rubickanov.Characters
             _swim = new SwimPose(_animator, _model);
             _head = _animator.GetBoneTransform(HumanBodyBones.Head);
 
-            CharacterMotion motion = Animator.Source?.Motion ?? default;
+            ResetParts(Animator.Source?.Motion ?? default);
+        }
+
+        // Everything starts from the pose shown now, as on enabling.
+        private void ResetParts(CharacterMotion motion)
+        {
             _feet.Reset(motion.IsGrounded);
             _contacts.Reset();
             _look.Reset();
@@ -173,7 +178,11 @@ namespace Rubickanov.Characters
             _swim.Reset();
             _mount = Animator.Character.Mount;
             _lastTurnOffset = Animator.TurnOffset;
+            _culled = false;
         }
+
+        // The last frame was culled: the parts start again from the pose shown.
+        private bool _culled;
 
         private void LateUpdate() => UpdateRig(Time.deltaTime);
 
@@ -187,6 +196,23 @@ namespace Rubickanov.Characters
 
             CharacterMotion motion = source.Motion;
             ICharacterMount mount = Animator.Character.Mount;
+            if (Animator.Culled)
+            {
+                // The bones are as last drawn: anything laid on them would pile up. The prints follow the body.
+                _culled = true;
+                if (_feet.IsValid && mount == null)
+                {
+                    _feet.StepBlind(Config, motion.IsGrounded, deltaTime);
+                }
+
+                return;
+            }
+
+            if (_culled)
+            {
+                ResetParts(motion);
+            }
+
             if (!ReferenceEquals(mount, _mount))
             {
                 if (mount == null)

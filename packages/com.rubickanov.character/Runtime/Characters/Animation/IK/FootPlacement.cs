@@ -51,6 +51,20 @@ namespace Rubickanov.Characters
         private FloatSpring _weight;
         private Vector3 _lastRoot;
         private Vector3 _heading;
+        // Prints with no pose to read: the body's place last frame, how far it walked since the last print, which
+        // foot is next. A step's length grows with speed (about 0.7 m walking, 1.2 m running).
+        private bool _blind;
+        private Vector3 _blindLast;
+        private float _blindWalked;
+        private bool _blindLeft;
+        private const float BlindStride = 0.42f;
+        private const float BlindStridePerSpeed = 0.2f;
+        private const float MaxBlindStride = 1.4f;
+        private const float MinBlindApart = 0.05f;
+        private const float MaxBlindApart = 0.2f;
+        private const float BlindFoot = 0.2f;
+        // More than this in a frame is a teleport, not a step.
+        private const float MaxBlindFrame = 2f;
 
         public bool IsValid => _hips != null && _left != null && _right != null;
 
@@ -87,6 +101,8 @@ namespace Rubickanov.Characters
 
         public void Reset(bool grounded)
         {
+            _blind = false;
+            _blindWalked = 0f;
             _pelvis.Reset(0f);
             _weight.Reset(grounded ? 1f : 0f);
             foreach (Leg leg in new[] { _left, _right })
@@ -116,6 +132,46 @@ namespace Rubickanov.Characters
         {
             PlaceLeg(_left, left);
             PlaceLeg(_right, right);
+        }
+
+        /// <summary>
+        /// With the bones as last drawn (a culled Animator) the prints follow the body: a foot set down at each stride
+        /// it walks on the ground, the feet by turns, as far apart as the drawn pose stands.
+        /// </summary>
+        public void StepBlind(CharacterRigConfig config, bool grounded, float deltaTime)
+        {
+            Vector3 root = _body.position;
+            Vector3 up = _body.up;
+            Vector3 moved = Vector3.ProjectOnPlane(root - _blindLast, up);
+            bool started = _blind;
+            _blind = true;
+            _blindLast = root;
+            float distance = moved.magnitude;
+            if (!started || !grounded || Prints == null || deltaTime <= 0f || distance > MaxBlindFrame)
+            {
+                _blindWalked = 0f;
+                return;
+            }
+
+            _blindWalked += distance;
+            float stride = Mathf.Clamp(BlindStride + BlindStridePerSpeed * distance / deltaTime, BlindStride, MaxBlindStride);
+            if (_blindWalked < stride || distance < 1e-5f)
+            {
+                return;
+            }
+
+            _blindWalked = Mathf.Min(_blindWalked - stride, stride);
+            Vector3 heading = moved / distance;
+            Vector3 right = Vector3.Cross(up, heading);
+            Leg leg = _blindLeft ? _left : _right;
+            float apart = Mathf.Clamp(Mathf.Abs(Vector3.Dot(leg.Foot.position - root, right)), MinBlindApart, MaxBlindApart);
+            Vector3 point = root + right * (_blindLeft ? -apart : apart);
+            if (Cast(point, config, root, up, out Vector3 contact, out _) != null)
+            {
+                Prints.Planted(contact, contact + heading * BlindFoot, _blindLeft);
+            }
+
+            _blindLeft = !_blindLeft;
         }
 
         private void PlaceLeg(Leg leg, RigFoot foot)
