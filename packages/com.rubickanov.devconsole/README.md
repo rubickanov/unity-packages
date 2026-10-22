@@ -354,6 +354,8 @@ CommandRegistry.Instance.PreExecuteFilter = (cmd, args) =>
 };
 ```
 
+`CommandRegistry.Execute(cmd, args)` runs a command with the arguments a filter was given, skipping the filter, e.g. on a host the client's filter forwarded the command to.
+
 ### Built-in Commands
 
 | Command | Description |
