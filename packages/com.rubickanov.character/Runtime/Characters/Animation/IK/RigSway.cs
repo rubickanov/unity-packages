@@ -16,8 +16,19 @@ namespace Rubickanov.Characters
         public float ArmHang;
         /// <summary>Metres the feet are set wider apart while on the ground.</summary>
         public float Stance;
+        /// <summary>World, horizontal, degrees: laid on the chest on top of <see cref="Lean"/> (the chain lagging it).</summary>
+        public Vector3 ChestLean;
+        /// <summary>
+        /// Degrees on each upper arm after the hang: x raises it out to its side, y forward, z bends the elbow.
+        /// </summary>
+        public Vector3 LeftArm;
+        public Vector3 RightArm;
+        /// <summary>Metres the pelvis sinks while the feet hold the ground: the knees give.</summary>
+        public float Sink;
 
-        public bool IsZero => Lean.sqrMagnitude == 0f && HeadLean.sqrMagnitude == 0f && ArmHang == 0f && Stance == 0f;
+        public bool IsZero => Lean.sqrMagnitude == 0f && HeadLean.sqrMagnitude == 0f && ArmHang == 0f && Stance == 0f
+                              && ChestLean.sqrMagnitude == 0f && LeftArm.sqrMagnitude == 0f
+                              && RightArm.sqrMagnitude == 0f && Sink == 0f;
 
         /// <summary>A rotation tipping the top of the body by <paramref name="lean"/> (degrees, world).</summary>
         public static Quaternion Tip(Vector3 lean, Vector3 up)

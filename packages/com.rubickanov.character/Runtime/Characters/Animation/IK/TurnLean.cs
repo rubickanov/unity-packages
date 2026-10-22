@@ -25,6 +25,9 @@ namespace Rubickanov.Characters
         private readonly Transform _head;
         private readonly Transform _leftArm;
         private readonly Transform _rightArm;
+        private readonly Transform _leftForearm;
+        private readonly Transform _rightForearm;
+        private readonly Transform _chest;
         private readonly List<Bone> _bones = new();
         private Vector3 _lastForward;
         private FloatSpring _speed;
@@ -42,6 +45,9 @@ namespace Rubickanov.Characters
             _head = animator.GetBoneTransform(HumanBodyBones.Head);
             _leftArm = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
             _rightArm = animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            _leftForearm = animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+            _rightForearm = animator.GetBoneTransform(HumanBodyBones.RightLowerArm);
+            _chest = animator.GetBoneTransform(HumanBodyBones.UpperChest) ?? animator.GetBoneTransform(HumanBodyBones.Chest);
             for (int i = 0; i < bones.Length; i++)
             {
                 Transform transform = animator.GetBoneTransform(bones[i].Bone);
@@ -107,6 +113,11 @@ namespace Rubickanov.Characters
 
             if (Mathf.Abs(roll) < 1e-3f && Mathf.Abs(pitch) < 1e-3f)
             {
+                if (swaying)
+                {
+                    Limbs(sway, weight, up, forward, right);
+                }
+
                 return;
             }
 
@@ -153,6 +164,52 @@ namespace Rubickanov.Characters
                 if (_rightArm != null)
                 {
                     _rightArm.rotation = back * _rightArm.rotation;
+                }
+            }
+
+            if (swaying)
+            {
+                Limbs(sway, weight, up, forward, right);
+            }
+        }
+
+        // The sway's chain past the lean: the pelvis sinking (the feet pass after hold the ground, so the knees give),
+        // the chest lagging, the arms thrown out and the elbows bent.
+        private void Limbs(in RigSway sway, float weight, Vector3 up, Vector3 forward, Vector3 right)
+        {
+            if (_hips != null && sway.Sink != 0f)
+            {
+                _hips.position -= up * (sway.Sink * weight);
+            }
+
+            if (_chest != null && sway.ChestLean.sqrMagnitude > 0f)
+            {
+                _chest.rotation = RigSway.Tip(sway.ChestLean * weight, up) * _chest.rotation;
+            }
+
+            Arm(_leftArm, _leftForearm, sway.LeftArm * weight, -right, up, forward);
+            Arm(_rightArm, _rightForearm, sway.RightArm * weight, right, up, forward);
+        }
+
+        private static void Arm(Transform upper, Transform lower, Vector3 degrees, Vector3 side, Vector3 up,
+            Vector3 forward)
+        {
+            if (upper == null || degrees.sqrMagnitude == 0f)
+            {
+                return;
+            }
+
+            // Out to its side and forward, each from hanging down; then the forearm bends toward the front.
+            Quaternion raise = Quaternion.AngleAxis(degrees.x, Vector3.Cross(-up, side))
+                               * Quaternion.AngleAxis(degrees.y, Vector3.Cross(-up, forward));
+            upper.rotation = raise * upper.rotation;
+            if (lower != null && degrees.z != 0f)
+            {
+                Vector3 along = lower.position - upper.position;
+                Vector3 axis = Vector3.Cross(along, forward);
+                if (axis.sqrMagnitude > 1e-8f)
+                {
+                    lower.rotation = Quaternion.AngleAxis(degrees.z, axis.normalized) * lower.rotation;
                 }
             }
         }
