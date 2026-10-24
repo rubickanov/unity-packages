@@ -28,6 +28,12 @@ namespace Rubickanov.Audio
         [field: SerializeField, Min(0f), Tooltip("Seconds an attached loop fades out for when the object it follows is destroyed.")]
         public float LostTargetFadeOut { get; private set; } = 0.25f;
 
+        [field: SerializeField, Tooltip("Occlusion, head shadow and outdoor reverb shared by every SoundKind.")]
+        public SoundSpaceSettings Space { get; private set; } = new();
+
+        [field: SerializeField, Tooltip("A lookahead true-peak limiter on the active AudioListener, after the whole mixer.")]
+        public OutputLimiterSettings Limiter { get; private set; } = new();
+
         [Header("Time")]
         [field: SerializeField, Tooltip("Fades, crossfades and ramps run on real time, so slow motion and a paused time scale don't stretch or freeze them.")]
         public bool UnscaledTime { get; private set; } = true;

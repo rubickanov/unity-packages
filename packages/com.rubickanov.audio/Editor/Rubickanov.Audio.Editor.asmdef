@@ -1,0 +1,18 @@
+{
+    "name": "Rubickanov.Audio.Editor",
+    "rootNamespace": "Rubickanov.Audio.Editor",
+    "references": [
+        "Rubickanov.Audio.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
