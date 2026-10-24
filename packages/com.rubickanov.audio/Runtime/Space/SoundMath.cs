@@ -98,6 +98,27 @@ namespace Rubickanov.Audio
             return Mathf.Clamp01(-cos);
         }
 
+        /// <summary>Points an occlusion check aims its rays at: the source's centre, then a half-ring round it.</summary>
+        public const int OcclusionPoints = 8;
+
+        /// <summary>
+        /// Point <paramref name="index"/> of <see cref="OcclusionPoints"/>: 0 the source, the rest a half-ring of
+        /// <paramref name="radius"/> across the line from the listener, from one side over the top to the other, never
+        /// below the source (the ground under it blocks nothing). Sound bends round an obstacle smaller than the ring.
+        /// </summary>
+        public static Vector3 OcclusionPoint(Vector3 listener, Vector3 source, float radius, int index)
+        {
+            if (index <= 0 || radius <= 0f) return source;
+            Vector3 along = source - listener;
+            Vector3 side = Vector3.Cross(Vector3.up, along);
+            if (side.sqrMagnitude < 1e-8f) side = Vector3.right;
+            side.Normalize();
+            Vector3 up = Vector3.Cross(along, side).normalized;
+            if (up.y < 0f) up = -up;
+            float angle = (index - 1) * Mathf.PI / (OcclusionPoints - 2);
+            return source + radius * (Mathf.Cos(angle) * side + Mathf.Sin(angle) * up);
+        }
+
         public static float DbToGain(float db) => Mathf.Pow(10f, db / 20f);
 
         /// <summary>One-pole step towards target: 63 % of the way after tau seconds, never past it.</summary>

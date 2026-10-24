@@ -49,10 +49,12 @@ namespace Rubickanov.Audio
         [field: Header("Listener")]
         [field: SerializeField, Range(0f, 1f), Tooltip("Behind the head: highs cut and a little quieter.")]
         public float HeadShadow { get; private set; } = 1f;
-        [field: SerializeField, Tooltip("A ray from the listener muffles the sound behind static world.")]
+        [field: SerializeField, Tooltip("Rays from the listener muffle the sound behind static world.")]
         public bool Occlusion { get; private set; }
         [field: SerializeField, Tooltip("Static world only: terrain, rocks, buildings. Never characters, vehicles, items, water.")]
         public LayerMask OcclusionMask { get; private set; } = 1;
+        [field: SerializeField, Min(0f), Tooltip("Sound bends round anything smaller than this, m: the rays go to the source and a half-ring this wide round it, and the share blocked is the occlusion. 0: one ray to the centre.")]
+        public float OcclusionRadius { get; private set; } = 1f;
         [field: SerializeField, Range(0, 256)] public int Priority { get; private set; } = 128;
         [field: SerializeField, Tooltip("Optional default mixer group for sounds of this kind.")]
         public AudioMixerGroup? Output { get; private set; }
@@ -66,7 +68,7 @@ namespace Rubickanov.Audio
         public static SoundKind Create(DistanceLaw law = DistanceLaw.Inverse, float reference = 2f, float max = 60f,
             float fadeShare = 0.2f, float air = 4f, float spreadNear = 110f, float spreadFar = 90f, float spreadFarAt = 6f,
             float reverbAtReference = 0.05f, float reverbMax = 1.1f, float headShadow = 1f, bool occlusion = false,
-            int occlusionMask = 1, int priority = 128, AudioMixerGroup? output = null)
+            int occlusionMask = 1, int priority = 128, AudioMixerGroup? output = null, float occlusionRadius = 1f)
         {
             var kind = CreateInstance<SoundKind>();
             kind.Law = law;
@@ -82,6 +84,7 @@ namespace Rubickanov.Audio
             kind.HeadShadow = Mathf.Clamp01(headShadow);
             kind.Occlusion = occlusion;
             kind.OcclusionMask = occlusionMask;
+            kind.OcclusionRadius = Mathf.Max(0f, occlusionRadius);
             kind.Priority = Mathf.Clamp(priority, 0, 256);
             kind.Output = output;
             return kind;

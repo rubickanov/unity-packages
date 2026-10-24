@@ -52,7 +52,7 @@ namespace Rubickanov.Audio.Tests
         public void Tick_OccludedAfterOpen_Reaches63PercentAtAttackWithoutOvershoot()
         {
             bool blocked = false;
-            _space.Blocked = (_, _, _) => blocked;
+            _space.Blocked = (_, _, _) => blocked ? 1f : 0f;
             var h = _space.Add(Source(Vector3.forward * 10f), Kind(occlusion: true, headShadow: 0f));
             blocked = true;
 
@@ -93,31 +93,73 @@ namespace Rubickanov.Audio.Tests
         [Test]
         public void Tick_TwentyOccludedWithBudgetEight_EveryOneCheckedWithinThreeFrames()
         {
-            var checks = new Dictionary<Vector3, int>();
+            int rays = 0;
             _space.Settings.RaysPerFrame = 8;
             var kind = Kind(occlusion: true, headShadow: 0f);
             var silent = Kind(occlusion: false, headShadow: 1f);
-            var points = new List<Vector3>();
+            var handles = new List<SpatialHandle>();
             for (int i = 0; i < 20; i++)
             {
                 var at = new Vector3(i + 1, 0f, 3f);
-                points.Add(at);
-                _space.Add(Source(at), kind);
+                handles.Add(_space.Add(Source(at), kind));
                 _space.Add(Source(at + Vector3.up * 50f), silent);
             }
-            _space.Blocked = (_, to, _) =>
+            _space.Blocked = (_, _, _) =>
             {
-                checks[to] = checks.TryGetValue(to, out int n) ? n + 1 : 1;
-                return false;
+                rays++;
+                return 1f;
             };
 
             for (int frame = 0; frame < 3; frame++) _space.Tick(0.016f);
 
-            foreach (Vector3 p in points)
-                Assert.That(checks.TryGetValue(p, out int n) ? n : 0, Is.GreaterThanOrEqualTo(1), $"source at {p}");
-            int total = 0;
-            foreach (int n in checks.Values) total += n;
-            Assert.AreEqual(24, total, "8 rays per frame, only on occluded kinds");
+            foreach (SpatialHandle h in handles)
+                Assert.That(_space.OcclusionOf(h), Is.GreaterThan(0f), $"slot {h.Slot}");
+            Assert.AreEqual(24, rays, "8 rays per frame, only on occluded kinds");
+        }
+
+        [Test]
+        public void Tick_OnlyTheCentreBlocked_OccludesAnEighth()
+        {
+            var at = Vector3.forward * 10f;
+            _space.Blocked = (_, to, _) => to == at ? 1f : 0f;
+            var h = _space.Add(Source(at), Kind(occlusion: true, headShadow: 0f));
+            for (int i = 0; i < 400; i++) _space.Tick(0.05f);
+
+            Assert.AreEqual(1f / SoundMath.OcclusionPoints, _space.OcclusionOf(h), 1e-3f);
+        }
+
+        [Test]
+        public void Add_SmallOccluderBetween_PassesAndAThinOneHalfBlocks()
+        {
+            var at = Vector3.forward * 10f;
+            var kind = Kind(occlusion: true, headShadow: 0f);
+            GameObject table = Make("Table");
+            table.transform.position = Vector3.forward * 5f;
+            table.AddComponent<BoxCollider>().size = new Vector3(0.4f, 0.4f, 0.4f);
+            Physics.SyncTransforms();
+            var small = _space.Add(Source(at), kind);
+            Assert.AreEqual(1f / SoundMath.OcclusionPoints, _space.OcclusionOf(small), 1e-3f, "only the centre ray hits it");
+
+            table.GetComponent<BoxCollider>().size = new Vector3(10f, 10f, 0.1f);
+            table.AddComponent<SoundOccluder>().Strength = 0.5f;
+            Physics.SyncTransforms();
+            var wall = _space.Add(Source(at), kind);
+            Assert.AreEqual(0.5f, _space.OcclusionOf(wall), 0.01f, "a cloth wall blocks by its strength");
+        }
+
+        [Test]
+        public void OcclusionPoint_HalfRingAcrossTheLine_NeverBelowTheSource()
+        {
+            var ears = new Vector3(3f, 1.7f, -2f);
+            var source = new Vector3(-4f, 0.3f, 6f);
+            Assert.AreEqual(source, SoundMath.OcclusionPoint(ears, source, 1f, 0));
+            for (int i = 1; i < SoundMath.OcclusionPoints; i++)
+            {
+                Vector3 p = SoundMath.OcclusionPoint(ears, source, 1f, i);
+                Assert.AreEqual(1f, Vector3.Distance(p, source), 1e-4f);
+                Assert.AreEqual(0f, Vector3.Dot(p - source, (source - ears).normalized), 1e-4f);
+                Assert.GreaterOrEqual(p.y, source.y - 1e-4f);
+            }
         }
 
         [Test]

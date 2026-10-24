@@ -19,6 +19,7 @@ IAudioService
 
 SoundSpace               — applies SoundKinds to sources: static curves once, head shadow + occlusion per frame
 ├── SoundKind            — ScriptableObject: what a kind of 3D sound does with distance and the listener
+├── SoundOccluder        — on an object: how much its colliders block sound (0 passes … 1 rock)
 └── SoundMath            — the numbers: distance law, air cutoff, spread, reverb send, back amount, curves
 
 OutputLimiter            — lookahead true-peak limiter on the active listener, after the whole mixer
@@ -45,7 +46,7 @@ ListenerCapture          — records the final output (or the listener) to a WAV
 
 **SoundHandle** — Opaque readonly struct returned by `PlaySFX*`. Pass it to `StopSound` to stop a one-shot early. Ignore it if you don't need to.
 
-**SoundKind** — ScriptableObject (**Create > Config > Sound Kind**) describing a kind of 3D sound: the distance law (`Inverse`: full level within `Reference`, −6 dB per doubling past it, a smoothstep fade to silence over the last `FadeShare` of `Max`; `External`: flat, the owner sets the level), `Air` (high-frequency loss ×ISO 9613-1), `SpreadNear`/`SpreadFar`/`SpreadFarAt` (width by distance), `ReverbAtReference`/`ReverbMax` (reverb-zone send rising with distance), `HeadShadow`, `Occlusion` with its `OcclusionMask`, `Priority` and an optional `Output` group. A `SoundConfig` names its kind in `Kind`.
+**SoundKind** — ScriptableObject (**Create > Config > Sound Kind**) describing a kind of 3D sound: the distance law (`Inverse`: full level within `Reference`, −6 dB per doubling past it, a smoothstep fade to silence over the last `FadeShare` of `Max`; `External`: flat, the owner sets the level), `Air` (high-frequency loss ×ISO 9613-1), `SpreadNear`/`SpreadFar`/`SpreadFarAt` (width by distance), `ReverbAtReference`/`ReverbMax` (reverb-zone send rising with distance), `HeadShadow`, `Occlusion` with its `OcclusionMask` and `OcclusionRadius`, `Priority` and an optional `Output` group. A `SoundConfig` names its kind in `Kind`.
 
 **SoundSpace** — Applies kinds to `AudioSource`s. `Shape` sets everything static once (custom rolloff, spread and reverb-mix curves, the air low-pass curve); `Add` also registers a source for the per-frame part (head shadow, occlusion) when the kind needs it (`kind.Ticks`). One list, no component per source. The service takes a space and uses it for every 3D play of a sound with a kind; a game adds its own sources (speakers, voices) itself.
 
@@ -224,7 +225,7 @@ What each kind sets:
 | `SpreadNear` → `SpreadFar` at `SpreadFarAt` | Width blended on log distance from `Reference`; ≤ 110° keeps a side source ≥ 6 dB louder in its ear (Unity's spread 0 is a hard pan, 180° has no direction) |
 | `ReverbAtReference`, `ReverbMax` | Reverb-zone send `min(ReverbMax, ReverbAtReference · d / Reference)` |
 | `HeadShadow` | Straight behind: −1.25 dB and the cutoff × 0.55, near an octave duller (`SoundSpaceSettings.ShadowDb`, `ShadowCutoff`), smoothed over 60 ms |
-| `Occlusion`, `OcclusionMask` | A ray from the listener to the source (round-robin, `RaysPerFrame`); fully occluded: −9 dB and ×0.3 cutoff, attack 0.12 s, release 0.3 s |
+| `Occlusion`, `OcclusionMask`, `OcclusionRadius` | Rays from the listener to the source and to 7 points on a half-ring of `OcclusionRadius` round it (across the line, over the top, never below); occlusion is the share blocked, so a table or a post blocks little and a rock all (round-robin, `RaysPerFrame` 16, one point per ray). A collider blocks by its `SoundOccluder.Strength` (0 passes, 1 rock), else fully. Fully occluded: −9 dB and ×0.3 cutoff, attack 0.12 s, release 0.3 s |
 
 Unity's panner loses up to 3 dB as a mono source widens (measured: −1.28 dB at 90°, −3.04 dB at 180°); the rolloff curve undoes it relative to the kind's widest spread, so width never changes loudness.
 
@@ -387,7 +388,7 @@ foreach (var (param, volume) in settings.Volumes)
 - **Rolloff, spread, reverb mix and air as custom curves** — Unity evaluates them on the audio side per source at no main-thread cost; only shadow and occlusion need per-frame writes, and only for kinds that use them.
 - **Low-pass Q 0.707** — Unity's default Q 1 bumps +1.25 dB at the cutoff; a moving cutoff on it sounds like a wah.
 - **Smoothed shadow and occlusion** — a one-pole on the back amount (60 ms) and on occlusion (attack/release) so a fast turn or a passing rock sweeps the filter instead of stepping it: no clicks, no level jumps.
-- **One occlusion ray per source** — to the source's centre, against static world only; a thin plank occludes like a cliff. Several rays and thickness are left for later.
+- **Volumetric occlusion** — the source is a ball, not a point (as Steam Audio's volumetric occlusion): eight rays to it and round it, the share blocked is the occlusion. Sound bends round small things, so a table or a lamp post between barely muffles and a cliff's edge fades in instead of stepping; no layers or tags per prop. One point per ray, round-robin, so the cost per frame stays `RaysPerFrame` raycasts whatever the count. `SoundOccluder` is for what is big but thin (a cloth screen, a fence): its strength caps what its colliders block.
 - **Kind-less sources bypass reverb zones** — a zone would otherwise send engines, UI and voice chat into the reverb.
 - **The pool's filter is added up front** — every pooled source gets a disabled low-pass when the service has a space, so a play enables it instead of rebuilding the DSP chain of a source about to start.
 - **Mixer layout by a helper, not a template** — games already own mixers with their values and exposed names; a template cannot merge into them.
@@ -400,7 +401,7 @@ foreach (var (param, volume) in settings.Volumes)
 ```
 com.rubickanov.audio/
 ├── Runtime/
-│   ├── Space/       — SoundKind, SoundMath, SoundSpace, KindCurves, PropagationDelay
+│   ├── Space/       — SoundKind, SoundMath, SoundSpace, SoundOccluder, KindCurves, PropagationDelay
 │   ├── Loudness/    — LoudnessMeter, LoudnessGain
 │   ├── Limiter/     — OutputLimiter, TruePeakLimiter
 │   └── Capture/     — ListenerCapture

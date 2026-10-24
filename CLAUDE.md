@@ -8,7 +8,7 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-Versions: `audio` `3.2.0`, `log` `1.2.0`, `eqs` `2.0.0`, `ui` `4.1.0`, `devconsole` `5.0.0`, `save` `1.0.0`, `input` `1.1.0`, `character` `2.1.0`:
+Versions: `audio` `3.3.0`, `log` `1.2.0`, `eqs` `2.0.0`, `ui` `4.1.0`, `devconsole` `5.0.0`, `save` `1.0.0`, `input` `1.1.0`, `character` `2.1.0`:
 
 | Package | Purpose |
 |---|---|
