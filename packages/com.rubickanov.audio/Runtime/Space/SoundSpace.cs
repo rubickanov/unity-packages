@@ -65,8 +65,8 @@ namespace Rubickanov.Audio
     [Serializable]
     public sealed class SoundSpaceSettings
     {
-        [Tooltip("Occlusion rays per frame, round-robin over the occluded sounds.")]
-        public int RaysPerFrame = 8;
+        [Tooltip("Occlusion rays per frame, round-robin over the occluded sounds (a sound's full look takes 8).")]
+        public int RaysPerFrame = 16;
         [Tooltip("Seconds (time constant) into the shadow of an obstacle.")]
         public float OcclusionAttack = 0.12f;
         [Tooltip("Seconds (time constant) out of it.")]
@@ -137,8 +137,9 @@ namespace Rubickanov.Audio
         /// <summary>False: nothing is occluded (A/B checks); the smoothing still eases the change.</summary>
         public bool OcclusionOn { get; set; } = true;
 
-        // Test hook: (from, to, mask) → blocked.
-        internal Func<Vector3, Vector3, int, bool> Blocked = RayBlocked;
+        // Test hook: (from, to, mask) → how much blocks the way, 0..1.
+        internal Func<Vector3, Vector3, int, float> Blocked = RayBlock;
+        private static readonly RaycastHit[] Hits = new RaycastHit[8];
 
         /// <summary>
         /// The kind's static part: rolloff, spread and reverb-mix curves, max distance, priority, the low-pass (air
@@ -241,7 +242,8 @@ namespace Rubickanov.Audio
             Transform? ears = ResolveListener();
             if (e.Ticks && ears != null)
             {
-                if (e.Occludes) e.OccTarget = OcclusionOn && Blocked(ears.position, source.transform.position, kind.OcclusionMask) ? 1f : 0f;
+                if (e.Occludes)
+                    for (int i = 0; i < SoundMath.OcclusionPoints; i++) Look(ref e, ears.position);
                 Step(ref e, ears.position, ears.forward, 0f, snap: true);
             }
             else
@@ -342,19 +344,48 @@ namespace Rubickanov.Audio
             _top = _count = _occluders = 0;
         }
 
-        // Every occluded entry is checked within ⌈occluded / RaysPerFrame⌉ frames.
+        // One ray each, round-robin: every occluded entry gets a ray within ⌈occluded / RaysPerFrame⌉ frames, and a
+        // few entries get several a frame, up to their whole look.
         private void CastRays(Vector3 at)
         {
             if (_occluders == 0) return;
             int budget = Mathf.Max(1, _settings.RaysPerFrame);
-            for (int scanned = 0; scanned < _top && budget > 0; scanned++)
+            for (int scanned = 0; scanned < _top * SoundMath.OcclusionPoints && budget > 0; scanned++)
             {
                 if (_rayCursor >= _top) _rayCursor = 0;
                 ref Entry e = ref _entries[_rayCursor++];
                 if (!e.Alive || !e.Occludes || e.Source == null) continue;
-                e.OccTarget = OcclusionOn && Blocked(at, e.Source.transform.position, e.Kind.OcclusionMask) ? 1f : 0f;
+                Look(ref e, at);
                 budget--;
             }
+        }
+
+        // The entry's next point: how much blocks the way there, kept per point; the target is their mean.
+        private void Look(ref Entry e, Vector3 at)
+        {
+            int point = e.Point;
+            e.Point = (byte)((point + 1) % SoundMath.OcclusionPoints);
+            float blocked = 0f;
+            if (OcclusionOn)
+            {
+                Vector3 to = SoundMath.OcclusionPoint(at, e.Source.transform.position, e.Kind.OcclusionRadius, point);
+                blocked = Mathf.Clamp01(Blocked(at, to, e.Kind.OcclusionMask));
+            }
+
+            ulong level = (ulong)Mathf.RoundToInt(blocked * 255f);
+            if (e.Kind.OcclusionRadius <= 0f)
+            {
+                // One point only: it stands for all of them.
+                e.Points = level * 0x0101010101010101UL;
+                e.OccTarget = level / 255f;
+                return;
+            }
+
+            int shift = point * 8;
+            e.Points = (e.Points & ~(0xFFUL << shift)) | (level << shift);
+            int sum = 0;
+            for (ulong p = e.Points; p != 0; p >>= 8) sum += (int)(p & 0xFF);
+            e.OccTarget = sum / (255f * SoundMath.OcclusionPoints);
         }
 
         private void Step(ref Entry e, Vector3 at, Vector3 forward, float dt, bool snap)
@@ -406,12 +437,16 @@ namespace Rubickanov.Audio
             _count--;
         }
 
-        private static bool RayBlocked(Vector3 from, Vector3 to, int mask)
+        // The most any collider on the way blocks (SoundOccluder.Of), 0 when none.
+        internal static float RayBlock(Vector3 from, Vector3 to, int mask)
         {
             Vector3 d = to - from;
             float distance = d.magnitude;
-            if (distance <= RayShortfall) return false;
-            return Physics.Raycast(from, d / distance, distance - RayShortfall, mask, QueryTriggerInteraction.Ignore);
+            if (distance <= RayShortfall) return 0f;
+            int n = Physics.RaycastNonAlloc(from, d / distance, Hits, distance - RayShortfall, mask, QueryTriggerInteraction.Ignore);
+            float most = 0f;
+            for (int i = 0; i < n && most < 1f; i++) most = Mathf.Max(most, SoundOccluder.Of(Hits[i].collider));
+            return most;
         }
 
         private struct Entry
@@ -423,6 +458,9 @@ namespace Rubickanov.Audio
             public float Back;
             public float Occ;
             public float OccTarget;
+            // Per occlusion point, 0..255 blocked; the next point to look at.
+            public ulong Points;
+            public byte Point;
             public float Gain;
             public int Gen;
             public bool Alive;
