@@ -54,6 +54,15 @@ namespace Rubickanov.Audio
         private readonly List<AudioSource> _stopBuffer = new();
         private readonly Dictionary<string, float> _volumes = new();
         private readonly CancellationTokenSource _cts = new();
+        private readonly SoundSpace? _space;
+        private readonly OutputLimiterSettings _limiterSettings;
+        private AudioListener? _limitedEars;
+        private OutputLimiter? _limiter;
+        private bool _limiterAdded;
+        private bool _limiterOn;
+        private float _nextEarsFind;
+        // Sources playing a kind: their volume is owned by the space (it carries head shadow and occlusion).
+        private readonly Dictionary<AudioSource, SpatialHandle> _spatial = new();
 
         // Clock for MinInterval, the same time the fades run on.
         private readonly Func<double> _now;
@@ -66,9 +75,12 @@ namespace Rubickanov.Audio
         // Silence on the mixer, the floor of its volume faders.
         private const float MinDecibels = -80f;
 
-        public UnityAudioService(AudioServiceConfig config)
+        /// <param name="space">Applies <see cref="SoundConfig.Kind"/> to point and attached plays; null: kinds are ignored.</param>
+        public UnityAudioService(AudioServiceConfig config, SoundSpace? space = null)
         {
             if (config == null) throw new ArgumentNullException(nameof(config));
+
+            _space = space;
 
             _mixer = config.Mixer;
             _musicGroup = config.MusicGroup;
@@ -80,6 +92,8 @@ namespace Rubickanov.Audio
             _maxDistance = Mathf.Max(config.MinDistance, config.MaxDistance);
             _dopplerLevel = config.DopplerLevel;
             _lostTargetFadeOut = config.LostTargetFadeOut;
+            _limiterSettings = config.Limiter ?? new OutputLimiterSettings();
+            _limiterOn = _limiterSettings.Enabled;
             _now = _unscaledTime ? () => Time.realtimeSinceStartupAsDouble : () => Time.timeAsDouble;
 
             _root = new GameObject("[AudioService]");
@@ -92,6 +106,74 @@ namespace Rubickanov.Audio
             int maxSources = Mathf.Max(1, config.MaxSfxSources);
             for (int i = 0; i < maxSources; i++)
                 _sfxPool.Enqueue(CreateSFXSource());
+
+            if (_space != null) TickSpaceAsync(_space, _cts.Token).Forget();
+            if (_limiterSettings.Enabled && Application.isPlaying) KeepLimiterAsync(_cts.Token).Forget();
+        }
+
+        /// <summary>The limiter on the active listener's output; null while nothing listens or it is off.</summary>
+        public OutputLimiter? Limiter => _limiter != null ? _limiter : null;
+
+        /// <summary>
+        /// The output limiter on (an A/B switch that also holds for listeners found later); false when the config
+        /// turns it off.
+        /// </summary>
+        public bool LimiterOn
+        {
+            get => _limiterOn;
+            set
+            {
+                _limiterOn = value && _limiterSettings.Enabled;
+                if (_limiter != null) _limiter.On = _limiterOn;
+            }
+        }
+
+        // The active listener carries the output limiter; a listener swap (camera, a probe's ears) moves it along.
+        private async UniTaskVoid KeepLimiterAsync(CancellationToken ct)
+        {
+            try
+            {
+                while (true)
+                {
+                    await UniTask.Yield(PlayerLoopTiming.PostLateUpdate, ct);
+                    if (_limitedEars != null && _limitedEars.isActiveAndEnabled && _limiter != null) continue;
+                    float now = Time.realtimeSinceStartup;
+                    if (now < _nextEarsFind && _limitedEars == null) continue;
+                    _nextEarsFind = now + 1f;
+                    _limitedEars = null;
+                    foreach (AudioListener l in Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude))
+                    {
+                        if (!l.isActiveAndEnabled) continue;
+                        _limitedEars = l;
+                        break;
+                    }
+                    if (_limitedEars == null) continue;
+                    _limiterAdded = !_limitedEars.TryGetComponent(out _limiter);
+                    if (_limiterAdded) _limiter = _limitedEars.gameObject.AddComponent<OutputLimiter>();
+                    _limiter!.Configure(_limiterSettings);
+                    _limiter.On = _limiterOn;
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { Debug.LogException(ex); }
+        }
+
+        /// <summary>The space kinds play through; null when the service was made without one.</summary>
+        public SoundSpace? Space => _space;
+
+        // After the camera has moved; a game that ticks the space itself sets TicksItself false.
+        private static async UniTaskVoid TickSpaceAsync(SoundSpace space, CancellationToken ct)
+        {
+            try
+            {
+                while (true)
+                {
+                    await UniTask.Yield(PlayerLoopTiming.PostLateUpdate, ct);
+                    if (space.TicksItself) space.Tick(Time.unscaledDeltaTime);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { Debug.LogException(ex); }
         }
 
         // Slow motion must not stretch fades, and a zero time scale must not freeze them.
@@ -106,6 +188,7 @@ namespace Rubickanov.Audio
             source.playOnAwake = false;
             source.spatialBlend = 0f;
             source.volume = 0f;
+            source.bypassReverbZones = true;
             if (_musicGroup != null) source.outputAudioMixerGroup = _musicGroup;
             return source;
         }
@@ -119,6 +202,7 @@ namespace Rubickanov.Audio
             source.loop = false;
             if (_sfxGroup != null) source.outputAudioMixerGroup = _sfxGroup;
             Apply3DSettings(source);
+            PrepareSpatial(source);
             return source;
         }
 
@@ -129,6 +213,43 @@ namespace Rubickanov.Audio
             source.minDistance = _minDistance;
             source.maxDistance = _maxDistance;
             source.dopplerLevel = _dopplerLevel;
+        }
+
+        // A kind-less sound never sends to a reverb zone. With a space the low-pass is added now, disabled, so a
+        // play only enables it instead of rebuilding the DSP chain of a source about to start.
+        private void PrepareSpatial(AudioSource source)
+        {
+            source.bypassReverbZones = true;
+            if (_space == null) return;
+            var filter = source.gameObject.AddComponent<AudioLowPassFilter>();
+            filter.enabled = false;
+        }
+
+        // Registers a 3D play of a sound with a kind; its output: the sound's, the kind's, the SFX group.
+        private void Spatialize(AudioSource source, in SoundConfig sound, float volume)
+        {
+            var kind = sound.Kind;
+            if (_space == null || kind == null) return;
+            source.outputAudioMixerGroup = sound.Output != null ? sound.Output : kind.Output != null ? kind.Output : _sfxGroup;
+            _spatial[source] = _space.Add(source, kind, volume);
+        }
+
+        // Back to the config's 3D settings and no reverb send.
+        private void Unspatialize(AudioSource source)
+        {
+            if (_space == null || !_spatial.Remove(source, out var handle)) return;
+            _space.Remove(handle);
+            SoundSpace.Unshape(source);
+            Apply3DSettings(source);
+        }
+
+        private float VolumeOf(AudioSource source) =>
+            _space != null && _spatial.TryGetValue(source, out var handle) ? _space.VolumeOf(handle) : source.volume;
+
+        private void SetVolumeOf(AudioSource source, float volume)
+        {
+            if (_space != null && _spatial.TryGetValue(source, out var handle)) _space.SetVolume(handle, volume);
+            else source.volume = volume;
         }
 
         // Null when the sound may not play: invalid, over its repeat limit, or below every sound in a full pool.
@@ -158,6 +279,7 @@ namespace Rubickanov.Audio
                 EndWatch(source);
                 UntrackHandle(source);
                 source.Stop();
+                Unspatialize(source);
             }
             else
             {
@@ -177,12 +299,13 @@ namespace Rubickanov.Audio
         {
             int quietest = 0;
             for (int i = 1; i < _fadingSources.Count; i++)
-                if (_fadingSources[i].volume < _fadingSources[quietest].volume) quietest = i;
+                if (VolumeOf(_fadingSources[i]) < VolumeOf(_fadingSources[quietest])) quietest = i;
 
             var source = _fadingSources[quietest];
             _fadingSources.RemoveAt(quietest);
             EndWatch(source);
             source.Stop();
+            Unspatialize(source);
             return source;
         }
 
@@ -241,6 +364,8 @@ namespace Rubickanov.Audio
         private void ReclaimToPool(AudioSource source)
         {
             source.Stop();
+            Unspatialize(source);
+            source.bypassReverbZones = true;
             source.resource = null;
             source.spatialBlend = 0f;
             source.loop = false;
@@ -360,7 +485,7 @@ namespace Rubickanov.Audio
             if (source == null) return SoundHandle.Invalid;
 
             source.spatialBlend = 0f;
-            return Start(source, in sound, volumeScale, fadeIn, follow: null);
+            return Start(source, in sound, volumeScale, fadeIn, follow: null, spatial: false);
         }
 
         public SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f)
@@ -370,7 +495,7 @@ namespace Rubickanov.Audio
 
             source.transform.position = position;
             source.spatialBlend = 1f;
-            return Start(source, in sound, volumeScale, fadeIn, follow: null);
+            return Start(source, in sound, volumeScale, fadeIn, follow: null, spatial: true);
         }
 
         public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f)
@@ -381,14 +506,16 @@ namespace Rubickanov.Audio
 
             source.transform.position = follow.position;
             source.spatialBlend = 1f;
-            return Start(source, in sound, volumeScale, fadeIn, follow);
+            return Start(source, in sound, volumeScale, fadeIn, follow, spatial: true);
         }
 
-        private SoundHandle Start(AudioSource source, in SoundConfig sound, float volumeScale, float fadeIn, Transform? follow)
+        private SoundHandle Start(AudioSource source, in SoundConfig sound, float volumeScale, float fadeIn, Transform? follow,
+            bool spatial)
         {
             source.resource = sound.Resource;
             ApplyRouting(source, in sound);
             ApplyPitch(source, in sound);
+            if (spatial) Spatialize(source, in sound, fadeIn > 0f ? 0f : volumeScale);
             var watch = BeginWatch(source);
             StartPlayWithFade(source, volumeScale, fadeIn, watch);
 
@@ -402,7 +529,7 @@ namespace Rubickanov.Audio
         {
             if (fadeIn > 0f)
             {
-                source.volume = 0f;
+                SetVolumeOf(source, 0f);
                 source.Play();
                 // Tie the fade to the per-source watcher token, not the service-lifetime _cts:
                 // if the source is returned, evicted, or stopped mid-fade, EndWatch cancels this
@@ -412,7 +539,7 @@ namespace Rubickanov.Audio
             }
             else
             {
-                source.volume = targetVolume;
+                SetVolumeOf(source, targetVolume);
                 source.Play();
             }
         }
@@ -426,14 +553,14 @@ namespace Rubickanov.Audio
                 {
                     elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
-                    if (source != null) source.volume = targetVolume * t;
+                    if (source != null) SetVolumeOf(source, targetVolume * t);
                     await UniTask.Yield(ct);
                 }
             }
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { Debug.LogException(ex); return; }
 
-            if (source != null) source.volume = targetVolume;
+            if (source != null) SetVolumeOf(source, targetVolume);
         }
 
         private async UniTaskVoid FollowAndReturnAsync(AudioSource source, Transform follow, CancellationToken ct)
@@ -498,15 +625,17 @@ namespace Rubickanov.Audio
             }
 
             source.Stop();
+            Unspatialize(source);
             source.spatialBlend = spatialBlend;
             source.resource = sound.Resource;
             source.loop = true;
             ApplyRouting(source, in sound);
             ApplyPitch(source, in sound);
+            if (spatialBlend > 0f) Spatialize(source, in sound, fadeIn > 0f ? 0f : volumeScale);
 
             if (fadeIn > 0f)
             {
-                source.volume = 0f;
+                SetVolumeOf(source, 0f);
                 source.Play();
                 var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
                 _loopWatchers[slot] = cts;
@@ -514,7 +643,7 @@ namespace Rubickanov.Audio
             }
             else
             {
-                source.volume = volumeScale;
+                SetVolumeOf(source, volumeScale);
                 source.Play();
             }
             return source;
@@ -607,7 +736,7 @@ namespace Rubickanov.Audio
             }
             else
             {
-                source.volume = volumeScale;
+                SetVolumeOf(source, volumeScale);
             }
         }
 
@@ -641,7 +770,7 @@ namespace Rubickanov.Audio
         {
             try
             {
-                float start = pitch ? source.pitch : source.volume;
+                float start = pitch ? source.pitch : VolumeOf(source);
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
@@ -649,7 +778,7 @@ namespace Rubickanov.Audio
                     float value = Mathf.Lerp(start, target, Mathf.Clamp01(elapsed / duration));
                     if (source == null) return;
                     if (pitch) source.pitch = value;
-                    else source.volume = value;
+                    else SetVolumeOf(source, value);
                     await UniTask.Yield(ct);
                 }
             }
@@ -658,20 +787,20 @@ namespace Rubickanov.Audio
 
             if (source == null) return;
             if (pitch) source.pitch = target;
-            else source.volume = target;
+            else SetVolumeOf(source, target);
         }
 
         private async UniTaskVoid FadeOutLoopAsync(string slot, AudioSource source, float duration, CancellationToken ct)
         {
             try
             {
-                float startVolume = source != null ? source.volume : 0f;
+                float startVolume = source != null ? VolumeOf(source) : 0f;
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
                     elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
-                    if (source != null) source.volume = startVolume * (1f - t);
+                    if (source != null) SetVolumeOf(source, startVolume * (1f - t));
                     await UniTask.Yield(ct);
                 }
             }
@@ -698,6 +827,8 @@ namespace Rubickanov.Audio
             if (source == null) return;
 
             source.Stop();
+            Unspatialize(source);
+            source.bypassReverbZones = true;
             source.resource = null;
             _freeLoopSources.Push(source);
         }
@@ -723,6 +854,7 @@ namespace Rubickanov.Audio
             source.loop = true;
             if (_sfxGroup != null) source.outputAudioMixerGroup = _sfxGroup;
             Apply3DSettings(source);
+            PrepareSpatial(source);
             return source;
         }
 
@@ -772,7 +904,7 @@ namespace Rubickanov.Audio
             var timing = follow != null ? PlayerLoopTiming.LastPostLateUpdate : PlayerLoopTiming.Update;
             try
             {
-                float startVolume = source != null ? source.volume : 0f;
+                float startVolume = source != null ? VolumeOf(source) : 0f;
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
@@ -780,7 +912,7 @@ namespace Rubickanov.Audio
                     float t = Mathf.Clamp01(elapsed / duration);
                     if (source != null)
                     {
-                        source.volume = startVolume * (1f - t);
+                        SetVolumeOf(source, startVolume * (1f - t));
                         if (follow != null) source.transform.position = follow.position;
                     }
                     await UniTask.Yield(timing, ct);
@@ -999,6 +1131,8 @@ namespace Rubickanov.Audio
 
             _cts.Cancel();
             _cts.Dispose();
+            if (_limiterAdded && _limiter != null) Object.Destroy(_limiter);
+            _limiter = null;
             if (_root != null)
             {
                 if (Application.isPlaying) Object.Destroy(_root);
