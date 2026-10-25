@@ -23,6 +23,8 @@ namespace Rubickanov.Characters.Netcode
         FaceUp = 1 << 4,
         /// <summary>The ragdoll was the body on this step, for a replica that starts watching mid-fall.</summary>
         Down = 1 << 5,
+        /// <summary>Facing the look, the legs may run where the body goes (CharacterInput.Stride).</summary>
+        Strides = 1 << 6,
     }
 
     /// <summary>
@@ -75,6 +77,8 @@ namespace Rubickanov.Characters.Netcode
         public bool Seated { readonly get => Has(CharacterNetFlags.Seated); set => Set(CharacterNetFlags.Seated, value); }
 
         public bool FacesLook { readonly get => Has(CharacterNetFlags.FacesLook); set => Set(CharacterNetFlags.FacesLook, value); }
+
+        public bool Strides { readonly get => Has(CharacterNetFlags.Strides); set => Set(CharacterNetFlags.Strides, value); }
 
         public bool FaceUp { readonly get => Has(CharacterNetFlags.FaceUp); set => Set(CharacterNetFlags.FaceUp, value); }
 

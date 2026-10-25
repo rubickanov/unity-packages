@@ -14,6 +14,11 @@ namespace Rubickanov.Characters
         /// the body then turns to Look at once.
         /// </summary>
         public bool FirstPerson;
+        /// <summary>
+        /// With a body that faces Look at once (<see cref="FirstPerson"/>): the legs and hips may run where the
+        /// character goes while the chest stays on the look (<see cref="CharacterAnimationsConfig.StrideAngle"/>).
+        /// </summary>
+        public bool Stride;
         /// <summary>A press edge, not a held button. Latched until the next simulation step.</summary>
         public bool JumpPressed;
         /// <summary>Held. Releasing during ascent shortens a jump when configured; it never starts another jump.</summary>

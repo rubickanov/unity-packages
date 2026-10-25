@@ -118,6 +118,10 @@ namespace Rubickanov.Characters
             new() { Bone = HumanBodyBones.Neck, Yaw = 0.25f, Pitch = 0.1f, Aims = true },
             new() { Bone = HumanBodyBones.Head, Yaw = 0.35f, Pitch = 0.1f, Aims = true },
         };
+        [Tooltip("Share of a first-person stride's turn of the hips (CharacterAnimationsConfig.StrideAngle) the spine "
+                 + "takes back, so the chest faces the look; the neck and head aim the rest. Below the spine bones' "
+                 + "own yaw shares it adds nothing.")]
+        [Range(0, 1)] public float StrideTwist = 1f;
         [Tooltip("Spring of the lowest bone. Bones up the chain blend toward Head Spring, " +
                  "so the head leads and the body follows.")]
         public SpringSettings SpineSpring = new(2.5f, 0.75f);

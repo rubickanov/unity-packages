@@ -80,11 +80,12 @@ Every tunable lives in a config asset the game owns: **MovementConfig** (speeds,
 (feet, head look, lean, swimming pose, seat grips, hand shapes), **CharacterAnimationsConfig** (clips), **RagdollConfig** (muscles,
 falling, get-up, water), **CharacterProportions** (build data for a game's character builder).
 
-A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Nine config fields are where games chose differently; their defaults are the conservative side:
+A feature is off until the game turns it on: swimming needs a `Water`, footprints an `IFootprints`. Ten config fields are where games chose differently; their defaults are the conservative side:
 
 | Field | Default | Other value |
 |---|---|---|
 | `MovementConfig.FirstPersonTurn` | `Eased`: in first person the body eases round to the camera at `OrientationSharpness` | `AtOnce`: the body faces the camera at once (the game sets `CharacterInput.FirstPerson`) |
+| `CharacterAnimationsConfig.StrideAngle` | `0`: a body facing the camera strafes its legs whichever way it walks | e.g. `60` (with `AtOnce` and `CharacterInput.Stride`): walking up to that far off the look turns the hips and legs onto the walk, so they run the forward clip, fading back onto the look over `StrideFade`; the spine takes `CharacterRigConfig.StrideTwist` of the turn back so the chest stays on the look, the neck and head aim the rest. `CharacterAnimator.StrideTurn` says how far; the flag goes over the network |
 | `RagdollConfig.FallTime` | `0`: a long fall stays upright until it lands | `1`: after 1 s of falling the body goes down into its ragdoll in the air |
 | `RagdollConfig.SafeSpot` | `false`: the capsule stands on the ground under the hips | `true`: `GetUpSpot` looks round that point in rings (`SpotStep` × `SpotRings` × 8) for stable ground, out of walls, with room to stand and nothing fixed over the lying head; with none the body stays down, looks again every `SpotRetry` and gets up where it lies after `SpotGiveUp` from the fall |
 | `RagdollConfig.Flail` | `false`: in the air the body holds the pose it fell in and fades to limp over `LimpTime` | `true` (with three `CharacterAnimationsConfig.Flails` clips: head first, along the fall, feet first): `FlailReflex` drives the joints toward the flail clip's pose (`FlailStrength` × peak torque, `FlailHz`), the clip chosen by the pelvis's up every `FlailChooseTime`; a touch over `FlailTouchForce` eases them to limp over `FlailEaseTime` (arms `FlailArmsTime`); water lets go at once. Bones get a `RagdollTouch` only then |

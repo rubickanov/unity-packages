@@ -15,6 +15,19 @@ namespace Rubickanov.Characters
         [Tooltip("How quickly the mixer parameter follows velocity. 0 follows it instantly.")]
         [Min(0)] public float ParameterSharpness = 12f;
 
+        [Header("First person stride")]
+        [Tooltip("A body that faces the look with CharacterInput.Stride: walking up to this many degrees off the look "
+                 + "turns the hips and legs onto the walk, so they run their forward clip, while the chest stays on "
+                 + "the look (CharacterRigConfig.StrideTwist). 0 keeps the hips on the look: the legs strafe.")]
+        [Range(0, 90)] public float StrideAngle;
+        [Tooltip("Past Stride Angle, the hips come back onto the look over this many more degrees; beyond, the legs "
+                 + "strafe.")]
+        [Range(0, 90)] public float StrideFade = 30f;
+        [Tooltip("Planar speed, m/s, from which the hips turn fully onto the walk; slower turns them a share.")]
+        [Min(0.01f)] public float StrideSpeed = 0.6f;
+        [Tooltip("How quickly the hips follow the walk's direction. 0 follows it instantly.")]
+        [Min(0)] public float StrideSharpness = 8f;
+
         [Header("Slopes")]
         [Tooltip("Optional. Forward locomotion uphill. Parameter is planar speed in m/s. " +
                  "Leave Extrapolate Speed off: Locomotion already scales the whole blend.")]

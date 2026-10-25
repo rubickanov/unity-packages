@@ -192,7 +192,8 @@ namespace Rubickanov.Characters.Netcode
             }
 
             Aim = rotation * aim;
-            Motion = new CharacterMotion(world, relative, Aim, rotation, _grounded, _grounded, _swimming, to.FacesLook);
+            Motion = new CharacterMotion(world, relative, Aim, rotation, _grounded, _grounded, _swimming, to.FacesLook,
+                to.Strides);
             // Before the motion events, which the animator ignores for a body that is down or getting up.
             if (fell)
             {

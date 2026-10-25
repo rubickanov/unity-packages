@@ -40,14 +40,15 @@ namespace Rubickanov.Characters.Netcode.Tests
         {
             var snapshot = new CharacterNetSnapshot
             {
-                Grounded = true, Swimming = true, Seated = true, FacesLook = true, FaceUp = true, Down = true,
+                Grounded = true, Swimming = true, Seated = true, FacesLook = true, FaceUp = true, Down = true, Strides = true,
             };
-            Assert.That((byte)snapshot.Flags, Is.EqualTo(0b11_1111));
+            Assert.That((byte)snapshot.Flags, Is.EqualTo(0b111_1111));
 
             snapshot.Seated = false;
 
             Assert.That(snapshot.Flags & CharacterNetFlags.Seated, Is.EqualTo(CharacterNetFlags.None));
-            Assert.That(snapshot.Grounded && snapshot.Swimming && snapshot.FacesLook && snapshot.FaceUp && snapshot.Down, Is.True);
+            Assert.That(snapshot.Grounded && snapshot.Swimming && snapshot.FacesLook && snapshot.FaceUp && snapshot.Down
+                        && snapshot.Strides, Is.True);
         }
 
         [Test]
