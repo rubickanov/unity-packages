@@ -751,6 +751,7 @@ namespace Rubickanov.Characters.Netcode
                 Grounded = motion.IsGrounded,
                 Swimming = motion.IsSwimming,
                 FacesLook = motion.FacesLook,
+                Strides = motion.Strides,
                 Jumps = _jumps,
                 Falls = _falls,
                 GetUps = _getUps,

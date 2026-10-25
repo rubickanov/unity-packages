@@ -114,6 +114,7 @@ namespace Rubickanov.Characters
         private Vector3 _aim;
         private const float FacingCatch = 2f;
         private bool _faceLook;
+        private bool _stride;
         // Heading locked onto the look: set once the body has turned to it, so it snaps only from there on.
         private bool _facing;
         private bool _sprint;
@@ -208,6 +209,7 @@ namespace Rubickanov.Characters
             _look = input.Look;
             _aim = input.Aim;
             _faceLook = input.FirstPerson && Settings.FirstPersonTurn == BodyTurn.AtOnce;
+            _stride = input.Stride;
             _sprint = input.Sprint;
             _pendingJump |= input.JumpPressed;
             _jumpHeld = input.JumpHeld;
@@ -234,7 +236,7 @@ namespace Rubickanov.Characters
         public void ClearInput()
         {
             _move = _look = _aim = Vector3.zero;
-            _sprint = _faceLook = _facing = false;
+            _sprint = _faceLook = _stride = _facing = false;
             _pendingJump = _jumpRequested = false;
             _jumpHeld = false;
             _jumpCut = true;
@@ -497,7 +499,7 @@ namespace Rubickanov.Characters
             bool grounded = Motor.GroundingStatus.IsStableOnGround && !_jumped && !_suspended && !_swimming;
             bool wasGrounded = Motion.IsGrounded;
             Motion = new CharacterMotion(Motor.Velocity, Motor.BaseVelocity, _aim, Motor.TransientRotation,
-                grounded, Motor.GroundingStatus.FoundAnyGround && !_jumped && !_swimming, _swimming, _facing);
+                grounded, Motor.GroundingStatus.FoundAnyGround && !_jumped && !_swimming, _swimming, _facing, _stride);
             if (_jumped)
             {
                 Jumped?.Invoke();

@@ -81,6 +81,10 @@ namespace Rubickanov.Characters
         private float _aimYaw;
         private bool _facing;
         private const float FacingCatch = 2f;
+        // First person stride: degrees the model faces off the look onto the walk, positive to the right.
+        private float _stride;
+        // Slower than this, the walk has no direction worth turning the hips onto.
+        private const float StrideMinSpeed = 0.05f;
         // How long the look has been past TurnAngle.
         private float _turnPending;
         // Stretches the clip's root rotation to the turn actually needed.
@@ -106,6 +110,12 @@ namespace Rubickanov.Characters
         /// Changes when a turn animation or settling turns the model, not when the body turns under it.
         /// </summary>
         public float TurnOffset => _turn.Value;
+
+        /// <summary>
+        /// Degrees the model faces off the look onto the walk while facing it with a stride
+        /// (<see cref="CharacterInput.Stride"/>), positive to the right; part of <see cref="TurnOffset"/>.
+        /// </summary>
+        public float StrideTurn => _stride;
 
         /// <summary>
         /// The Animator may skip writing the bones while none of the character's renderers is drawn (shadows count):
@@ -252,6 +262,7 @@ namespace Rubickanov.Characters
             TrackInertia();
             _lastBodyForward = PlanarForward(Body);
             _turn.Reset();
+            _stride = 0f;
             _aimYaw = 0f;
             _turnPending = 0f;
             ICharacterMotionSource source = Source;
@@ -334,7 +345,9 @@ namespace Rubickanov.Characters
                 TrackReach();
             }
 
-            Vector2 target = PlanarVelocity(motion);
+            UpdateStride(motion);
+            // The mixer walks the model: with the hips turned onto the walk, the velocity in their frame.
+            Vector2 target = TurnedBy(PlanarVelocity(motion), -_stride);
             if ((target - _moveParameter).sqrMagnitude > Settled * Settled)
             {
                 _moveParameter = Vector2.Lerp(_moveParameter, target, Smoothing(Animations.ParameterSharpness));
@@ -522,14 +535,16 @@ namespace Rubickanov.Characters
 
             // First person: the model faces the look this frame, whatever the simulated body's step has reached; coming
             // into it (a get-up, a seat left) it turns there first.
-            _facing = motion.FacesLook && (_facing || Mathf.Abs(_turn.ErrorTo(_aimYaw)) <= FacingCatch);
+            // A stride turns the hips onto the walk on top of the look.
+            float facing = _aimYaw + _stride;
+            _facing = motion.FacesLook && (_facing || Mathf.Abs(_turn.ErrorTo(facing)) <= FacingCatch);
             if (_facing)
             {
-                _turn.Face(_aimYaw);
+                _turn.Face(facing);
             }
             else if (motion.FacesLook)
             {
-                _turn.Toward(_aimYaw, Smoothing(Animations.TurnSettleSharpness));
+                _turn.Toward(facing, Smoothing(Animations.TurnSettleSharpness));
             }
 
             // A rider faces the way the seat does, however the vehicle turns under it.
@@ -578,6 +593,38 @@ namespace Rubickanov.Characters
 
             Vector3 turned = Animancer.Animator.deltaRotation * Vector3.forward;
             _turn.Turn(Mathf.Atan2(turned.x, turned.z) * Mathf.Rad2Deg * _turnScale);
+        }
+
+        // Facing the look with a stride, a walk ahead or aside turns the hips onto it, so the legs run their forward
+        // clip under a chest that stays on the look; walking back or straight aside they strafe. In the air the
+        // hips keep their turn.
+        private void UpdateStride(CharacterMotion motion)
+        {
+            bool strides = motion.Strides && Animations.StrideAngle > 0f && !IsLyingOrRising && !IsMounted
+                           && _phase != Phase.Swimming && !motion.IsSwimming;
+            if (!strides && (IsLyingOrRising || IsMounted))
+            {
+                _stride = 0f;
+                return;
+            }
+
+            if (strides && !motion.IsGrounded)
+            {
+                return;
+            }
+
+            float target = 0f;
+            float speed = motion.PlanarSpeed;
+            if (strides && speed > StrideMinSpeed)
+            {
+                float off = Mathf.DeltaAngle(_aimYaw,
+                    Mathf.Atan2(motion.LocalVelocity.x, motion.LocalVelocity.z) * Mathf.Rad2Deg);
+                float past = Mathf.Abs(off) - Animations.StrideAngle;
+                float share = past <= 0f ? 1f : Mathf.Clamp01(1f - past / Mathf.Max(Animations.StrideFade, 0.01f));
+                target = off * share * Mathf.Clamp01(speed / Animations.StrideSpeed);
+            }
+
+            _stride = Mathf.Lerp(_stride, target, Smoothing(Animations.StrideSharpness));
         }
 
         private void UpdateLocomotion()
@@ -951,6 +998,7 @@ namespace Rubickanov.Characters
         public void AlignModel()
         {
             _turn.Reset();
+            _stride = 0f;
             _turnPending = 0f;
             _lastBodyForward = PlanarForward(Body);
             if (_model != null)
@@ -1236,6 +1284,19 @@ namespace Rubickanov.Characters
 
         private static float Smoothing(float sharpness) =>
             sharpness > 0f ? 1f - Mathf.Exp(-sharpness * Time.deltaTime) : 1f;
+
+        // Degrees positive to the right, X right and Y forward.
+        private static Vector2 TurnedBy(Vector2 planar, float degrees)
+        {
+            if (degrees == 0f)
+            {
+                return planar;
+            }
+
+            float radians = degrees * Mathf.Deg2Rad;
+            float cos = Mathf.Cos(radians), sin = Mathf.Sin(radians);
+            return new Vector2(planar.x * cos + planar.y * sin, planar.y * cos - planar.x * sin);
+        }
 
         private static Vector2 PlanarVelocity(CharacterMotion motion) =>
             new(motion.LocalVelocity.x, motion.LocalVelocity.z);

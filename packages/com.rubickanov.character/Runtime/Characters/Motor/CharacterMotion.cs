@@ -16,6 +16,8 @@ namespace Rubickanov.Characters
         public readonly bool IsSwimming;
         /// <summary>The body faces where it looks at once, every frame (first person): no turning in place.</summary>
         public readonly bool FacesLook;
+        /// <summary>Facing the look, the legs may run where the character goes (<see cref="CharacterInput.Stride"/>).</summary>
+        public readonly bool Strides;
         public float PlanarSpeed => new Vector2(LocalVelocity.x, LocalVelocity.z).magnitude;
         public float VerticalSpeed => LocalVelocity.y;
 
@@ -27,7 +29,8 @@ namespace Rubickanov.Characters
             bool isGrounded,
             bool foundGround,
             bool isSwimming = false,
-            bool facesLook = false)
+            bool facesLook = false,
+            bool strides = false)
         {
             Quaternion toLocal = Quaternion.Inverse(rotation);
             Velocity = velocity;
@@ -38,6 +41,7 @@ namespace Rubickanov.Characters
             FoundGround = foundGround;
             IsSwimming = isSwimming;
             FacesLook = facesLook;
+            Strides = facesLook && strides;
         }
     }
 }

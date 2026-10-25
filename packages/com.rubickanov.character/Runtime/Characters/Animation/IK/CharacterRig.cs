@@ -34,6 +34,7 @@ namespace Rubickanov.Characters
         // The seat the limbs reach for; changing it starts the reach over, leaving it resets what it held back.
         private ICharacterMount _mount;
         private float _lastTurnOffset;
+        private float _lastStride;
         private IFootGround _footGround;
         private IFootGround _bodyGround;
         private IFootprints _footprints;
@@ -178,6 +179,7 @@ namespace Rubickanov.Characters
             _swim.Reset();
             _mount = Animator.Character.Mount;
             _lastTurnOffset = Animator.TurnOffset;
+            _lastStride = Animator.StrideTurn;
             _culled = false;
         }
 
@@ -279,8 +281,12 @@ namespace Rubickanov.Characters
             {
                 // No look while getting up lets the head follow the clip, easing out and back in.
                 Vector3 aim = Animator.IsGettingUp ? Vector3.zero : ModelAim(source.Aim);
-                // A model that faces the look turns with it: nothing to hold the upper body against.
-                _look.Apply(Config, aim, motion.FacesLook ? 0f : modelTurn, Weight, deltaTime);
+                // A model that faces the look turns with it: nothing to hold the upper body against but the hips
+                // turning onto a stride.
+                float stride = Animator.StrideTurn;
+                float strideTurn = Mathf.DeltaAngle(_lastStride, stride);
+                _lastStride = stride;
+                _look.Apply(Config, aim, motion.FacesLook ? strideTurn : modelTurn, Weight, deltaTime, stride);
             }
 
             if (mounted)
