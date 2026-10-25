@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using Animancer;
 using Rubickanov.Rig;
@@ -68,6 +69,15 @@ namespace Rubickanov.Characters
         private bool _holdingLeft;
         private Transform _rightShoulder;
         private Transform _leftShoulder;
+        // The arms poses in place of HoldArms (PoseArms) and how far each is in now; HoldArms has the rest.
+        private readonly List<(ArmsPose Pose, float Weight)> _poses = new();
+        private ArmsPose _pose;
+        private ArmsPose _poseAimed;
+        private float _poseAim;
+        private float _holdRest = 1f;
+        private Transform _spine;
+        private Transform _chest;
+        private Transform _upperChest;
         private float _landAuthoredSpeed;
         private ICharacterMotionSource _source;
         private Transform _model;
@@ -157,6 +167,102 @@ namespace Rubickanov.Characters
             FadeHold(_holdLeft, ref _holdingLeft, left);
         }
 
+        /// <summary>
+        /// The pose held arms take in place of <see cref="CharacterAnimationsConfig.HoldArms"/> from now on:
+        /// <paramref name="pose"/> blended toward <paramref name="aimed"/> by <paramref name="aim"/> (0..1), its clip over
+        /// the arms, its clavicles and, while the right arm holds, its trunk stance; null puts HoldArms back. Each pose
+        /// eases in and out over <see cref="CharacterAnimationsConfig.HoldFade"/>; it holds until called again.
+        /// </summary>
+        public void PoseArms(ArmsPose pose, ArmsPose aimed = null, float aim = 0f)
+        {
+            _pose = pose != null && pose.Clip != null ? pose : null;
+            _poseAimed = _pose != null && aimed != null && aimed.Clip != null ? aimed : _pose;
+            _poseAim = _poseAimed != _pose ? Mathf.Clamp01(aim) : 0f;
+        }
+
+        // Each arms pose toward its share of the hold, the clips' weights on both hold layers, HoldArms the rest.
+        private void EasePoses(float deltaTime)
+        {
+            if ((_holdRight == null && _holdLeft == null) || (_pose == null && _poses.Count == 0))
+            {
+                return;
+            }
+
+            Want(_pose);
+            Want(_poseAimed);
+            float step = Animations.HoldFade > 0f ? deltaTime / Animations.HoldFade : 1f;
+            float sum = 0f;
+            for (int i = _poses.Count - 1; i >= 0; i--)
+            {
+                (ArmsPose pose, float weight) = _poses[i];
+                float wanted = (pose == _pose ? 1f - _poseAim : 0f) + (pose == _poseAimed ? _poseAim : 0f);
+                weight = Mathf.MoveTowards(weight, _pose != null ? wanted : 0f, step);
+                if (weight <= 0f && pose != _pose && pose != _poseAimed)
+                {
+                    _poses.RemoveAt(i);
+                }
+                else
+                {
+                    _poses[i] = (pose, weight);
+                }
+
+                sum += weight;
+                PoseWeight(pose.Clip, weight);
+            }
+
+            if (sum > 1f)
+            {
+                for (int i = 0; i < _poses.Count; i++)
+                {
+                    _poses[i] = (_poses[i].Pose, _poses[i].Weight / sum);
+                    PoseWeight(_poses[i].Pose.Clip, _poses[i].Weight);
+                }
+            }
+
+            _holdRest = Mathf.Max(0f, 1f - sum);
+            PoseWeight(Animations.HoldArms, _holdRest);
+        }
+
+        private void Want(ArmsPose pose)
+        {
+            if (pose != null && _poses.FindIndex(p => p.Pose == pose) < 0)
+            {
+                _poses.Add((pose, 0f));
+            }
+        }
+
+        private void PoseWeight(AnimationClip clip, float weight)
+        {
+            foreach (AnimancerLayer layer in new[] { _holdRight, _holdLeft })
+            {
+                if (layer == null)
+                {
+                    continue;
+                }
+
+                AnimancerState state = layer.GetOrCreateState(clip);
+                state.IsPlaying = weight > 0f;
+                state.Weight = weight;
+            }
+        }
+
+        // The poses' blend of a turn, HoldArms' share at rest.
+        private Quaternion Blend(Quaternion rest, System.Func<ArmsPose, Quaternion> turn)
+        {
+            Quaternion blended = rest;
+            float total = _holdRest;
+            foreach ((ArmsPose pose, float weight) in _poses)
+            {
+                total += weight;
+                if (weight > 0f)
+                {
+                    blended = Quaternion.Slerp(blended, turn(pose), weight / total);
+                }
+            }
+
+            return blended;
+        }
+
         private void FadeHold(AnimancerLayer layer, ref bool holding, bool hold)
         {
             if (layer == null || holding == hold)
@@ -169,11 +275,32 @@ namespace Rubickanov.Characters
         }
 
         // Mecanim leaves a clavicle to the base layer unless both arms are masked over: a held arm's goes where the
-        // hold pose has it here.
+        // hold pose (or the arms poses) has it here, and the right arm's hold brings the poses' trunk stance.
         private void HoldShoulders()
         {
-            HoldShoulder(_holdRight, _rightShoulder, Animations.HoldShoulderRight);
-            HoldShoulder(_holdLeft, _leftShoulder, Animations.HoldShoulderLeft);
+            bool posed = _poses.Count > 0;
+            HoldShoulder(_holdRight, _rightShoulder,
+                posed ? Blend(Animations.HoldShoulderRight, p => p.ShoulderRight) : Animations.HoldShoulderRight);
+            HoldShoulder(_holdLeft, _leftShoulder,
+                posed ? Blend(Animations.HoldShoulderLeft, p => p.ShoulderLeft) : Animations.HoldShoulderLeft);
+            float weight = _holdRight != null ? _holdRight.Weight : 0f;
+            if (!posed || weight <= 0f)
+            {
+                return;
+            }
+
+            // The trunk's stance on top of the clip's, by how far the right arm holds.
+            Stance(_spine, Blend(Quaternion.identity, p => p.Spine), weight);
+            Stance(_chest, Blend(Quaternion.identity, p => p.Chest), weight);
+            Stance(_upperChest, Blend(Quaternion.identity, p => p.UpperChest), weight);
+        }
+
+        private static void Stance(Transform bone, Quaternion turn, float weight)
+        {
+            if (bone != null)
+            {
+                bone.localRotation *= Quaternion.Slerp(Quaternion.identity, turn, weight);
+            }
         }
 
         private static void HoldShoulder(AnimancerLayer layer, Transform shoulder, Quaternion held)
@@ -283,6 +410,9 @@ namespace Rubickanov.Characters
             Culled = false;
             _rightShoulder = Animancer.Animator.GetBoneTransform(HumanBodyBones.RightShoulder);
             _leftShoulder = Animancer.Animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
+            _spine = animator.GetBoneTransform(HumanBodyBones.Spine);
+            _chest = animator.GetBoneTransform(HumanBodyBones.Chest);
+            _upperChest = animator.GetBoneTransform(HumanBodyBones.UpperChest);
             _holdRight ??= CreateHold(1, Animations.RightArmMask, "Hold Right");
             _holdLeft ??= CreateHold(2, Animations.LeftArmMask, "Hold Left");
             CharacterMotion motion = source.Motion;
@@ -338,6 +468,7 @@ namespace Rubickanov.Characters
 
         private void Update()
         {
+            EasePoses(Time.deltaTime);
             // The motor steps at a fixed rate; smoothing here keeps the blend from stepping with it.
             CharacterMotion motion = Source.Motion;
             if (StrideSyncs)
