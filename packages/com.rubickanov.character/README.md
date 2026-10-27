@@ -93,7 +93,7 @@ A feature is off until the game turns it on: swimming needs a `Water`, footprint
 | `CharacterAnimationsConfig.InertialGetUp` (and `InertialJump`, `InertialLand`, `InertialTurn`, `InertialWaterEntry`) | `false`: clips cross-fade | `true` (with a `PoseInertia` on the model, `CharacterAnimator.Inertia`): the new clip plays at once and the offset to the old pose dies away over `GetUpInertia` / `SwitchInertia` s, keeping its velocity |
 | `RagdollConfig.ShellLayer` | `-1`: no shell; an upright body has no bones on, so nothing body-shaped for a flying ragdoll to hit | a layer (the game makes it meet only its ragdoll layer): `CharacterRagdoll.Shell = true` turns an upright body's bones on as a shell (see Shell) |
 | `RagdollConfig.SolverVelocityIterations` | `1` (the physics default) | e.g. `4`: stiffer bones on a moving deck |
-| `CharacterRigConfig.MountGrip` | `Wrist`: the wrist goes onto the hold, the hand keeps the clip's turn | `Palm`: the hand takes the hold's turn exactly (palm faces Z, fingers along Y), fingers shaped Fist/OpenPalm |
+| `CharacterRigConfig.MountGrip` | `Wrist`: the wrist goes onto the hold, the hand keeps the clip's turn | `Palm`: the hand takes the hold's turn exactly (palm faces Z, fingers along Y), fingers shaped Fist/OpenPalm/Trigger, every joint of each finger and the thumb |
 
 ## Quick Start
 

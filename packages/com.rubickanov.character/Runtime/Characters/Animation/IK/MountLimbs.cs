@@ -1,5 +1,8 @@
+using System;
+using System.Collections.Generic;
 using Rubickanov.Rig;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace Rubickanov.Characters
 {
@@ -27,12 +30,34 @@ namespace Rubickanov.Characters
             public Quaternion FromGrip;
             // The palm's middle and the way it faces, in the hand's space.
             public Vector3 Middle, Facing;
-            // The finger block and the thumb, their rest turns under the hand, and the axes (hand space) the hand
-            // shapes turn them about: curl toward the palm, thumb fold over it, thumb spread off the fingers.
-            public Transform Index, Thumb;
-            public Quaternion IndexRest, ThumbRest;
-            public Vector3 CurlAxis, FoldAxis, SpreadAxis;
+            // The fingers (the index first) and the thumb the hand shapes turn, each joint about its own axis; the
+            // thumb's root also folds and spreads about two axes in the hand's space.
+            public Digit[] Fingers;
+            public Digit Thumb;
+            public bool HasIndex;
+            public Vector3 FoldAxis, SpreadAxis;
         }
+
+        // A finger's or the thumb's bones from its root out, their rest turns under their parents, and the axis each
+        // turns about to curl, in its parent's rest space.
+        private sealed class Digit
+        {
+            public Transform[] Bones;
+            public Quaternion[] Rests;
+            public Vector3[] Axes;
+        }
+
+        private static readonly HumanBodyBones[] RightFingerRoots =
+        {
+            HumanBodyBones.RightIndexProximal, HumanBodyBones.RightMiddleProximal, HumanBodyBones.RightRingProximal,
+            HumanBodyBones.RightLittleProximal,
+        };
+
+        private static readonly HumanBodyBones[] LeftFingerRoots =
+        {
+            HumanBodyBones.LeftIndexProximal, HumanBodyBones.LeftMiddleProximal, HumanBodyBones.LeftRingProximal,
+            HumanBodyBones.LeftLittleProximal,
+        };
 
         private readonly Limb _leftHand;
         private readonly Limb _rightHand;
@@ -45,8 +70,12 @@ namespace Rubickanov.Characters
         // The last bend and twist each wrist was asked for.
         private Vector2 _askedLeft, _askedRight;
 
-        // Where the palm's middle lies from the wrist to the index's root, as the hand pieces are built.
+        // Where the palm's middle lies from the wrist to the middle finger's root (the index's on a hand without
+        // one), as the hand pieces are built.
         private const float PalmAlong = 0.55f;
+
+        // How far across the palm, of a right angle, rather than down under it, a thumb with joints curls.
+        private const float ThumbAcross = 0.3f;
 
         public bool IsValid => _leftHand != null || _rightHand != null || _leftFoot != null || _rightFoot != null;
 
@@ -119,19 +148,42 @@ namespace Rubickanov.Characters
         public void ShapeFingers(bool right, in HandShapePose shape, float weight)
         {
             Palm palm = right ? _rightPalm : _leftPalm;
-            if (palm == null || palm.Index == null || weight <= 0f)
+            if (palm == null || palm.Fingers == null || weight <= 0f)
             {
                 return;
             }
 
-            Quaternion index = Quaternion.AngleAxis(shape.Curl, palm.CurlAxis) * palm.IndexRest;
-            palm.Index.localRotation = Quaternion.Slerp(palm.Index.localRotation, index, weight);
+            for (int i = 0; i < palm.Fingers.Length; i++)
+            {
+                float share = i == 0 && palm.HasIndex && palm.Fingers.Length > 1 ? 1f - shape.IndexOpen : 1f;
+                Curl(palm.Fingers[i], 0, shape.Curl * share, weight);
+                Curl(palm.Fingers[i], 1, shape.Bend * share, weight);
+                Curl(palm.Fingers[i], 2, shape.Tip * share, weight);
+            }
+
             if (palm.Thumb != null)
             {
-                Quaternion thumb = Quaternion.AngleAxis(shape.ThumbSpread, palm.SpreadAxis)
-                                   * Quaternion.AngleAxis(shape.ThumbFold, palm.FoldAxis) * palm.ThumbRest;
-                palm.Thumb.localRotation = Quaternion.Slerp(palm.Thumb.localRotation, thumb, weight);
+                // A thumb with joints folds its root the way it curls; a mitten's thumb over the palm.
+                Transform root = palm.Thumb.Bones[0];
+                Vector3 fold = palm.Thumb.Bones.Length > 1 ? palm.Thumb.Axes[0] : palm.FoldAxis;
+                Quaternion turned = Quaternion.AngleAxis(shape.ThumbSpread, palm.SpreadAxis)
+                                    * Quaternion.AngleAxis(shape.ThumbFold, fold) * palm.Thumb.Rests[0];
+                root.localRotation = Quaternion.Slerp(root.localRotation, turned, weight);
+                Curl(palm.Thumb, 1, shape.ThumbCurl, weight);
+                Curl(palm.Thumb, 2, shape.ThumbCurl, weight);
             }
+        }
+
+        private static void Curl(Digit digit, int joint, float degrees, float weight)
+        {
+            if (joint >= digit.Bones.Length)
+            {
+                return;
+            }
+
+            Transform bone = digit.Bones[joint];
+            Quaternion turned = Quaternion.AngleAxis(degrees, digit.Axes[joint]) * digit.Rests[joint];
+            bone.localRotation = Quaternion.Slerp(bone.localRotation, turned, weight);
         }
 
         /// <summary>
@@ -309,8 +361,9 @@ namespace Rubickanov.Characters
             return new Quaternion(q.x / length, q.y / length, q.z / length, q.w / length);
         }
 
-        // The palm from the finger bones: the fingers point from the wrist to the index's root, the thumb's root
-        // lies to one side, and the palm faces away from the back of the hand between them.
+        // The palm from the finger bones: the fingers point from the wrist to the middle finger's root (the index's on
+        // a hand without one), the thumb's root lies to one side, and the palm faces away from the back of the hand
+        // between them.
         private static Palm CreatePalm(Animator animator, Limb limb, bool right)
         {
             if (limb == null)
@@ -318,29 +371,43 @@ namespace Rubickanov.Characters
                 return null;
             }
 
-            Transform index = animator.GetBoneTransform(right ? HumanBodyBones.RightIndexProximal : HumanBodyBones.LeftIndexProximal)
-                ?? animator.GetBoneTransform(right ? HumanBodyBones.RightMiddleProximal : HumanBodyBones.LeftMiddleProximal);
+            HumanBodyBones[] roots = right ? RightFingerRoots : LeftFingerRoots;
+            Transform middle = animator.GetBoneTransform(roots[1]) ?? animator.GetBoneTransform(roots[0]);
             Transform thumb = animator.GetBoneTransform(right ? HumanBodyBones.RightThumbProximal : HumanBodyBones.LeftThumbProximal);
-            if (index == null || thumb == null)
+            if (middle == null || thumb == null)
             {
                 return null;
             }
 
-            Vector3 knuckles = limb.End.InverseTransformPoint(index.position);
+            Vector3 knuckles = limb.End.InverseTransformPoint(middle.position);
             Vector3 fingers = knuckles.normalized;
             Vector3 side = Vector3.ProjectOnPlane(limb.End.InverseTransformPoint(thumb.position), fingers).normalized;
             Vector3 facing = (right ? Vector3.Cross(fingers, side) : Vector3.Cross(side, fingers)).normalized;
             SkeletonBone[] skeleton = animator.avatar != null ? animator.avatar.humanDescription.skeleton : null;
             Quaternion rest = HeadLook.RestRotation(skeleton, limb.End);
-            // The fingers turn under the hand bone itself; the axes are in its space.
-            bool shaped = index.parent == limb.End && thumb.parent == limb.End;
+            // The fingers curl toward the palm; the thumb, turned against them, down under the palm and a little
+            // across it toward the fingers.
+            Vector3 curl = Vector3.Cross(fingers, facing).normalized;
+            float across = ThumbAcross * Mathf.PI * 0.5f;
+            var digits = new List<Digit>();
+            foreach (HumanBodyBones root in roots)
+            {
+                Digit digit = CreateDigit(animator, skeleton, limb.End, root, _ => curl);
+                if (digit != null)
+                {
+                    digits.Add(digit);
+                }
+            }
+
+            Digit thumbDigit = CreateDigit(animator, skeleton, limb.End,
+                right ? HumanBodyBones.RightThumbProximal : HumanBodyBones.LeftThumbProximal,
+                along => Vector3.Cross(along, (Vector3.ProjectOnPlane(-side, along).normalized * Mathf.Sin(across)
+                                               + facing * Mathf.Cos(across)).normalized).normalized);
             return new Palm
             {
-                Index = shaped ? index : null,
-                Thumb = shaped ? thumb : null,
-                IndexRest = HeadLook.RestRotation(skeleton, index),
-                ThumbRest = HeadLook.RestRotation(skeleton, thumb),
-                CurlAxis = Vector3.Cross(fingers, facing).normalized,
+                Fingers = digits.Count > 0 && thumbDigit != null ? digits.ToArray() : null,
+                Thumb = digits.Count > 0 ? thumbDigit : null,
+                HasIndex = animator.GetBoneTransform(roots[0]) != null,
                 FoldAxis = Vector3.Cross(side, facing).normalized,
                 SpreadAxis = Vector3.Cross(fingers, side).normalized,
                 Rest = rest,
@@ -349,6 +416,46 @@ namespace Rubickanov.Characters
                 Middle = fingers * (knuckles.magnitude * PalmAlong),
                 Facing = facing,
             };
+        }
+
+        // A digit's bones from its root under the hand out to its last joint, each the child of the one before; the
+        // axes come from the hand's space through the rest turns of the bones above. Null when its root is not right
+        // under the hand. axis maps the digit's line (hand space) to the axis it curls about.
+        private static Digit CreateDigit(Animator animator, SkeletonBone[] skeleton, Transform hand, HumanBodyBones root,
+            Func<Vector3, Vector3> axis)
+        {
+            Transform first = animator.GetBoneTransform(root);
+            if (first == null || first.parent != hand)
+            {
+                return null;
+            }
+
+            var bones = new List<Transform> { first };
+            for (int k = 1; k < 3; k++)
+            {
+                Transform next = animator.GetBoneTransform(root + k);
+                if (next == null || next.parent != bones[k - 1])
+                {
+                    break;
+                }
+
+                bones.Add(next);
+            }
+
+            Vector3 end = bones.Count > 1 ? bones[^1].position : first.position + (first.position - hand.position);
+            Vector3 along = hand.InverseTransformDirection(end - first.position).normalized;
+            Vector3 handAxis = axis(along);
+            var rests = new Quaternion[bones.Count];
+            var axes = new Vector3[bones.Count];
+            Quaternion above = Quaternion.identity;
+            for (int k = 0; k < bones.Count; k++)
+            {
+                rests[k] = HeadLook.RestRotation(skeleton, bones[k]);
+                axes[k] = Quaternion.Inverse(above) * handAxis;
+                above *= rests[k];
+            }
+
+            return new Digit { Bones = bones.ToArray(), Rests = rests, Axes = axes };
         }
 
         private static void Reach(Limb limb, Transform target, float weight)
