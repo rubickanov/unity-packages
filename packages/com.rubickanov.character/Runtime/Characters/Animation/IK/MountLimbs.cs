@@ -35,7 +35,7 @@ namespace Rubickanov.Characters
             public Digit[] Fingers;
             public Digit Thumb;
             public bool HasIndex;
-            public Vector3 FoldAxis, SpreadAxis;
+            public Vector3 FoldAxis, SpreadAxis, OpposeAxis;
         }
 
         // A finger's or the thumb's bones from its root out, their rest turns under their parents, and the axis each
@@ -74,8 +74,9 @@ namespace Rubickanov.Characters
         // one), as the hand pieces are built.
         private const float PalmAlong = 0.55f;
 
-        // How far across the palm, of a right angle, rather than down under it, a thumb with joints curls.
-        private const float ThumbAcross = 0.3f;
+        // How far across the palm, of a right angle, rather than down under it, a thumb with joints curls (as the
+        // model rolls its bones).
+        private const float ThumbAcross = 0.7f;
 
         public bool IsValid => _leftHand != null || _rightHand != null || _leftFoot != null || _rightFoot != null;
 
@@ -155,18 +156,19 @@ namespace Rubickanov.Characters
 
             for (int i = 0; i < palm.Fingers.Length; i++)
             {
-                float share = i == 0 && palm.HasIndex && palm.Fingers.Length > 1 ? 1f - shape.IndexOpen : 1f;
-                Curl(palm.Fingers[i], 0, shape.Curl * share, weight);
-                Curl(palm.Fingers[i], 1, shape.Bend * share, weight);
-                Curl(palm.Fingers[i], 2, shape.Tip * share, weight);
+                bool apart = i == 0 && palm.HasIndex && palm.Fingers.Length > 1 && shape.IndexApart;
+                Curl(palm.Fingers[i], 0, apart ? shape.Index.x : shape.Curl, weight);
+                Curl(palm.Fingers[i], 1, apart ? shape.Index.y : shape.Bend, weight);
+                Curl(palm.Fingers[i], 2, apart ? shape.Index.z : shape.Tip, weight);
             }
 
             if (palm.Thumb != null)
             {
                 // A thumb with joints folds its root the way it curls; a mitten's thumb over the palm.
                 Transform root = palm.Thumb.Bones[0];
-                Vector3 fold = palm.Thumb.Bones.Length > 1 ? palm.Thumb.Axes[0] : palm.FoldAxis;
-                Quaternion turned = Quaternion.AngleAxis(shape.ThumbSpread, palm.SpreadAxis)
+                bool joints = palm.Thumb.Bones.Length > 1;
+                Vector3 fold = joints ? palm.Thumb.Axes[0] : palm.FoldAxis;
+                Quaternion turned = Quaternion.AngleAxis(shape.ThumbSpread, joints ? palm.OpposeAxis : palm.SpreadAxis)
                                     * Quaternion.AngleAxis(shape.ThumbFold, fold) * palm.Thumb.Rests[0];
                 root.localRotation = Quaternion.Slerp(root.localRotation, turned, weight);
                 Curl(palm.Thumb, 1, shape.ThumbCurl, weight);
@@ -385,8 +387,8 @@ namespace Rubickanov.Characters
             Vector3 facing = (right ? Vector3.Cross(fingers, side) : Vector3.Cross(side, fingers)).normalized;
             SkeletonBone[] skeleton = animator.avatar != null ? animator.avatar.humanDescription.skeleton : null;
             Quaternion rest = HeadLook.RestRotation(skeleton, limb.End);
-            // The fingers curl toward the palm; the thumb, turned against them, down under the palm and a little
-            // across it toward the fingers.
+            // The fingers curl toward the palm; the thumb, growing out under the palm, mostly across it toward the
+            // fingers and a little down.
             Vector3 curl = Vector3.Cross(fingers, facing).normalized;
             float across = ThumbAcross * Mathf.PI * 0.5f;
             var digits = new List<Digit>();
@@ -399,9 +401,10 @@ namespace Rubickanov.Characters
                 }
             }
 
+            Vector3 thumbAlong = Vector3.zero;
             Digit thumbDigit = CreateDigit(animator, skeleton, limb.End,
                 right ? HumanBodyBones.RightThumbProximal : HumanBodyBones.LeftThumbProximal,
-                along => Vector3.Cross(along, (Vector3.ProjectOnPlane(-side, along).normalized * Mathf.Sin(across)
+                along => Vector3.Cross(thumbAlong = along, (Vector3.ProjectOnPlane(-side, along).normalized * Mathf.Sin(across)
                                                + facing * Mathf.Cos(across)).normalized).normalized);
             return new Palm
             {
@@ -409,6 +412,7 @@ namespace Rubickanov.Characters
                 Thumb = digits.Count > 0 ? thumbDigit : null,
                 HasIndex = animator.GetBoneTransform(roots[0]) != null,
                 FoldAxis = Vector3.Cross(side, facing).normalized,
+                OpposeAxis = thumbDigit != null ? Vector3.Cross(thumbAlong, facing).normalized : Vector3.zero,
                 SpreadAxis = Vector3.Cross(fingers, side).normalized,
                 Rest = rest,
                 Axis = (Quaternion.Inverse(rest) * limb.End.localPosition).normalized,
