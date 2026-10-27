@@ -83,6 +83,8 @@ namespace Rubickanov.Characters
         public HandShapePose Fist = new(65f, 40f, 10f);
         [Tooltip("Fingers flat on a big round thing, such as a ball.")]
         public HandShapePose OpenPalm = new(-5f, 0f, 30f);
+        [Tooltip("Fingers round a gun's grip, the index finger out on the trigger.")]
+        public HandShapePose Trigger = new(65f, 40f, 10f);
 
         [Header("Swimming")]
         [Tooltip("A swimmer's body rises by this much over the swimming clips, metres, so the chin clears the water " +
@@ -154,7 +156,12 @@ namespace Rubickanov.Characters
         [Tooltip("How much of the roll the head takes back to keep the eyes level.")]
         [Range(0, 1)] public float HeadStabilize = 0.8f;
 
-        public HandShapePose Shape(HandShape shape) => shape == HandShape.OpenPalm ? OpenPalm : Fist;
+        public HandShapePose Shape(HandShape shape) => shape switch
+        {
+            HandShape.OpenPalm => OpenPalm,
+            HandShape.Trigger => Trigger,
+            _ => Fist,
+        };
     }
 
     /// <summary>How a seated character's hands take the seat's hand holds.</summary>
