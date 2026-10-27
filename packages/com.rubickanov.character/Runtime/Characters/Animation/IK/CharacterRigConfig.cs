@@ -83,7 +83,7 @@ namespace Rubickanov.Characters
         public HandShapePose Fist = new(65f, 40f, 10f);
         [Tooltip("Fingers flat on a big round thing, such as a ball.")]
         public HandShapePose OpenPalm = new(-5f, 0f, 30f);
-        [Tooltip("Fingers round a gun's grip, the index finger out on the trigger.")]
+        [Tooltip("Fingers round a gun's grip, the index finger hooked on the trigger, the thumb on the grip's far side.")]
         public HandShapePose Trigger = new(65f, 40f, 10f);
 
         [Header("Swimming")]
