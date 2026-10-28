@@ -385,6 +385,15 @@ namespace Rubickanov.Characters
             Vector3 fingers = knuckles.normalized;
             Vector3 side = Vector3.ProjectOnPlane(limb.End.InverseTransformPoint(thumb.position), fingers).normalized;
             Vector3 facing = (right ? Vector3.Cross(fingers, side) : Vector3.Cross(side, fingers)).normalized;
+            // A rig that says where its palms face (a thumb rooted under the palm would tip the frame above): the side
+            // follows from it, square to the fingers.
+            CharacterRig rig = animator.GetComponentInParent<CharacterRig>();
+            Vector3 told = rig != null && rig.Config != null ? rig.Config.PalmFacing : Vector3.zero;
+            if (told != Vector3.zero)
+            {
+                facing = Vector3.ProjectOnPlane(told, fingers).normalized;
+                side = (right ? Vector3.Cross(facing, fingers) : Vector3.Cross(fingers, facing)).normalized;
+            }
             SkeletonBone[] skeleton = animator.avatar != null ? animator.avatar.humanDescription.skeleton : null;
             Quaternion rest = HeadLook.RestRotation(skeleton, limb.End);
             // The fingers curl toward the palm; the thumb, growing out under the palm, mostly across it toward the

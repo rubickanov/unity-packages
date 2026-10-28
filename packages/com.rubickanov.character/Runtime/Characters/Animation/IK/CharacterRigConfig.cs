@@ -78,6 +78,11 @@ namespace Rubickanov.Characters
                  "still takes the hold's turn.")]
         [Range(0, 180)] public float MountWristTwist = 120f;
 
+        [Tooltip("The way both palms face in their hand bones' space at rest, for a hand whose thumb grows out under " +
+                 "the palm rather than off its edge. Zero: the palm faces away from the back of the hand, square to " +
+                 "the fingers and the thumb's root.")]
+        public Vector3 PalmFacing;
+
         [Header("Hand shapes")]
         [Tooltip("Fingers round a bar, handle or bottle.")]
         public HandShapePose Fist = new(65f, 40f, 10f);
