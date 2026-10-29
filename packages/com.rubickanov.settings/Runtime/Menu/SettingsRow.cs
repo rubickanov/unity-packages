@@ -8,7 +8,8 @@ namespace Rubickanov.Settings
     /// <summary>
     /// One row of a settings section. A row reads its value each time it is asked, so a change made by the console or
     /// code shows at once. A game's own kind of row overrides <see cref="Step"/> and <see cref="Submit"/> (and
-    /// <see cref="Current"/> to take part in keep-or-revert and the change cue) and draws itself.
+    /// <see cref="Current"/> to take part in keep-or-revert and the change cue) and draws itself. A row that
+    /// <see cref="Holds"/> its picks shows them without putting them on until the section's <see cref="ApplyRow"/>.
     /// </summary>
     public abstract class SettingsRow
     {
@@ -26,10 +27,16 @@ namespace Rubickanov.Settings
 
         public bool IsVisible => _visible?.Invoke() ?? true;
 
-        public bool IsEnabled => _enabled?.Invoke() ?? true;
+        public virtual bool IsEnabled => _enabled?.Invoke() ?? true;
 
-        /// <summary>A change asks "keep?" and goes back by itself when nobody answers (window, resolution).</summary>
+        /// <summary>
+        /// A change asks "keep?" and goes back by itself when nobody answers (window, resolution). A choice so marked
+        /// holds its picks until the section's APPLY (<see cref="SectionBuilder.ApplyRow"/>) and asks then.
+        /// </summary>
         public bool IsKeepOrRevert { get; private set; }
+
+        /// <summary>A pick is shown but not put on yet: it waits for APPLY and is dropped when the section opens again.</summary>
+        public bool IsHeld => Held;
 
         public virtual bool Focusable => IsEnabled;
 
@@ -81,8 +88,21 @@ namespace Rubickanov.Settings
         /// <summary>Enter or a click; true when the row did something.</summary>
         protected internal virtual bool Submit(ISettingsMenu menu) => false;
 
-        /// <summary>The section was opened or rebuilt: options read live are read now.</summary>
+        /// <summary>The section was opened or rebuilt: options read live are read now, a held pick is dropped.</summary>
         protected internal virtual void Open()
+        {
+        }
+
+        /// <summary>Picks wait for APPLY instead of going on at once.</summary>
+        protected internal virtual bool Holds => false;
+
+        protected internal virtual bool Held => false;
+
+        /// <summary>Puts the held pick on; what puts the value before it back, or null with nothing held.</summary>
+        protected internal virtual Action? Apply() => null;
+
+        /// <summary>Forgets the held pick; the row shows its value again.</summary>
+        protected internal virtual void Drop()
         {
         }
 
@@ -201,6 +221,8 @@ namespace Rubickanov.Settings
         private readonly Func<IReadOnlyList<T>>? _liveOptions;
         private readonly Func<T, ISettingsText, string> _show;
         private IReadOnlyList<T> _options;
+        private T _held = default!;
+        private bool _holding;
 
         public ChoiceRow(string id, ISettingValue<T> value, IReadOnlyList<T> options, Func<T, ISettingsText, string> show)
             : base(id)
@@ -225,13 +247,13 @@ namespace Rubickanov.Settings
 
         public override int Count => _options.Count;
 
-        /// <summary>The value's option; the first when the value is none of them.</summary>
+        /// <summary>The shown option (a held pick, else the value's); the first when the value is none of them.</summary>
         public override int Index
         {
             get
             {
                 if (_options.Count == 0) return -1;
-                T value = _value.Value;
+                T value = Shown;
                 for (int i = 0; i < _options.Count; i++)
                 {
                     if (EqualityComparer<T>.Default.Equals(_options[i], value)) return i;
@@ -243,14 +265,32 @@ namespace Rubickanov.Settings
 
         public override string OptionText(int option, ISettingsText text) => _show(_options[option], text);
 
-        protected internal override object? Current => _value.Value;
+        private T Shown => _holding ? _held : _value.Value;
+
+        protected internal override object? Current => Shown;
 
         protected internal override Action? Remember() => RememberOf(_value);
 
         protected internal override void Open()
         {
+            _holding = false;
             if (_liveOptions != null) _options = _liveOptions() ?? Array.Empty<T>();
         }
+
+        protected internal override bool Holds => IsKeepOrRevert;
+
+        protected internal override bool Held => _holding;
+
+        protected internal override Action? Apply()
+        {
+            if (!_holding) return null;
+            Action back = RememberOf(_value);
+            _holding = false;
+            _value.Value = _held;
+            return back;
+        }
+
+        protected internal override void Drop() => _holding = false;
 
         protected internal override bool Step(int direction, ISettingsMenu menu) => Choose(Index + direction);
 
@@ -260,6 +300,14 @@ namespace Rubickanov.Settings
         private bool Choose(int option)
         {
             if (option < 0 || option >= _options.Count || option == Index) return false;
+            if (Holds)
+            {
+                // Back on the value it has is no pick at all.
+                _held = _options[option];
+                _holding = !EqualityComparer<T>.Default.Equals(_held, _value.Value);
+                return true;
+            }
+
             _value.Value = _options[option];
             return true;
         }
@@ -283,6 +331,36 @@ namespace Rubickanov.Settings
             _act(menu);
             return true;
         }
+    }
+
+    /// <summary>
+    /// APPLY: puts the section's held picks on at once and asks to keep them (<see cref="SettingsMenu.KeepSeconds"/>);
+    /// off while nothing is held, so it never moves the rows under it.
+    /// </summary>
+    public sealed class ApplyRow : SettingsRow
+    {
+        public ApplyRow(string id) : base(id)
+        {
+        }
+
+        /// <summary>The section's rows, set by the menu each time it makes them.</summary>
+        internal IReadOnlyList<SettingsRow>? SectionRows { get; set; }
+
+        public override bool IsEnabled
+        {
+            get
+            {
+                if (SectionRows == null) return false;
+                foreach (SettingsRow row in SectionRows)
+                {
+                    if (row.IsHeld) return true;
+                }
+
+                return false;
+            }
+        }
+
+        protected internal override bool Submit(ISettingsMenu menu) => menu is SettingsMenu settings && settings.ApplyHeld();
     }
 
     /// <summary>A heading between rows, never focused.</summary>

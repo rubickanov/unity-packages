@@ -38,8 +38,9 @@ namespace Rubickanov.Settings
         public ChoiceSetting<int> FrameCap { get; }
 
         /// <summary>
-        /// Window and size (both keep-or-revert; the sizes read when the section opens, native shown as the size it is
-        /// now), vsync, and the frame cap (off while vsync is on).
+        /// Window and size (both keep-or-revert: picked freely, put on by APPLY under them and kept or reverted then;
+        /// the sizes read when the section opens, native shown as the size it is now), vsync, and the frame cap (off
+        /// while vsync is on).
         /// </summary>
         public void AddRows(SectionBuilder section, IDisplayModes modes)
         {
@@ -53,6 +54,7 @@ namespace Rubickanov.Settings
             section.Choice(Size.Id, shown, () => Offered(modes), (size, text) => Show(size, text))
                 .Resets(Size)
                 .KeepOrRevert();
+            section.ApplyRow();
 
             section.Toggle(VSync);
             section.Choice(FrameCap.Id, FrameCap, FrameCaps, (cap, text) => ShowCap(cap, text))

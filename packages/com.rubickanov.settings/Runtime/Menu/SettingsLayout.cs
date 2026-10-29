@@ -112,6 +112,11 @@ namespace Rubickanov.Settings
 
         public const string ResetId = "settings.reset";
 
+        /// <summary>APPLY for the section's held picks (window, resolution): needed wherever a choice keeps-or-reverts.</summary>
+        public ApplyRow ApplyRow() => Add(new ApplyRow(ApplyId));
+
+        public const string ApplyId = "settings.apply";
+
         private static Func<T, ISettingsText, string> Keyed<T>(Func<T, string> optionKey)
         {
             if (optionKey == null) throw new ArgumentNullException(nameof(optionKey));

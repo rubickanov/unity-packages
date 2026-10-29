@@ -59,8 +59,9 @@ namespace Rubickanov.Settings
     /// A settings screen without the drawing: sections of rows, the focus, and what the menu waits on (an answer, a new
     /// key). Up and down move the focus past headings and rows that are off or hidden, left and right change the value
     /// (none go round), the section keys change the section, Enter acts; Back first answers a question no or calls a
-    /// listening off, otherwise it is the owner's to close the menu. A change of a keep-or-revert row asks to keep it
-    /// and goes back after <see cref="KeepSeconds"/> unanswered. <see cref="Changed"/> fires on anything shown.
+    /// listening off, otherwise it is the owner's to close the menu. A keep-or-revert choice only picks; the section's
+    /// APPLY puts its picks on and asks to keep them, going back after <see cref="KeepSeconds"/> unanswered; picks not
+    /// applied are dropped when the section opens again. A keep-or-revert row of another kind asks on each change. <see cref="Changed"/> fires on anything shown.
     /// </summary>
     public sealed class SettingsMenu : ISettingsMenu, IDisposable
     {
@@ -403,6 +404,7 @@ namespace Rubickanov.Settings
             }
 
             Section.MakeRows(_all);
+            Bind();
             foreach (SettingsRow row in _all)
             {
                 row.Open();
@@ -438,11 +440,41 @@ namespace Rubickanov.Settings
             }, startOnNo: true));
         }
 
+        /// <summary>APPLY: the section's held picks go on together, then one keep question; false with nothing held.</summary>
+        internal bool ApplyHeld()
+        {
+            var revert = new List<Action>();
+            foreach (SettingsRow row in _all)
+            {
+                if (!row.IsHeld) continue;
+                Action? back = row.Apply();
+                if (back != null) revert.Add(back);
+            }
+
+            if (revert.Count == 0) return false;
+            Cue(SettingsCue.Change);
+            _revert = revert.ToArray();
+            Ask(new SettingsQuestion("settings.keep.question", "settings.keep", "settings.revert", Kept,
+                seconds: KeepSeconds));
+            return true;
+        }
+
+        // The APPLY rows see the section's rows.
+        private void Bind()
+        {
+            foreach (SettingsRow row in _all)
+            {
+                if (row is ApplyRow apply) apply.SectionRows = _all;
+            }
+        }
+
         private void ResetSection()
         {
             SettingsSection? section = Section;
             if (section == null) return;
-            BeforeChange();
+            // A reset puts values on at once: held picks go, and the holding rows ask like any keep-or-revert row.
+            foreach (SettingsRow row in _all) row.Drop();
+            BeforeChange(true);
             // A reset may make the rows again (keys put back): go over the rows as they were.
             foreach (SettingsRow row in _all.ToArray())
             {
@@ -459,6 +491,7 @@ namespace Rubickanov.Settings
             SectionIndex = Mathf.Clamp(section, 0, Math.Max(0, Sections.Count - 1));
             _all.Clear();
             Section?.MakeRows(_all);
+            Bind();
             foreach (SettingsRow row in _all) row.Open();
             _rows.Clear();
             foreach (SettingsRow row in _all)
@@ -530,15 +563,15 @@ namespace Rubickanov.Settings
         }
 
         // What the section's keep-or-revert rows show before a change, and what puts it back unless a keep question
-        // already holds the first.
-        private void BeforeChange()
+        // already holds the first. Rows that hold their picks ask on APPLY instead, unless a reset changes them.
+        private void BeforeChange(bool holding = false)
         {
             _keepRows.Clear();
             _keepBefore.Clear();
             _keepRestore.Clear();
             foreach (SettingsRow row in _all)
             {
-                if (!row.IsKeepOrRevert) continue;
+                if (!row.IsKeepOrRevert || (row.Holds && !holding)) continue;
                 _keepRows.Add(row);
                 _keepBefore.Add(row.Current);
                 _keepRestore.Add(_revert == null ? row.Remember() : null);
