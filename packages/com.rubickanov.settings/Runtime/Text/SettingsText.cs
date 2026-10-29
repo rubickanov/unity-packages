@@ -80,6 +80,7 @@ namespace Rubickanov.Settings
             .Add("settings.keep.question", "KEEP THIS SCREEN? BACK IN {0}")
             .Add("settings.swap.question", "{0} IS ON {1}. SWAP?")
             .Row("settings.reset", "RESET SECTION", "Puts this section back as it was.")
+            .Row("settings.apply", "APPLY", "Puts the new screen on. Keep it, or it goes back by itself.")
             .Add("settings.reset.question", "PUT THIS SECTION BACK AS IT WAS?")
             .Add("settings.listen", "PRESS A KEY FOR {0}. ESC CANCELS")
             .Add("settings.listen.pad", "PRESS A BUTTON FOR {0}. START CANCELS")

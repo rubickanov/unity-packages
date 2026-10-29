@@ -141,7 +141,7 @@ var layout = new SettingsLayout()
     }, onReset: () => statsPanel.ResetLayout());
 ```
 
-Rows: `Steps`, `Toggle`, `Choice` (keys of options, or shown as they are), `Action`, `Heading`, `Add` (a game's own kind), `Rows(() => …)` (made again on `Rebuild`), `ResetRow` (asks, then resets every row of the section and `onReset`). On a row: `.Visible(when)`, `.Enabled(when)`, `.KeepOrRevert()`, `.Resets(values)`.
+Rows: `Steps`, `Toggle`, `Choice` (keys of options, or shown as they are), `Action`, `Heading`, `Add` (a game's own kind), `Rows(() => …)` (made again on `Rebuild`), `ResetRow` (asks, then resets every row of the section and `onReset`), `ApplyRow` (puts the section's held picks on). On a row: `.Visible(when)`, `.Enabled(when)`, `.KeepOrRevert()`, `.Resets(values)`.
 
 ### Driving the menu
 
@@ -179,11 +179,11 @@ root.Add(panel); /* … */ panel.Dispose();
 
 `KeyCap` gets the row and the key's index; for an `ActionKeysRow`, `row.Name(key)` is the input package's `KeyName` (text, device, control path, pad family), enough for a glyph or a class per button. Setting it draws the rows again. The focused row is scrolled into view with the headings right above it, once it is laid out.
 
-Classes: `settings` (`settings--asking` while a question is up), `settings__sections`, `settings__section(--current)`, `settings__rows`, `settings__row` (`--focused`, `--disabled`, `--heading`, `--<kind>`), `settings__label`, `settings__value`, `settings__about`, `settings__question`, `settings__question-text`, `settings__countdown`, `settings__answers`, `settings__answer` (`--yes`, `--no`, `--chosen`); per kind `settings-steps__step(--on)`, `settings-steps__number`, `settings-toggle__option(--on)`, `settings-choice__arrow(--left|--right|--end)`, `settings-choice__option`, `settings-keys__key` (`--focused`, `--changed`, `--listening`). Hover focuses a row or an answer, a click sets a step, an option, an arrow, a tab or an answer.
+Classes: `settings` (`settings--asking` while a question is up), `settings__sections`, `settings__section(--current)`, `settings__rows`, `settings__row` (`--focused`, `--disabled`, `--held`, `--heading`, `--<kind>`: steps, toggle, choice, heading, keys, action, apply, custom), `settings__label`, `settings__value`, `settings__about`, `settings__question`, `settings__question-text`, `settings__countdown`, `settings__answers`, `settings__answer` (`--yes`, `--no`, `--chosen`); per kind `settings-steps__step(--on)`, `settings-steps__number`, `settings-toggle__option(--on)`, `settings-choice__arrow(--left|--right|--end)`, `settings-choice__option`, `settings-keys__key` (`--focused`, `--changed`, `--listening`). Hover focuses a row or an answer, a click sets a step, an option, an arrow, a tab or an answer.
 
 ### Keep or revert
 
-A change of a `KeepOrRevert()` row asks `settings.keep.question` and goes back after `SettingsMenu.KeepSeconds` (10) unanswered, on "revert", on Back and when the menu is disposed. A section reset that changes such a row asks too.
+A `KeepOrRevert()` choice (window, resolution) only picks: the row shows the pick (`IsHeld`, class `settings__row--held`) and the screen stays as it is. The section's `ApplyRow` (`settings.apply`, off while nothing is held) puts every held pick on at once and asks `settings.keep.question`; it goes back after `SettingsMenu.KeepSeconds` (10) unanswered, on "revert", on Back and when the menu is disposed. Picks never applied are dropped when the section opens again or the rows are rebuilt. A section reset puts values on at once and asks too. A keep-or-revert row of a game's own kind (not a choice) still asks on each change. `DisplaySettings.AddRows` adds the APPLY row under its two.
 
 ### Words
 

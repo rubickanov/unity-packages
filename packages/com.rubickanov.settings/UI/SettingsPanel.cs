@@ -174,6 +174,7 @@ namespace Rubickanov.Settings.UI
                 bool focus = i == _menu.Focus;
                 view.EnableInClassList(SettingsRowView.FocusedClass, focus);
                 view.EnableInClassList(SettingsRowView.DisabledClass, !row.IsEnabled);
+                view.EnableInClassList(SettingsRowView.HeldClass, row.IsHeld);
                 view.Render();
                 if (focus) focused = view;
             }
@@ -290,6 +291,7 @@ namespace Rubickanov.Settings.UI
         public const string RowClass = "settings__row";
         public const string FocusedClass = "settings__row--focused";
         public const string DisabledClass = "settings__row--disabled";
+        public const string HeldClass = "settings__row--held";
         public const string HeadingClass = "settings__row--heading";
         public const string LabelClass = "settings__label";
         public const string ValueClass = "settings__value";
@@ -340,6 +342,7 @@ namespace Rubickanov.Settings.UI
             HeadingRow => "heading",
             KeysRow => "keys",
             ActionRow => "action",
+            ApplyRow => "apply",
             _ => "custom",
         };
     }

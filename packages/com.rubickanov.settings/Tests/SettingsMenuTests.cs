@@ -122,13 +122,45 @@ namespace Rubickanov.Settings.Tests
         }
 
         [Test]
+        public void KeepOrRevert_AStepOnlyPicks_ApplyPutsItOnAndAsks()
+        {
+            SettingsMenu menu = Menu(Sound, "display");
+            int apply = IndexOf(menu, SectionBuilder.ApplyId);
+            Assert.That(menu.Rows[apply].IsEnabled, Is.False, "nothing to apply yet");
+
+            menu.Step(SettingsStep.Right);
+            Assert.That(menu.Question, Is.Null);
+            Assert.That(_window.Value, Is.EqualTo(WindowMode.Fullscreen), "the screen waits for APPLY");
+            Assert.That(menu.Rows[0].IsHeld, Is.True);
+            Assert.That(((ChoiceRow)menu.Rows[0]).Index, Is.EqualTo(1), "the pick is shown");
+            Assert.That(menu.Rows[apply].IsEnabled, Is.True);
+
+            menu.Click(apply);
+            Assert.That(_window.Value, Is.EqualTo(WindowMode.Windowed));
+            Assert.That(menu.Question!.TextKey, Is.EqualTo("settings.keep.question"));
+            Assert.That(menu.QuestionText, Does.Contain("10"));
+            Assert.That(menu.Rows[0].IsHeld, Is.False);
+        }
+
+        [Test]
+        public void KeepOrRevert_StepBackToTheValue_HoldsNothing()
+        {
+            SettingsMenu menu = Menu(Sound, "display");
+
+            menu.Step(SettingsStep.Right);
+            menu.Step(SettingsStep.Left);
+
+            Assert.That(menu.Rows[0].IsHeld, Is.False);
+            Assert.That(menu.Rows[IndexOf(menu, SectionBuilder.ApplyId)].IsEnabled, Is.False);
+        }
+
+        [Test]
         public void KeepOrRevert_Yes_KeepsTheNewValue()
         {
             SettingsMenu menu = Menu(Sound, "display");
 
             menu.Step(SettingsStep.Right);
-            Assert.That(menu.Question!.TextKey, Is.EqualTo("settings.keep.question"));
-            Assert.That(menu.QuestionText, Does.Contain("10"));
+            menu.Click(IndexOf(menu, SectionBuilder.ApplyId));
             menu.Submit();
 
             Assert.That(menu.Question, Is.Null);
@@ -141,6 +173,7 @@ namespace Rubickanov.Settings.Tests
             SettingsMenu menu = Menu(Sound, "display");
 
             menu.Step(SettingsStep.Right);
+            menu.Click(IndexOf(menu, SectionBuilder.ApplyId));
             menu.Step(SettingsStep.Right);
             menu.Submit();
 
@@ -153,6 +186,7 @@ namespace Rubickanov.Settings.Tests
         {
             SettingsMenu menu = Menu(Sound, "display");
             menu.Step(SettingsStep.Right);
+            menu.Click(IndexOf(menu, SectionBuilder.ApplyId));
 
             _now = 3.5f;
             menu.Tick();
@@ -166,10 +200,25 @@ namespace Rubickanov.Settings.Tests
         }
 
         [Test]
+        public void KeepOrRevert_LeavingTheSection_DropsThePick()
+        {
+            SettingsMenu menu = Menu(Sound, "display");
+            menu.Step(SettingsStep.Right);
+
+            menu.Step(SettingsStep.PreviousSection);
+            menu.Step(SettingsStep.NextSection);
+
+            Assert.That(menu.Rows[0].IsHeld, Is.False);
+            Assert.That(((ChoiceRow)menu.Rows[0]).Index, Is.EqualTo(0));
+            Assert.That(_window.Value, Is.EqualTo(WindowMode.Fullscreen));
+        }
+
+        [Test]
         public void Dispose_WithTheKeepQuestionUp_PutsTheOldValueBack()
         {
             SettingsMenu menu = Menu(Sound, "display");
             menu.Step(SettingsStep.Right);
+            menu.Click(IndexOf(menu, SectionBuilder.ApplyId));
 
             menu.Dispose();
 
@@ -226,6 +275,7 @@ namespace Rubickanov.Settings.Tests
         {
             SettingsMenu menu = Menu(Sound, "display");
             menu.Step(SettingsStep.Right);
+            menu.Click(IndexOf(menu, SectionBuilder.ApplyId));
 
             Assert.That(menu.Back(), Is.True);
             Assert.That(menu.Question, Is.Null);
@@ -334,6 +384,8 @@ namespace Rubickanov.Settings.Tests
 
             Assert.That(size.Index, Is.EqualTo(1));
             menu.Nudge(IndexOf(menu, "screen.size"), -1);
+            Assert.That(display.Size.Value.IsNative, Is.True, "picked, not on yet");
+            menu.Click(IndexOf(menu, SectionBuilder.ApplyId));
             Assert.That(display.Size.Value, Is.EqualTo(new ScreenSize(1280, 720)));
             menu.Answer(false);
 
@@ -358,6 +410,7 @@ namespace Rubickanov.Settings.Tests
             .Section("display", rows =>
             {
                 rows.Choice(_window.Id, _window, new[] { WindowMode.Fullscreen, WindowMode.Windowed }, w => "display.window/" + w).KeepOrRevert();
+                rows.ApplyRow();
                 rows.Choice(_quality, q => "display.quality/" + q);
                 rows.ResetRow();
             }), section);
