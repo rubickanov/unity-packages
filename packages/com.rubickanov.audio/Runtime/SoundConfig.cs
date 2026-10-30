@@ -1,3 +1,6 @@
+// The SoundConfig API stays for older users; the package itself still serves it.
+#pragma warning disable CS0618
+
 using System;
 using UnityEngine;
 using UnityEngine.Audio;
@@ -5,6 +8,7 @@ using UnityEngine.Audio;
 namespace Rubickanov.Audio
 {
     [Serializable]
+    [Obsolete("Use a SoundCue asset.")]
     public struct SoundConfig
     {
         [SerializeField] private AudioResource _resource;
