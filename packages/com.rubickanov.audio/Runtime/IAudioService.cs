@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Audio;
 
 namespace Rubickanov.Audio
 {
@@ -46,5 +48,52 @@ namespace Rubickanov.Audio
         /// parameter is not exposed.
         /// </summary>
         float GetVolume(string mixerParam);
+
+        // Cues. Every member below has a do-nothing default, so an older fake of the service still compiles.
+
+        /// <summary>
+        /// Plays the cue in 2D. <paramref name="variant"/> &lt; 0: the cue's <see cref="SoundCue.Pick"/>; ≥ 0:
+        /// variant % its count, the same on every machine. The source's volume is cue.Volume × jitter × volume, at most 1.
+        /// </summary>
+        SoundHandle Play(SoundCue? cue, float volume = 1f, int variant = -1, float fadeIn = 0f) => SoundHandle.Invalid;
+        /// <summary>Plays the cue in 3D at the point, through its kind when it has one.</summary>
+        SoundHandle PlayAt(SoundCue? cue, Vector3 point, float volume = 1f, int variant = -1, float fadeIn = 0f) =>
+            SoundHandle.Invalid;
+        /// <summary>Plays the cue in 3D following the transform.</summary>
+        SoundHandle PlayAttached(SoundCue? cue, Transform follow, float volume = 1f, int variant = -1, float fadeIn = 0f) =>
+            SoundHandle.Invalid;
+
+        /// <summary>Loops one variant of the cue in 2D, picked at the start; the handle owns it.</summary>
+        LoopHandle Loop(SoundCue? cue, float volume = 1f, float fadeIn = 0f) => LoopHandle.Invalid;
+        LoopHandle LoopAt(SoundCue? cue, Vector3 point, float volume = 1f, float fadeIn = 0f) => LoopHandle.Invalid;
+        /// <summary>A destroyed transform fades the loop out where it was last seen.</summary>
+        LoopHandle LoopAttached(SoundCue? cue, Transform follow, float volume = 1f, float fadeIn = 0f) => LoopHandle.Invalid;
+        /// <summary>A scale over cue.Volume (and the start's jitter), at most 1 in all.</summary>
+        void SetVolume(LoopHandle loop, float volume, float duration = 0f) { }
+        /// <summary>Absolute pitch, as <see cref="SetLoopPitch"/>.</summary>
+        void SetPitch(LoopHandle loop, float pitch, float duration = 0f) { }
+        void Stop(LoopHandle loop, float fadeOut = 0f) { }
+        bool IsPlaying(LoopHandle loop) => false;
+
+        /// <summary>
+        /// Puts an own source into the mix: group, kind (through the space when there is one), Unity priority from
+        /// the cue scale, reverb bypass, listener pause. The handle is the space's, for its volume; invalid without a kind.
+        /// </summary>
+        SpatialHandle Adopt(AudioSource source, in SourceSetup setup) => SpatialHandle.Invalid;
+        /// <summary>Undoes <see cref="Adopt"/>.</summary>
+        void Release(AudioSource source) { }
+
+        /// <summary>The group the cue plays through.</summary>
+        AudioMixerGroup? GroupOf(SoundCue cue) => null;
+        /// <summary>Starts of the cue heard here.</summary>
+        int Played(SoundCue cue) => 0;
+        /// <summary>Adds every cue this service has seen.</summary>
+        void Describe(List<CueStats> into) { }
+        /// <summary>Logs every cue start, "sound &lt;cue&gt; &lt;who|at (x, y, z)|flat&gt; &lt;n&gt;", channel Audio. Off by default.</summary>
+        bool LogPlays
+        {
+            get => false;
+            set { }
+        }
     }
 }

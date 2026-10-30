@@ -1,12 +1,13 @@
 # Audio
 
-Audio service with SFX source pooling (priority eviction, per-sound repeat limits), loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, sounds that play through a paused listener, mixer snapshots, and mixer volume control; 3D sound kinds (inverse-distance level, air absorption, width by distance, outdoor reverb send, head shadow, occlusion) on Unity's own `AudioSource`, a lookahead true-peak limiter on the listener's output, a mixer layout kit for the editor, and an output capture for checks.
+Audio service with sound cues (one asset per sound: variants picked without repeat or by index, volume and pitch jitter, group, kind, priority, limits), SFX source pooling (priority eviction on one 0..100 scale, per-sound repeat limits), loops owned by handles, loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, sounds that play through a paused listener, mixer snapshots, and mixer volume control; 3D sound kinds (inverse-distance level, air absorption, width by distance, outdoor reverb send, head shadow, occlusion) on Unity's own `AudioSource`, a lookahead true-peak limiter on the listener's output, a mixer layout kit for the editor, and an output capture for checks.
 
 ## Dependencies
 
 > `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
 - `UniTask` — async crossfade, fades, ramps, and source lifecycle watchers
+- `com.rubickanov.log` (assembly `Rubickanov.Log.Runtime`) — the `Audio` channel for `LogPlays`
 
 Requires Unity 6000.0 or newer (uses `AudioResource` and `AudioSource.resource`).
 
@@ -17,6 +18,11 @@ IAudioService
 ├── UnityAudioService    — AudioMixer-based, pooled SFX sources, named loop slots, music crossfade
 └── NullAudioService     — no-op for server/headless builds
 
+SoundCue                 — ScriptableObject: one sound, its variants and settings
+├── CuePick              — the variant pick (no repeat, random, sequence, explicit index)
+├── SoundPriority        — the 0..100 scale and its classes, mapped to the pool and to AudioSource.priority
+└── SoundCueCatalog      — a game's list of cues for consoles
+
 SoundSpace               — applies SoundKinds to sources: static curves once, head shadow + occlusion per frame
 ├── SoundKind            — ScriptableObject: what a kind of 3D sound does with distance and the listener
 ├── SoundOccluder        — on an object: how much its colliders block sound (0 passes … 1 rock)
@@ -25,6 +31,7 @@ SoundSpace               — applies SoundKinds to sources: static curves once, 
 OutputLimiter            — lookahead true-peak limiter on the active listener, after the whole mixer
 └── TruePeakLimiter      — the DSP: 4× oversampled peaks, min-hold + ramp over the lookahead, release
 
+SoundCueEditor (Editor)  — ▶ per variant, ▶ random, ■ in the cue's inspector, no Play Mode
 MixerKit (Editor)        — ensures groups, effects, sends, exposed volumes and a limiter in an existing mixer
 ListenerCapture          — records the final output (or the listener) to a WAV; editor and debug builds
 ```
@@ -36,9 +43,15 @@ ListenerCapture          — records the final output (or the listener) to a WAV
 | Assembly | Engine Refs | Description |
 |----------|-------------|-------------|
 | **Rubickanov.Audio.Runtime** | Yes | Service, configs, sound kinds and space, output limiter, capture |
-| **Rubickanov.Audio.Editor** | Editor | `MixerKit`: mixer layout from code |
+| **Rubickanov.Audio.Editor** | Editor | `MixerKit`: mixer layout from code; `SoundCueEditor`: preview in the inspector |
 
 ## Core Concepts
+
+**SoundCue** — ScriptableObject (**Create > Audio > Sound Cue**), one per sound: `Variants` (`AudioResource[]`; a hand-made `AudioRandomContainer` goes in as one element), `Pick` (`RandomNoRepeat` by default, `Random`, `Sequence`), `Volume` (linear 0..1), `VolumeJitter` (dB, downward only), `PitchJitter` (0..0.5), `Output`, `Kind`, `Priority` (0..100), `MaxInstances` and `MinInterval` (counted over all variants), `PlaysOnPause` and a `Note` on when it sounds. Its group is `Output`, else the kind's, else the service's SFX group (`GroupOf`).
+
+**SoundPriority** — One scale for cues, own sources and the pool, 0..100, higher matters more: `Feedback` 100, `Voice` 90, `Shot` 85, `Signal` 70, `Engine` 60, `Music` 55, `Default` 50, `Detail` 40, `Bed` 20. `ToUnity(p)` = round(256 × (1 − p/100)): 0 → 256, 50 → 128, 100 → 0.
+
+**LoopHandle** — What `Loop*` returns; `SetVolume`, `SetPitch`, `Stop`, `IsPlaying` take it. A stopped handle is dead and its id is never reused.
 
 **SoundConfig** — Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`), an optional output `AudioMixerGroup`, and pool rules for one-shots: `Priority`, `MaxInstances`, `MinInterval`, and `PlaysOnPause`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
 
@@ -80,6 +93,27 @@ builder.Register<IAudioService, UnityAudioService>(Lifetime.Singleton);
 ```
 
 ## Usage
+
+### Sound Cues
+
+```csharp
+[SerializeField] private SoundCue _shot;     // a field on the feature's own config
+[SerializeField] private SoundCue _rain;
+
+audio.Play(_shot);                            // 2D
+audio.PlayAt(_shot, muzzle.position);         // 3D through the cue's kind
+audio.PlayAttached(_shot, gun.transform, volume: 0.8f);
+audio.PlayAt(_thunder, sky, variant: seed);   // variant % count: the same clip on every machine
+
+LoopHandle rain = audio.Loop(_rain, volume: 0f, fadeIn: 2f);
+audio.SetVolume(rain, wet01, duration: 0.5f); // a scale over the cue's Volume, at most 1 in all
+audio.SetPitch(rain, 1.1f);                   // absolute
+audio.Stop(rain, fadeOut: 1f);                // the handle is dead from here on
+```
+
+The source's volume is `cue.Volume` × a random 0..`VolumeJitter` dB down × the call's `volume`, at most 1, the same for 2D, the space and loop ramps. The pick state, the counters and the limits live in the service per cue: `MaxInstances` counts the copies of all variants together (a loop counts until it is freed), `MinInterval` the starts; a start over a limit or below every sound in a full pool is dropped and counted. `Played(cue)`, `Describe(list)` (played, dropped, playing, last variant per cue) and `LogPlays` (`sound <cue> <who|at (x, y, z)|flat> <n>` on the `Audio` log channel, off by default) tell what sounded. `CueRandom` replaces the random numbers for a seeded run.
+
+Every cue member of `IAudioService` has a default implementation that does nothing, so an older fake of the service still compiles.
 
 ### Playing SFX
 
@@ -125,6 +159,8 @@ audio.PlaySFX(_bumper);                              // never evicted by hits
 SoundHandle hit = audio.PlaySFXAtPoint(_bodyHit, contact.point, volumeScale: force01);
 if (!hit.IsValid) { /* dropped by a limit — nothing to do */ }
 ```
+
+The pool ranks a `SoundConfig` as `SoundPriority.Default` + its `Priority` and a cue by its own `Priority`, so both APIs share one order: an old sound with `Priority` 0 ranks 50, above a `Bed` cue and below a `Signal` one. A cue also sets `AudioSource.priority` from its scale on every start (after its kind's shape), in 2D too; a `SoundConfig` keeps the kind's priority in 3D and Unity's default otherwise.
 
 A dropped sound returns `SoundHandle.Invalid`. A sound is identified by its `AudioResource`, so two configs with the same resource share limits. Copies fading out after `StopSound` don't count. `MinInterval` runs on the same clock as the fades (real time by default). Loops and music are not pooled and ignore these fields.
 
@@ -230,6 +266,15 @@ What each kind sets:
 Unity's panner loses up to 3 dB as a mono source widens (measured: −1.28 dB at 90°, −3.04 dB at 180°); the rolloff curve undoes it relative to the kind's widest spread, so width never changes loudness.
 
 ### Own Sources in the Space
+
+A source the game owns (a voice, a speaker, an engine) joins the mix through the service in one call:
+
+```csharp
+SpatialHandle h = audio.Adopt(source, new SourceSetup(kinds.Voice, SoundPriority.Voice) { Spatial = SpatialOptions.ExternalGain });
+audio.Release(source);                // Space.Remove + Unshape
+```
+
+`Adopt` sets the group (`Output`, else the kind's, else the SFX group), the kind through the space (or `Shape` without one), `AudioSource.priority` from the scale, the reverb bypass of a kind-less source and `ignoreListenerPause`. Or by hand:
 
 ```csharp
 SpatialHandle h = space.Add(source, kinds.Speaker, volume: 0.8f);
@@ -393,6 +438,10 @@ foreach (var (param, volume) in settings.Volumes)
 - **The pool's filter is added up front** — every pooled source gets a disabled low-pass when the service has a space, so a play enables it instead of rebuilding the DSP chain of a source about to start.
 - **Mixer layout by a helper, not a template** — games already own mixers with their values and exposed names; a template cannot merge into them.
 - **Delay by reading the owner's samples, not a filter** — a delay line in `OnAudioFilterRead` needs its own buffer per source; a game that owns the PCM reads it delayed straight from its history. Slewing within 0.3 % instead of resampling to any rate keeps a speaker's pitch steady while the listener walks.
+- **Cues are assets, picked by the service** — a sound with its variants and settings in one asset means a new clip or a new sound is data, not code. Unity's `AudioRandomContainer` cannot be read or indexed from code (internal type), so the list is the package's own: an explicit index for picks that must match on every machine, visible to consoles, testable.
+- **One priority scale** — 0..100 for cues and own sources, mapped both to the pool's eviction and to Unity's voices, so a horn and a shot are ranked the same way everywhere; the old API ranks at `Default` + its priority in the same order.
+- **Loops by handle on the slot machinery** — a cue loop is a slot under a private key built once, so fades, following and lost targets are the same code; per-frame `SetVolume` by handle allocates nothing.
+- **3.4.0 is additive** — the old API (`SoundConfig`, `PlaySFX*`, string loop slots) behaves as before except the pool rank of a `SoundConfig`, now `Default` + `Priority` (the same order among old sounds).
 - **3.2.0 is additive** — `IAudioService` is unchanged; nothing to migrate. Sounds without a kind and services without a space behave as in 3.1.
 - **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.unscaledDeltaTime` (or `Time.deltaTime`), and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.
 
@@ -400,11 +449,11 @@ foreach (var (param, volume) in settings.Volumes)
 
 ```
 com.rubickanov.audio/
-├── Runtime/
+├── Runtime/         — service, SoundCue, CuePick, SoundPriority, LoopHandle, SourceSetup, CueStats, SoundCueCatalog
 │   ├── Space/       — SoundKind, SoundMath, SoundSpace, SoundOccluder, KindCurves, PropagationDelay
 │   ├── Loudness/    — LoudnessMeter, LoudnessGain
 │   ├── Limiter/     — OutputLimiter, TruePeakLimiter
 │   └── Capture/     — ListenerCapture
-├── Editor/          — MixerKit
-└── Tests/           — EditMode (service, math, space, mix kit, loudness, delay) and PlayMode (pause)
+├── Editor/          — MixerKit, SoundCueEditor
+└── Tests/           — EditMode (service, cues, math, space, mix kit, loudness, delay) and PlayMode (pause)
 ```
