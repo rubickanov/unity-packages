@@ -271,7 +271,8 @@ A source the game owns (a voice, a speaker, an engine) joins the mix through the
 
 ```csharp
 SpatialHandle h = audio.Adopt(source, new SourceSetup(kinds.Voice, SoundPriority.Voice) { Spatial = SpatialOptions.ExternalGain });
-audio.Release(source);                // Space.Remove + Unshape
+audio.Release(source);                // Space.Remove + Unshape; a destroyed source is forgotten too
+audio.IsAdopted(source);              // in the mix through Adopt
 ```
 
 `Adopt` sets the group (`Output`, else the kind's, else the SFX group), the kind through the space (or `Shape` without one), `AudioSource.priority` from the scale, the reverb bypass of a kind-less source and `ignoreListenerPause`. Or by hand:

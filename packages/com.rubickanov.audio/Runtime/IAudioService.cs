@@ -80,8 +80,10 @@ namespace Rubickanov.Audio
         /// the cue scale, reverb bypass, listener pause. The handle is the space's, for its volume; invalid without a kind.
         /// </summary>
         SpatialHandle Adopt(AudioSource source, in SourceSetup setup) => SpatialHandle.Invalid;
-        /// <summary>Undoes <see cref="Adopt"/>.</summary>
+        /// <summary>Undoes <see cref="Adopt"/>; a source destroyed meanwhile is forgotten too.</summary>
         void Release(AudioSource source) { }
+        /// <summary>Whether the source is in the mix through <see cref="Adopt"/>.</summary>
+        bool IsAdopted(AudioSource source) => false;
 
         /// <summary>The group the cue plays through.</summary>
         AudioMixerGroup? GroupOf(SoundCue cue) => null;
