@@ -1,10 +1,11 @@
 {
   "name": "com.rubickanov.audio",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "license": "MIT",
   "displayName": "Audio",
-  "description": "Audio service with SFX pooling, loops in 2D, at a point or attached to a transform, music playback, sounds that play on a paused listener, AudioMixer-based volume control, 3D sound kinds (distance, air, width, reverb send, head shadow, occlusion), a lookahead true-peak output limiter, a mixer layout kit and an output capture.",
+  "description": "Audio service with sound cues (variants, jitter, group, kind, one priority scale, limits), loops by handle, own sources adopted into the mix, SFX pooling, loops in 2D, at a point or attached to a transform, music playback, sounds that play on a paused listener, AudioMixer-based volume control, 3D sound kinds (distance, air, width, reverb send, head shadow, occlusion), a lookahead true-peak output limiter, a mixer layout kit and an output capture.",
   "unity": "6000.0",
   "author": { "name": "rubickanov" },
-  "keywords": ["audio", "sfx", "music", "mixer"]
+  "keywords": ["audio", "sfx", "music", "mixer"],
+  "dependencies": { "com.rubickanov.log": "1.2.0" }
 }

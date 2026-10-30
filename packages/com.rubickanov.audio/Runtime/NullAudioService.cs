@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Audio;
 
 namespace Rubickanov.Audio
 {
@@ -36,5 +37,25 @@ namespace Rubickanov.Audio
 
         public float GetVolume(string mixerParam) =>
             !string.IsNullOrEmpty(mixerParam) && _volumes.TryGetValue(mixerParam, out var volume) ? volume : 1f;
+
+        public SoundHandle Play(SoundCue? cue, float volume = 1f, int variant = -1, float fadeIn = 0f) => SoundHandle.Invalid;
+        public SoundHandle PlayAt(SoundCue? cue, Vector3 point, float volume = 1f, int variant = -1, float fadeIn = 0f) => SoundHandle.Invalid;
+        public SoundHandle PlayAttached(SoundCue? cue, Transform follow, float volume = 1f, int variant = -1, float fadeIn = 0f) => SoundHandle.Invalid;
+
+        public LoopHandle Loop(SoundCue? cue, float volume = 1f, float fadeIn = 0f) => LoopHandle.Invalid;
+        public LoopHandle LoopAt(SoundCue? cue, Vector3 point, float volume = 1f, float fadeIn = 0f) => LoopHandle.Invalid;
+        public LoopHandle LoopAttached(SoundCue? cue, Transform follow, float volume = 1f, float fadeIn = 0f) => LoopHandle.Invalid;
+        public void SetVolume(LoopHandle loop, float volume, float duration = 0f) { }
+        public void SetPitch(LoopHandle loop, float pitch, float duration = 0f) { }
+        public void Stop(LoopHandle loop, float fadeOut = 0f) { }
+        public bool IsPlaying(LoopHandle loop) => false;
+
+        public SpatialHandle Adopt(AudioSource source, in SourceSetup setup) => SpatialHandle.Invalid;
+        public void Release(AudioSource source) { }
+
+        public AudioMixerGroup? GroupOf(SoundCue cue) => cue != null ? cue.OutputOr(null) : null;
+        public int Played(SoundCue cue) => 0;
+        public void Describe(List<CueStats> into) { }
+        public bool LogPlays { get; set; }
     }
 }
