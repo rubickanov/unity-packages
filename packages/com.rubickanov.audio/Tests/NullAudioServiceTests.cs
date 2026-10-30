@@ -1,3 +1,6 @@
+// The SoundConfig API stays for older users; the package itself still serves it.
+#pragma warning disable CS0618
+
 using NUnit.Framework;
 using UnityEngine;
 

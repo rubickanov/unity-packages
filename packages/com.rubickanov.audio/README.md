@@ -53,7 +53,7 @@ ListenerCapture          — records the final output (or the listener) to a WAV
 
 **LoopHandle** — What `Loop*` returns; `SetVolume`, `SetPitch`, `Stop`, `IsPlaying` take it. A stopped handle is dead and its id is never reused.
 
-**SoundConfig** — Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`), an optional output `AudioMixerGroup`, and pool rules for one-shots: `Priority`, `MaxInstances`, `MinInterval`, and `PlaysOnPause`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
+**SoundConfig** — *Obsolete since 3.4.2; use a `SoundCue`.* Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`), an optional output `AudioMixerGroup`, and pool rules for one-shots: `Priority`, `MaxInstances`, `MinInterval`, and `PlaysOnPause`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
 
 **MusicConfig** — Serializable struct with an `AudioResource` and `PlaysOnPause`. No pitch variation. Used by `PlayMusic`.
 
@@ -115,7 +115,9 @@ The source's volume is `cue.Volume` × a random 0..`VolumeJitter` dB down × the
 
 Every cue member of `IAudioService` has a default implementation that does nothing, so an older fake of the service still compiles.
 
-### Playing SFX
+### Playing SFX (obsolete)
+
+`PlaySFX`, `PlaySFXAtPoint` and `PlaySFXAttached` with a `SoundConfig` are `[Obsolete]` since 3.4.2 and still work; new code plays a `SoundCue`.
 
 ```csharp
 [SerializeField] private SoundConfig _hitSound;
@@ -164,7 +166,9 @@ The pool ranks a `SoundConfig` as `SoundPriority.Default` + its `Priority` and a
 
 A dropped sound returns `SoundHandle.Invalid`. A sound is identified by its `AudioResource`, so two configs with the same resource share limits. Copies fading out after `StopSound` don't count. `MinInterval` runs on the same clock as the fades (real time by default). Loops and music are not pooled and ignore these fields.
 
-### Loops via Named Slots
+### Loops via Named Slots (obsolete)
+
+The string slots (`PlayLoop*`, `SetLoopVolume`, `SetLoopPitch`, `StopLoop`, `IsLoopPlaying`) are `[Obsolete]` since 3.4.2 and still work; new code loops a `SoundCue` through a `LoopHandle`.
 
 ```csharp
 [SerializeField] private SoundConfig _footsteps;

@@ -1,3 +1,6 @@
+// The SoundConfig API stays for older users; the package itself still serves it.
+#pragma warning disable CS0618
+
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -595,6 +598,8 @@ namespace Rubickanov.Audio
             return cue.Volume * SoundMath.DbToGain(db);
         }
 
+        [Obsolete("Use a SoundCue: Play, PlayAt, PlayAttached.")]
+
         public SoundHandle PlaySFX(in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f)
         {
             var source = RentSource(in sound, follow: null);
@@ -604,6 +609,8 @@ namespace Rubickanov.Audio
             var spec = SpecOf(in sound);
             return Start(source, in spec, volumeScale, fadeIn, follow: null, spatial: false);
         }
+
+        [Obsolete("Use a SoundCue: Play, PlayAt, PlayAttached.")]
 
         public SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f)
         {
@@ -615,6 +622,8 @@ namespace Rubickanov.Audio
             var spec = SpecOf(in sound);
             return Start(source, in spec, volumeScale, fadeIn, follow: null, spatial: true);
         }
+
+        [Obsolete("Use a SoundCue: Play, PlayAt, PlayAttached.")]
 
         public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f)
         {
@@ -707,6 +716,8 @@ namespace Rubickanov.Audio
                 ReturnSource(source);
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public void PlayLoop(string slot, in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f)
         {
             if (string.IsNullOrEmpty(slot) || !sound.IsValid) return;
@@ -716,6 +727,8 @@ namespace Rubickanov.Audio
             StartLoop(slot, in spec, volumeScale, fadeIn, spatialBlend: 0f);
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public void PlayLoopAtPoint(string slot, in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f)
         {
             if (string.IsNullOrEmpty(slot) || !sound.IsValid) return;
@@ -724,6 +737,8 @@ namespace Rubickanov.Audio
             var spec = SpecOf(in sound);
             StartLoop(slot, in spec, volumeScale, fadeIn, spatialBlend: 1f).transform.position = position;
         }
+
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
 
         public void PlayLoopAttached(string slot, in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f)
         {
@@ -809,6 +824,8 @@ namespace Rubickanov.Audio
             _lostFollows.Clear();
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public void StopLoop(string slot, float fadeOut = 0f)
         {
             if (string.IsNullOrEmpty(slot)) return;
@@ -830,6 +847,8 @@ namespace Rubickanov.Audio
             }
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public bool IsLoopPlaying(string slot)
         {
             if (string.IsNullOrEmpty(slot)) return false;
@@ -847,6 +866,8 @@ namespace Rubickanov.Audio
             }
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public void SetLoopVolume(string slot, float volumeScale, float duration = 0f)
         {
             if (!TryGetLiveLoop(slot, out var source)) return;
@@ -863,6 +884,8 @@ namespace Rubickanov.Audio
                 SetVolumeOf(source, volumeScale);
             }
         }
+
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
 
         public void SetLoopPitch(string slot, float pitch, float duration = 0f)
         {
