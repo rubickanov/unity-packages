@@ -378,6 +378,23 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
+        public void Release_OfDestroyedSource_ForgetsIt()
+        {
+            using var service = ServiceWithSpace(poolSize: 1);
+            var go = new GameObject("Own");
+            var source = go.AddComponent<AudioSource>();
+            var kind = Track(SoundKind.Create());
+            service.Adopt(source, new SourceSetup(kind, SoundPriority.Engine));
+            Assert.IsTrue(service.IsAdopted(source));
+
+            UnityEngine.Object.DestroyImmediate(go);
+            service.Release(source);
+
+            Assert.IsFalse(service.IsAdopted(source));
+            Assert.AreEqual(0, _space!.Count);
+        }
+
+        [Test]
         public void GroupOf_CueThenKindThenSfx()
         {
             Assert.IsNull(_service.GroupOf(Cue(1)), "the test config has no SFX group");

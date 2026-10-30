@@ -1123,10 +1123,13 @@ namespace Rubickanov.Audio
 
         public void Release(AudioSource source)
         {
-            if (source == null || !_adopted.Remove(source, out var adopted)) return;
+            // A source destroyed with its holder is still forgotten: Unity's null would keep it here for good.
+            if (ReferenceEquals(source, null) || !_adopted.Remove(source, out var adopted)) return;
             if (adopted.Handle.IsValid) _space?.Remove(adopted.Handle);
-            if (adopted.Shaped) SoundSpace.Unshape(source);
+            if (adopted.Shaped && source != null) SoundSpace.Unshape(source);
         }
+
+        public bool IsAdopted(AudioSource source) => !ReferenceEquals(source, null) && _adopted.ContainsKey(source);
 
         public AudioMixerGroup? GroupOf(SoundCue cue) => cue != null ? cue.OutputOr(_sfxGroup) : null;
 
