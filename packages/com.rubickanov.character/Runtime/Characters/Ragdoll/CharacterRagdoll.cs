@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Animancer;
+using KinematicCharacterController;
 using Rubickanov.Rig;
 using Rubickanov.Log;
 using UnityEngine;
@@ -35,6 +36,9 @@ namespace Rubickanov.Characters
     public sealed partial class CharacterRagdoll : MonoBehaviour
     {
         private static readonly LogChannel Log = LogChannel.Get("Character");
+
+        // What carries a point is looked for from this far over it, so the feet of a capsule on a deck find the deck, m.
+        private const float CarrierProbeLift = 0.3f;
 
         public CharacterMotor Character;
         public CharacterAnimator Animator;
@@ -146,10 +150,11 @@ namespace Rubickanov.Characters
         public bool ShowsStreamed => _streamed && State == BodyState.Upright;
 
         /// <summary>
-        /// Velocity of whatever carries the body at a point, such as a moving deck it lies on, or null for none: a
-        /// body at rest on it rests, and the capsule that follows the hips is carried along rather than left behind.
+        /// Whatever carries the body, such as a moving deck it lies on, or null: where it carries nothing, the rigidbody
+        /// or moving platform under the body does. A body still on it rests, the capsule that follows the hips is
+        /// carried along rather than left behind, and a body getting up rises on it, capsule and bones going with it.
         /// </summary>
-        public Func<Vector3, Vector3> Carrier { get; set; }
+        public ICharacterCarrier Carrier { get; set; }
 
         /// <summary>The game's say over the body at the water while it is down, or null to float as configured.</summary>
         public IRagdollWater WaterHook { get; set; }
@@ -196,6 +201,9 @@ namespace Rubickanov.Characters
         /// <summary>The character starts getting up: lying face up or down, and the nearest-frame get-up's clip and
         /// start (<see cref="CharacterGetUp.Classic"/> for the face up / down one). Raised where it is simulated.</summary>
         public event Action<CharacterGetUp> GettingUp;
+
+        /// <summary>Raised when the body stands again after getting up, its capsule resumed, on every machine.</summary>
+        public event Action StoodUp;
 
         // The bones are left on in the prefab, so they can be seen and edited there; the character starts
         // upright, before the first physics step.
@@ -253,13 +261,16 @@ namespace Rubickanov.Characters
                 return;
             }
 
-            // A getting-up body falls from the pose it shows now, which is what SamplePose reads next.
-            Vector3 carrier = Character.Motion.Velocity;
+            // The capsule's speed against what it stands on is capped, that thing's own is kept whole. A getting-up body
+            // falls from the pose it shows now, which is what SamplePose reads next, still on what carries it.
+            Vector3 platform = Character.Motor.AttachedRigidbodyVelocity;
+            Vector3 carrier = Character.Motion.Velocity - platform;
             if (State == BodyState.GettingUp)
             {
                 _ragdoll.TurnOff();
                 _ragdoll.SamplePose(0f);
                 carrier = Vector3.zero;
+                CarrierMotion(Character.Motor.TransientPosition, out platform, out _);
             }
 
             else if (Animator.Culled)
@@ -270,11 +281,11 @@ namespace Rubickanov.Characters
             Character.Suspend();
             if (inFlight)
             {
-                _ragdoll.Activate(carrier, carrier.magnitude + Config.MaxActivationSpeed);
+                _ragdoll.Activate(carrier, carrier.magnitude + Config.MaxActivationSpeed, platform);
             }
             else
             {
-                _ragdoll.Activate(carrier);
+                _ragdoll.Activate(carrier, Config.MaxActivationSpeed, platform);
             }
 
             _ragdoll.GoLimp();
@@ -436,7 +447,8 @@ namespace Rubickanov.Characters
             {
                 if (_ragdoll.Mode == RagdollMode.Off || _ragdoll.Mode == RagdollMode.Shell)
                 {
-                    _ragdoll.Activate(Vector3.zero);
+                    CarrierMotion(Character.transform.position, out Vector3 platform, out _);
+                    _ragdoll.Activate(Vector3.zero, Config.MaxActivationSpeed, platform);
                     _ragdoll.GoLimp();
                 }
                 else
@@ -449,7 +461,7 @@ namespace Rubickanov.Characters
                     _ragdoll.CaptureState(at, turns, moves, spinsNow);
                     for (int i = 0; i < n; i++)
                     {
-                        moves[i] = Carrier?.Invoke(at[i]) ?? Vector3.zero;
+                        CarrierMotion(at[i], out moves[i], out _);
                         spinsNow[i] = Vector3.zero;
                     }
 
@@ -500,6 +512,15 @@ namespace Rubickanov.Characters
             }
 
             BeginGetUp(getUp.FaceUp, false);
+        }
+
+        // Each frame, before the animation moves a get-up's capsule on by the clip's travel.
+        private void Update()
+        {
+            if (State == BodyState.GettingUp && !IsReplica)
+            {
+                CarryRising(Time.deltaTime);
+            }
         }
 
         private void FixedUpdate()
@@ -563,7 +584,7 @@ namespace Rubickanov.Characters
                 _ragdoll.Accelerate(Character.Gravity - Physics.gravity);
             }
 
-            Vector3 carried = Carrier?.Invoke(hips) ?? Vector3.zero;
+            CarrierMotion(hips, out Vector3 carried, out _);
             bool slow = inWater
                 ? (_ragdoll.Hips.Body.linearVelocity - water).magnitude < Config.WaterRestSpeed
                 : (_ragdoll.Hips.Body.linearVelocity - carried).magnitude < Config.RestSpeed;
@@ -628,7 +649,7 @@ namespace Rubickanov.Characters
 
         // The capsule stands where the hips lie, so the camera and the network stay with the body; in deep water it
         // floats where a swimmer would. Thrown off a tilted seat, it turns upright as a standing character would, not
-        // at once, so the camera does not jerk.
+        // at once, so the camera does not jerk. On something that moves it goes and turns with it.
         private void FollowHips(Vector3 hips, Vector3 ground, bool floating, float surface, float dt)
         {
             if (floating)
@@ -636,9 +657,12 @@ namespace Rubickanov.Characters
                 ground = new Vector3(hips.x, surface - Character.Settings.FloatDepth, hips.z);
             }
 
-            _followPosition += (Carrier?.Invoke(_followPosition) ?? Vector3.zero) * dt;
+            CarrierMotion(_followPosition, out Vector3 carried, out Vector3 spin);
+            _followPosition += carried * dt;
             _followPosition = Vector3.Lerp(_followPosition, ground, 1f - Mathf.Exp(-dt / Config.FollowTime));
-            Quaternion rotation = Character.Motor.TransientRotation;
+            Vector3 up = Up;
+            Quaternion rotation = Quaternion.AngleAxis(Vector3.Dot(spin, up) * Mathf.Rad2Deg * dt, up)
+                                  * Character.Motor.TransientRotation;
             rotation = Quaternion.Slerp(rotation, Upright(rotation),
                 1f - Mathf.Exp(-Character.Settings.UpOrientationSharpness * dt));
             Character.Follow(_followPosition, rotation);
@@ -1091,6 +1115,55 @@ namespace Rubickanov.Characters
             {
                 Rig.enabled = true;
             }
+
+            StoodUp?.Invoke();
+        }
+
+        // Getting up on something that moves: the capsule goes with it each frame, turning about the up as it turns,
+        // and the bones while they still show the ragdoll's pose; the clip's travel goes on top, so the body rises on
+        // the deck rather than hangs where it lay as the deck goes on.
+        private void CarryRising(float dt)
+        {
+            if (!Character.isActiveAndEnabled || !Character.IsSuspended)
+            {
+                return;
+            }
+
+            KinematicCharacterMotor motor = Character.Motor;
+            Vector3 feet = motor.TransientPosition;
+            CarrierMotion(feet, out Vector3 velocity, out Vector3 spin);
+            if (velocity == Vector3.zero && spin == Vector3.zero)
+            {
+                return;
+            }
+
+            Vector3 up = Up;
+            Quaternion turn = Quaternion.AngleAxis(Vector3.Dot(spin, up) * Mathf.Rad2Deg * dt, up);
+            Vector3 shift = velocity * dt;
+            Character.Teleport(feet + shift, turn * motor.TransientRotation);
+            _ragdoll.Carry(feet, turn, shift);
+        }
+
+        // How whatever carries the body moves at a point: the game's carrier, else the rigidbody or moving platform
+        // under the point; still where nothing carries it.
+        private void CarrierMotion(Vector3 point, out Vector3 velocity, out Vector3 spin)
+        {
+            if (Carrier != null && Carrier.TryMotion(point, out velocity, out spin))
+            {
+                return;
+            }
+
+            Vector3 up = Up;
+            if (Physics.Raycast(point + up * CarrierProbeLift, -up, out RaycastHit hit, Config.GroundProbe + CarrierProbeLift,
+                    Config.GroundLayers, QueryTriggerInteraction.Ignore) && hit.rigidbody != null
+                && hit.rigidbody.GetComponent<RagdollBone>() == null)
+            {
+                Character.Motor.GetVelocityFromRigidbodyMovement(hit.rigidbody, point, Time.fixedDeltaTime, out velocity,
+                    out spin);
+                return;
+            }
+
+            velocity = spin = Vector3.zero;
         }
 
         // Against gravity, not along the capsule: a body thrown off a seat lies down with the seat's tilt.

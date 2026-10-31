@@ -481,7 +481,14 @@ namespace Rubickanov.Characters
         public void Activate(Vector3 carrierVelocity) => Activate(carrierVelocity, _config.MaxActivationSpeed);
 
         /// <summary>As <see cref="Activate(Vector3)"/>, no bone faster than <paramref name="maxSpeed"/>, m/s.</summary>
-        public void Activate(Vector3 carrierVelocity, float maxSpeed)
+        public void Activate(Vector3 carrierVelocity, float maxSpeed) => Activate(carrierVelocity, maxSpeed, Vector3.zero);
+
+        /// <summary>
+        /// As <see cref="Activate(Vector3, float)"/> on something going at <paramref name="platformVelocity"/>, such as
+        /// a deck: <paramref name="carrierVelocity"/> is against it and only that is capped, its own velocity is added
+        /// whole, so a body falling on a fast deck lies on the deck.
+        /// </summary>
+        public void Activate(Vector3 carrierVelocity, float maxSpeed, Vector3 platformVelocity)
         {
             if (_samples == 0)
             {
@@ -504,7 +511,8 @@ namespace Rubickanov.Characters
                 body.isKinematic = false;
                 body.interpolation = RigidbodyInterpolation.Interpolate;
                 (Vector3 linear, Vector3 angular) = PoseVelocity(i);
-                body.linearVelocity = Vector3.ClampMagnitude(rootRotation * linear + carrierVelocity, maxSpeed);
+                body.linearVelocity = Vector3.ClampMagnitude(rootRotation * linear + carrierVelocity, maxSpeed)
+                                      + platformVelocity;
                 body.angularVelocity = rootRotation * angular;
                 body.WakeUp();
             }
@@ -708,6 +716,28 @@ namespace Rubickanov.Characters
 
             _flail?.Reset();
             Mode = RagdollMode.Kinematic;
+        }
+
+        /// <summary>
+        /// Moves kinematic bones with what carries them, such as a deck under a body getting up: turned by
+        /// <paramref name="turn"/> about <paramref name="pivot"/>, then shifted by <paramref name="shift"/>.
+        /// </summary>
+        public void Carry(Vector3 pivot, Quaternion turn, Vector3 shift)
+        {
+            if (Mode != RagdollMode.Kinematic)
+            {
+                return;
+            }
+
+            foreach (RagdollBone bone in _bones)
+            {
+                bone.transform.GetPositionAndRotation(out Vector3 position, out Quaternion rotation);
+                position = pivot + turn * (position - pivot) + shift;
+                rotation = turn * rotation;
+                bone.transform.SetPositionAndRotation(position, rotation);
+                bone.Body.position = position;
+                bone.Body.rotation = rotation;
+            }
         }
 
         /// <summary>Switches the bones on as kinematic bodies, for a pose replicated from elsewhere.</summary>
