@@ -1,12 +1,13 @@
 # Audio
 
-Audio service with SFX source pooling (priority eviction, per-sound repeat limits), loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, sounds that play through a paused listener, mixer snapshots, and mixer volume control.
+Audio service with sound cues (one asset per sound: variants picked without repeat or by index, volume and pitch jitter, group, kind, priority, limits), SFX source pooling (priority eviction on one 0..100 scale, per-sound repeat limits), loops owned by handles, loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, sounds that play through a paused listener, mixer snapshots, and mixer volume control; 3D sound kinds (inverse-distance level, air absorption, width by distance, outdoor reverb send, head shadow, occlusion) on Unity's own `AudioSource`, a lookahead true-peak limiter on the listener's output, a mixer layout kit for the editor, and an output capture for checks.
 
 ## Dependencies
 
 > `UniTask` comes from a git URL, not from UPM — UPM will not pull it in for you. See [Third-party dependencies](https://github.com/rubickanov/unity-packages#third-party-dependencies).
 
 - `UniTask` — async crossfade, fades, ramps, and source lifecycle watchers
+- `com.rubickanov.log` (assembly `Rubickanov.Log.Runtime`) — the `Audio` channel for `LogPlays`
 
 Requires Unity 6000.0 or newer (uses `AudioResource` and `AudioSource.resource`).
 
@@ -16,17 +17,55 @@ Requires Unity 6000.0 or newer (uses `AudioResource` and `AudioSource.resource`)
 IAudioService
 ├── UnityAudioService    — AudioMixer-based, pooled SFX sources, named loop slots, music crossfade
 └── NullAudioService     — no-op for server/headless builds
+
+SoundCue                 — ScriptableObject: one sound, its variants and settings
+├── CuePick              — the variant pick (no repeat, random, sequence, explicit index)
+├── SoundPriority        — the 0..100 scale and its classes, mapped to the pool and to AudioSource.priority
+└── SoundCueCatalog      — a game's list of cues for consoles
+
+SoundSpace               — applies SoundKinds to sources: static curves once, head shadow + occlusion per frame
+├── SoundKind            — ScriptableObject: what a kind of 3D sound does with distance and the listener
+├── SoundOccluder        — on an object: how much its colliders block sound (0 passes … 1 rock)
+└── SoundMath            — the numbers: distance law, air cutoff, spread, reverb send, back amount, curves
+
+OutputLimiter            — lookahead true-peak limiter on the active listener, after the whole mixer
+└── TruePeakLimiter      — the DSP: 4× oversampled peaks, min-hold + ramp over the lookahead, release
+
+SoundCueEditor (Editor)  — ▶ per variant, ▶ random, ■ in the cue's inspector, no Play Mode
+MixerKit (Editor)        — ensures groups, effects, sends, exposed volumes and a limiter in an existing mixer
+ListenerCapture          — records the final output (or the listener) to a WAV; editor and debug builds
 ```
 
 **UnityAudioService** is constructed from an **AudioServiceConfig** (ScriptableObject) that supplies the mixer, the music and default SFX groups, pool size, default crossfade duration, 3D distance settings, the fade-out of a loop whose target is destroyed, and whether fades run on real time. The service creates a `[AudioService]` GameObject (marked `DontDestroyOnLoad` in play mode) that hosts the music sources, the SFX pool, and loop sources.
 
+## Assemblies
+
+| Assembly | Engine Refs | Description |
+|----------|-------------|-------------|
+| **Rubickanov.Audio.Runtime** | Yes | Service, configs, sound kinds and space, output limiter, capture |
+| **Rubickanov.Audio.Editor** | Editor | `MixerKit`: mixer layout from code; `SoundCueEditor`: preview in the inspector |
+
 ## Core Concepts
 
-**SoundConfig** — Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`), an optional output `AudioMixerGroup`, and pool rules for one-shots: `Priority`, `MaxInstances`, `MinInterval`, and `PlaysOnPause`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
+**SoundCue** — ScriptableObject (**Create > Audio > Sound Cue**), one per sound: `Variants` (`AudioResource[]`; a hand-made `AudioRandomContainer` goes in as one element), `Pick` (`RandomNoRepeat` by default, `Random`, `Sequence`), `Volume` (linear 0..1), `VolumeJitter` (dB, downward only), `PitchJitter` (0..0.5), `Output`, `Kind`, `Priority` (0..100), `MaxInstances` and `MinInterval` (counted over all variants), `PlaysOnPause` and a `Note` on when it sounds. Its group is `Output`, else the kind's, else the service's SFX group (`GroupOf`).
+
+**SoundPriority** — One scale for cues, own sources and the pool, 0..100, higher matters more: `Feedback` 100, `Voice` 90, `Shot` 85, `Signal` 70, `Engine` 60, `Music` 55, `Default` 50, `Detail` 40, `Bed` 20. `ToUnity(p)` = round(256 × (1 − p/100)): 0 → 256, 50 → 128, 100 → 0.
+
+**LoopHandle** — What `Loop*` returns; `SetVolume`, `SetPitch`, `Stop`, `IsPlaying` take it. A stopped handle is dead and its id is never reused.
+
+**SoundConfig** — *Obsolete since 3.4.2; use a `SoundCue`.* Serializable struct with an `AudioResource`, a pitch variation range (`0`–`0.5`), an optional output `AudioMixerGroup`, and pool rules for one-shots: `Priority`, `MaxInstances`, `MinInterval`, and `PlaysOnPause`. Used for SFX and loops. Assigned in the Inspector. A sound with no output plays through the config's `SfxGroup`; set one to route crowd, UI or voice sounds to their own group.
 
 **MusicConfig** — Serializable struct with an `AudioResource` and `PlaysOnPause`. No pitch variation. Used by `PlayMusic`.
 
 **SoundHandle** — Opaque readonly struct returned by `PlaySFX*`. Pass it to `StopSound` to stop a one-shot early. Ignore it if you don't need to.
+
+**SoundKind** — ScriptableObject (**Create > Config > Sound Kind**) describing a kind of 3D sound: the distance law (`Inverse`: full level within `Reference`, −6 dB per doubling past it, a smoothstep fade to silence over the last `FadeShare` of `Max`; `External`: flat, the owner sets the level), `Air` (high-frequency loss ×ISO 9613-1), `SpreadNear`/`SpreadFar`/`SpreadFarAt` (width by distance), `ReverbAtReference`/`ReverbMax` (reverb-zone send rising with distance), `HeadShadow`, `Occlusion` with its `OcclusionMask` and `OcclusionRadius`, `Priority` and an optional `Output` group. A `SoundConfig` names its kind in `Kind`.
+
+**SoundSpace** — Applies kinds to `AudioSource`s. `Shape` sets everything static once (custom rolloff, spread and reverb-mix curves, the air low-pass curve); `Add` also registers a source for the per-frame part (head shadow, occlusion) when the kind needs it (`kind.Ticks`). One list, no component per source. The service takes a space and uses it for every 3D play of a sound with a kind; a game adds its own sources (speakers, voices) itself.
+
+**PropagationDelay** — Pure C# delay through the air for a source whose samples the game owns (a PCM reader): the read trails a reference cursor by distance / speed of sound, moving with the read rate within 1 ± `MaxSlew` and crossfading past `Jump`. Fractional reads by a 4-point Hermite.
+
+**LoudnessMeter / LoudnessGain** — Pure C# BS.1770 loudness of a stream over a sliding window, and a slow gain bringing it to a target: what makes tracks from different sources play equally loud.
 
 **Loop slot** — A string key identifying a dedicated, non-pooled `AudioSource`. `PlayLoop("steps", cfg)` reuses the same slot across calls and is never evicted by the SFX pool. A slot plays in 2D, at a point or following a transform.
 
@@ -39,6 +78,13 @@ IAudioService
 IAudioService audio = new UnityAudioService(audioConfig);
 ```
 
+With 3D sound kinds, give it a space (its numbers come from `AudioServiceConfig.Space`):
+
+```csharp
+var space = new SoundSpace(audioConfig.Space);
+IAudioService audio = new UnityAudioService(audioConfig, space);
+```
+
 Or register it in a DI container:
 
 ```csharp
@@ -48,7 +94,30 @@ builder.Register<IAudioService, UnityAudioService>(Lifetime.Singleton);
 
 ## Usage
 
-### Playing SFX
+### Sound Cues
+
+```csharp
+[SerializeField] private SoundCue _shot;     // a field on the feature's own config
+[SerializeField] private SoundCue _rain;
+
+audio.Play(_shot);                            // 2D
+audio.PlayAt(_shot, muzzle.position);         // 3D through the cue's kind
+audio.PlayAttached(_shot, gun.transform, volume: 0.8f);
+audio.PlayAt(_thunder, sky, variant: seed);   // variant % count: the same clip on every machine
+
+LoopHandle rain = audio.Loop(_rain, volume: 0f, fadeIn: 2f);
+audio.SetVolume(rain, wet01, duration: 0.5f); // a scale over the cue's Volume, at most 1 in all
+audio.SetPitch(rain, 1.1f);                   // absolute
+audio.Stop(rain, fadeOut: 1f);                // the handle is dead from here on
+```
+
+The source's volume is `cue.Volume` × a random 0..`VolumeJitter` dB down × the call's `volume`, at most 1, the same for 2D, the space and loop ramps. The pick state, the counters and the limits live in the service per cue: `MaxInstances` counts the copies of all variants together (a loop counts until it is freed), `MinInterval` the starts; a start over a limit or below every sound in a full pool is dropped and counted. `Played(cue)`, `Describe(list)` (played, dropped, playing, last variant per cue) and `LogPlays` (`sound <cue> <who|at (x, y, z)|flat> <n>` on the `Audio` log channel, off by default) tell what sounded. `CueRandom` replaces the random numbers for a seeded run.
+
+Every cue member of `IAudioService` has a default implementation that does nothing, so an older fake of the service still compiles.
+
+### Playing SFX (obsolete)
+
+`PlaySFX`, `PlaySFXAtPoint` and `PlaySFXAttached` with a `SoundConfig` are `[Obsolete]` since 3.4.2 and still work; new code plays a `SoundCue`.
 
 ```csharp
 [SerializeField] private SoundConfig _hitSound;
@@ -93,9 +162,13 @@ SoundHandle hit = audio.PlaySFXAtPoint(_bodyHit, contact.point, volumeScale: for
 if (!hit.IsValid) { /* dropped by a limit — nothing to do */ }
 ```
 
+The pool ranks a `SoundConfig` as `SoundPriority.Default` + its `Priority` and a cue by its own `Priority`, so both APIs share one order: an old sound with `Priority` 0 ranks 50, above a `Bed` cue and below a `Signal` one. A cue also sets `AudioSource.priority` from its scale on every start (after its kind's shape), in 2D too; a `SoundConfig` keeps the kind's priority in 3D and Unity's default otherwise.
+
 A dropped sound returns `SoundHandle.Invalid`. A sound is identified by its `AudioResource`, so two configs with the same resource share limits. Copies fading out after `StopSound` don't count. `MinInterval` runs on the same clock as the fades (real time by default). Loops and music are not pooled and ignore these fields.
 
-### Loops via Named Slots
+### Loops via Named Slots (obsolete)
+
+The string slots (`PlayLoop*`, `SetLoopVolume`, `SetLoopPitch`, `StopLoop`, `IsLoopPlaying`) are `[Obsolete]` since 3.4.2 and still work; new code loops a `SoundCue` through a `LoopHandle`.
 
 ```csharp
 [SerializeField] private SoundConfig _footsteps;
@@ -172,6 +245,142 @@ A container (`AudioRandomContainer`) that plays on pause is heard, but Unity kee
 
 The service doesn't pause anything itself: setting `AudioListener.pause` is the game's call. Fades keep running while paused, so a sound faded out on the pause screen is gone when the game resumes.
 
+### 3D Sound Kinds
+
+Create a `SoundKind` asset per kind of sound (a speaker, a footstep, a shutter) and assign it in the `Kind` field of the `SoundConfig`. Point and attached plays of that sound go through the service's space; 2D plays and sounds without a kind take the old path (the config's global rolloff) unchanged.
+
+```csharp
+audio.PlaySFXAtPoint(sounds.Shutter, phone.position);           // Shutter.Kind = "Click" kind
+audio.PlayLoopAttached("radio", sounds.Radio, radio.transform);
+```
+
+The output group of a kind's sound is the sound's `Output`, else the kind's `Output`, else `SfxGroup`. Fades, `SetLoopVolume` and the pool's "quietest fading" choice work on the volume the caller asked for; the source's own `volume` also carries head shadow and occlusion.
+
+What each kind sets:
+
+| Field | Effect |
+|---|---|
+| `Reference`, `Max`, `FadeShare` | Custom rolloff: 1 up to `Reference`, `Reference / d` past it, smoothstep to 0 over the last `FadeShare` of `Max` (0: the law holds up to `Max`) |
+| `Air` | Low-pass where air absorption takes 3 dB: 3 m → 13.9 kHz, 10 m → 7.6 kHz, 40 m → 3.8 kHz at `Air` 4 |
+| `SpreadNear` → `SpreadFar` at `SpreadFarAt` | Width blended on log distance from `Reference`; ≤ 110° keeps a side source ≥ 6 dB louder in its ear (Unity's spread 0 is a hard pan, 180° has no direction) |
+| `ReverbAtReference`, `ReverbMax` | Reverb-zone send `min(ReverbMax, ReverbAtReference · d / Reference)` |
+| `HeadShadow` | Straight behind: −1.25 dB and the cutoff × 0.55, near an octave duller (`SoundSpaceSettings.ShadowDb`, `ShadowCutoff`), smoothed over 60 ms |
+| `Occlusion`, `OcclusionMask`, `OcclusionRadius` | Rays from the listener to the source and to 7 points on a half-ring of `OcclusionRadius` round it (across the line, over the top, never below); occlusion is the share blocked, so a table or a post blocks little and a rock all (round-robin, `RaysPerFrame` 16, one point per ray). A collider blocks by its `SoundOccluder.Strength` (0 passes, 1 rock), else fully. Fully occluded: −9 dB and ×0.3 cutoff, attack 0.12 s, release 0.3 s |
+
+Unity's panner loses up to 3 dB as a mono source widens (measured: −1.28 dB at 90°, −3.04 dB at 180°); the rolloff curve undoes it relative to the kind's widest spread, so width never changes loudness.
+
+### Own Sources in the Space
+
+A source the game owns (a voice, a speaker, an engine) joins the mix through the service in one call:
+
+```csharp
+SpatialHandle h = audio.Adopt(source, new SourceSetup(kinds.Voice, SoundPriority.Voice) { Spatial = SpatialOptions.ExternalGain });
+audio.Release(source);                // Space.Remove + Unshape; a destroyed source is forgotten too
+audio.IsAdopted(source);              // in the mix through Adopt
+```
+
+`Adopt` sets the group (`Output`, else the kind's, else the SFX group), the kind through the space (or `Shape` without one), `AudioSource.priority` from the scale, the reverb bypass of a kind-less source and `ignoreListenerPause`. Or by hand:
+
+```csharp
+SpatialHandle h = space.Add(source, kinds.Speaker, volume: 0.8f);
+space.SetVolume(h, 0.5f);             // owners with fades write here, never to source.volume
+space.Remove(h);                      // stops ticking; SoundSpace.Unshape(source) undoes the shape
+SoundSpace.Shape(source, kinds.Bird); // static part only, no per-frame cost
+```
+
+`SpatialOptions.ExternalGain` leaves `volume` to the owner, who multiplies by `space.GainOf(h)` itself (a voice chat with its own level path).
+
+`space.Describe(list)` appends a `SpatialState` per registered source (kind, owned volume, shadow × occlusion gain, cutoff) for consoles and checks; `space.OcclusionOn = false` opens every occlusion for an A/B (the smoothing still eases it). `SoundSpace.ApplyReverb(zone, settings)` puts the settings' outdoor reverb (User preset: room, roomHF, decay, reflections delay) on a zone the game places; the radius is the game's.
+
+The listener is `space.Listener`, or the enabled `AudioListener` found once and cached (a cached listener that is switched off is replaced at once). The service ticks the space after `LateUpdate`; a game with its own frame order sets `space.TicksItself = false` and calls `space.Tick(deltaTime)` after its camera moves.
+
+### Reverb Zones
+
+An `AudioReverbZone` takes a send from **every** source inside it with `reverbZoneMix > 0` — Unity's default — 2D or 3D. So:
+
+- every source the service creates (pool, loop slots, music) bypasses reverb zones; `Shape` turns the bypass off for kinds with a reverb send and keeps it on for a kind whose `ReverbAtReference` or `ReverbMax` is 0 (a voice chat's playback makes its sound in `OnAudioFilterRead` over a flat clip: its send would be the clip, a thump, not the voice);
+- a game's own sources that should stay dry set `bypassReverbZones = true` where they are made;
+- `SoundSpace.Strays()` lists scene sources that would send without a kind's shape — a check, not a fix.
+
+Measured on 6000.6 (keep these in mind when sizing the send):
+
+- the send is taken **after** volume, rolloff and every mixer fader on the source's path, but **before** the source's own filters and `OnAudioFilterRead` — a low-passed or script-generated source sends its raw signal;
+- the wet sums **after** the mixer **and after the listener's filters**: neither a Master limiter nor the [Output Limiter](#output-limiter) sees it. Size every send so its wet fits the limiter's headroom (ceiling to 0 dBTP). An `Inverse` kind: keep `ReverbAtReference` ≤ 0.1 — with send ∝ distance and level ∝ 1/distance its wet stays near its level at `Reference` minus 26 dB minus the zone's own level. An `External` kind has a fixed send while the game sets the level: the louder it plays, the louder its wet, also while the limiter is cutting its dry sound. Measured with a −12 dB zone (decay 1.1 s) and thunder that drives the limiter 5 dB deep: send 1.0 → clipped at 0 dBFS; 0.5 → still clipped on one clip; 0.2 → ≤ −0.3 dBTP, ≤ 0.01 % of samples over −1 dBFS.
+
+### Mix Kit (Editor)
+
+`MixerKit` adds what a mixer is missing and leaves everything it finds as it is: a second run changes nothing, hand edits stay. The mixer is marked dirty; save with `AssetDatabase.SaveAssets()`.
+
+```csharp
+AudioMixerGroup master = mixer.FindMatchingGroups("Master")[0];
+MixerKit.EnsureLimiter(master, ceilingDb: -1f, releaseMs: 100f, exposedThreshold: "MasterLimit");
+AudioMixerGroup music = MixerKit.EnsureGroup(mixer, "Music", "Master");
+AudioMixerGroup world = MixerKit.EnsureGroup(mixer, "World", "Master");
+MixerKit.EnsureExposedVolume(music, "MusicVolume");
+AudioMixerGroup verb = MixerKit.EnsureGroup(mixer, "Reverb", "Master");
+MixerKit.EnsureEffect(verb, "SFX Reverb", new Dictionary<string, float> { ["Decay Time"] = 1.2f });
+MixerKit.EnsureSend(world, verb, levelDb: -12f);   // Receive heads the Reverb group
+AssetDatabase.SaveAssets();
+```
+
+Recommended layout: `Master` [limiter] → `Music`, `World` (3D game sounds), `Ambience`, `Voice`, `UI`. The mixer Compressor with attack 0 is an infinite-ratio peak limiter without lookahead (a +20 dB step overshoots ~11 dB for ~15 ms), so keep it a safety: stage levels so it is idle in normal play, and don't put a "glue" compressor on music — it would clamp every transient. The [Output Limiter](#output-limiter) after it catches what it lets through. `exposedThreshold` lets a probe set it to 0 dB (off) and measure gain reduction.
+
+It works through Unity's internal mixer editor API by reflection; when that changes, it logs what it could not make and returns `null`/`false`.
+
+### Output Limiter
+
+The mixer Compressor has no lookahead and reads sample peaks only, so loud sums (several sources close by, thunder over music) still clip. `UnityAudioService` keeps an `OutputLimiter` on the active `AudioListener` (found again within a second when the listener changes) when `AudioServiceConfig.Limiter.Enabled`:
+
+- `OnAudioFilterRead` on the listener gets the whole mix after every mixer group and effect, so it sees everything but the reverb-zone wet (see [Reverb Zones](#reverb-zones)); the ceiling sits below 0 dBTP to leave the wet room;
+- true peak: the value between samples by 4× oversampling (16-tap Kaiser-windowed sinc per phase, as BS.1770 meters do; under-reads ≤ 0.15 dB on audio band-limited to 17 kHz at 48 kHz); a block whose interpolation cannot reach the ceiling skips it;
+- the gain each sample needs is held over the lookahead and averaged over it, so it ramps down in time and reaches its value exactly as the peak leaves: no sample passes the ceiling; it comes back with an exponential release; channels share one gain;
+- everything heard is delayed by the lookahead (1.5 ms + 8 frames by default); the wet is not;
+- cost (CoreCLR, loud stereo at 48 kHz): ~0.7 % of a core; quiet blocks ~0.
+
+```csharp
+var audio = new UnityAudioService(config);           // config.Limiter: Enabled, CeilingDb -1, LookaheadMs 1.5, ReleaseMs 100
+float cut = audio.Limiter?.TakeReductionDb() ?? 0f;  // deepest gain cut since the last ask, dB
+audio.LimiterOn = false;                             // A/B; holds for listeners found later
+```
+
+`TruePeakLimiter` alone is pure C# for a stream the game owns: `Process(span, channels)` in place, output `Latency` frames late.
+
+A listener-tap `ListenerCapture` records after the limiter only when it was added after it (component order).
+
+### Capture
+
+```csharp
+var capture = ListenerCapture.Start("Logs/turn.wav", seconds: 10f);   // Tap.Renderer by default
+long at = capture.Frames;                                               // mark events
+capture.Written += path => Debug.Log(path);
+```
+
+`Tap.Renderer` records the final output, reverb-zone wet included; the device is silent while it records. `Tap.Listener` records on the listener's `OnAudioFilterRead` and is heard live, but misses the reverb-zone wet. Float32 stereo WAV at the output rate. Compiled in the editor and debug builds only.
+
+### Loudness
+
+```csharp
+var meter = new LoudnessMeter(rate, channels);                 // BS.1770, gated over a sliding 20 s
+var gain = new LoudnessGain(targetLufs: -18f);                 // clamp [-12, +3] dB, down 6 dB/s, up 0.5 dB/s, guard 2 LU
+gain.Process(meter, buffer, offset: 0, frames, channels);      // audio thread: measure, step, apply a ramp
+float lufs = meter.Integrated, db = gain.Db;                   // main thread may read them
+```
+
+For a stream the game feeds itself (music from a decoder): **LoudnessMeter** is ITU-R BS.1770 (K-weighting for any rate, 400 ms blocks every 100 ms, −70 LUFS absolute and −10 LU relative gates) over a sliding window instead of the whole programme; every channel weighs 1. **LoudnessGain** moves toward `target − measured`, clamped, cutting fast and lifting slowly so a quiet intro is not pumped up and a loud part reaches the limiter for a second at most; the first 3 measured seconds slew fast both ways to land the first estimate. The meter also gives `ShortTerm` (the last 3 s, ungated); the gain aims at the louder of the window and short-term − `Guard` (2 LU), so a drop after a quiet intro is cut within a second or two instead of as the window fills, while a chorus up to 2 LU over the track keeps its lift. `Apply` ramps across the buffer, so the gain never steps. Pure C#, no allocation after construction.
+
+### Propagation Delay
+
+```csharp
+var delay = new PropagationDelay(rate);                         // slew 0.003, jump 0.05 s, crossfade 0.02 s, max 1 s
+delay.Aim(Vector3.Distance(source, ear) / SoundMath.SoundSpeed); // any thread, every frame
+// audio thread, per block of `frames` output frames whose undelayed reference starts at `cursor`:
+delay.Plan(cursor, frames, out long first, out int count);      // source frames [first, first + count) it will read
+delay.Render(window, windowFirst, output, channels);           // window: interleaved source frames from windowFirst
+delay.Shift(frames, 0.01f);                                     // the reference cursor resynced: crossfade old → new
+```
+
+For several sources playing one programme (speakers on a beach): each lags by its own distance, so the nearest arrives first and leads and the far ones sound as its echo (precedence) instead of a phantom between them. A moving ear changes the delay; `MaxSlew` 0.003 (≈ 5 cents, under the pitch JND of music) caps the read rate, so it is Doppler-like but never a pitch bend; a lag past `Jump` (a vehicle, a teleport) is a raised-cosine crossfade between the old and the new read. `Snap` lands on the aim at the next block (a new track). The caller keeps a history at least `MaxDelay` + the block long; frames outside the window read as silence. Unity's own Doppler stays off on such sources.
+
 ### Time
 
 Fades, crossfades and loop ramps run on real time by default (`AudioServiceConfig.UnscaledTime`), so slow motion doesn't stretch them and `Time.timeScale = 0` doesn't freeze them. Turn it off to have them follow the game's time scale.
@@ -208,6 +417,8 @@ foreach (var (param, volume) in settings.Volumes)
 
 ## Design Decisions
 
+- **The output limiter on the listener, not in the mixer** — a mixer effect needs a native plugin for lookahead; `OnAudioFilterRead` on the listener is managed, gets the whole mix after every group, and costs one DSP for the game. What it cannot see is the reverb-zone wet, so sends are sized to the headroom instead.
+
 - **Separate SoundConfig and MusicConfig** — music must not receive random pitch variation; the type system enforces this rather than documentation.
 - **Named loop slots, not handles** — a loop is a semantic slot (`"steps"`, `"ambient"`), not an anonymous instance. Slots are dedicated sources that survive scene loads and are never evicted by the SFX pool, so callers don't manage handles across scenes.
 - **A lost target fades its loop out** — a destroyed transform is almost always an object that left the scene, so its loop should end with it; a short fade avoids a click, and a slot the caller stopped is left to its own fade.
@@ -222,4 +433,32 @@ foreach (var (param, volume) in settings.Volumes)
 - **Silence ends a container on pause** — Unity reports a container played through a paused listener as playing until the pause ends, and gives its length nowhere; the source's output is the only sign that it is over. Clips keep `isPlaying`, which is exact.
 - **A paused source is busy** — the pool waits for a sound to end, and `isPlaying` is false under `AudioListener.pause`, so a paused source with a resource still counts as playing; otherwise pausing the game would cut every sound and hand its source to the next one.
 - **Real time by default** — a game with slow motion or a paused time scale expects its audio fades to keep their length; following the time scale is the opt-in.
+- **Kinds are data, the space is one loop** — a kind's curves are built once and shared; the per-frame part (head shadow, occlusion) is one array walked by `Tick`, not a `MonoBehaviour` per source. 32 ticking sources cost ~20 µs per frame on the main thread and ~0.3 ms/s per low-pass on the audio threads.
+- **No HRTF, no spatializer plugin** — front/back is a spectral cue a single native low-pass gives (head shadow); a managed per-ear filter costs 3× the native one. Left/right comes from Unity's panner with a spread that never reaches 0 (hard pan, −∞ dB in the far ear).
+- **Rolloff, spread, reverb mix and air as custom curves** — Unity evaluates them on the audio side per source at no main-thread cost; only shadow and occlusion need per-frame writes, and only for kinds that use them.
+- **Low-pass Q 0.707** — Unity's default Q 1 bumps +1.25 dB at the cutoff; a moving cutoff on it sounds like a wah.
+- **Smoothed shadow and occlusion** — a one-pole on the back amount (60 ms) and on occlusion (attack/release) so a fast turn or a passing rock sweeps the filter instead of stepping it: no clicks, no level jumps.
+- **Volumetric occlusion** — the source is a ball, not a point (as Steam Audio's volumetric occlusion): eight rays to it and round it, the share blocked is the occlusion. Sound bends round small things, so a table or a lamp post between barely muffles and a cliff's edge fades in instead of stepping; no layers or tags per prop. One point per ray, round-robin, so the cost per frame stays `RaysPerFrame` raycasts whatever the count. `SoundOccluder` is for what is big but thin (a cloth screen, a fence): its strength caps what its colliders block.
+- **Kind-less sources bypass reverb zones** — a zone would otherwise send engines, UI and voice chat into the reverb.
+- **The pool's filter is added up front** — every pooled source gets a disabled low-pass when the service has a space, so a play enables it instead of rebuilding the DSP chain of a source about to start.
+- **Mixer layout by a helper, not a template** — games already own mixers with their values and exposed names; a template cannot merge into them.
+- **Delay by reading the owner's samples, not a filter** — a delay line in `OnAudioFilterRead` needs its own buffer per source; a game that owns the PCM reads it delayed straight from its history. Slewing within 0.3 % instead of resampling to any rate keeps a speaker's pitch steady while the listener walks.
+- **Cues are assets, picked by the service** — a sound with its variants and settings in one asset means a new clip or a new sound is data, not code. Unity's `AudioRandomContainer` cannot be read or indexed from code (internal type), so the list is the package's own: an explicit index for picks that must match on every machine, visible to consoles, testable.
+- **One priority scale** — 0..100 for cues and own sources, mapped both to the pool's eviction and to Unity's voices, so a horn and a shot are ranked the same way everywhere; the old API ranks at `Default` + its priority in the same order.
+- **Loops by handle on the slot machinery** — a cue loop is a slot under a private key built once, so fades, following and lost targets are the same code; per-frame `SetVolume` by handle allocates nothing.
+- **3.4.0 is additive** — the old API (`SoundConfig`, `PlaySFX*`, string loop slots) behaves as before except the pool rank of a `SoundConfig`, now `Default` + `Priority` (the same order among old sounds).
+- **3.2.0 is additive** — `IAudioService` is unchanged; nothing to migrate. Sounds without a kind and services without a space behave as in 3.1.
 - **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.unscaledDeltaTime` (or `Time.deltaTime`), and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.
+
+## File Structure
+
+```
+com.rubickanov.audio/
+├── Runtime/         — service, SoundCue, CuePick, SoundPriority, LoopHandle, SourceSetup, CueStats, SoundCueCatalog
+│   ├── Space/       — SoundKind, SoundMath, SoundSpace, SoundOccluder, KindCurves, PropagationDelay
+│   ├── Loudness/    — LoudnessMeter, LoudnessGain
+│   ├── Limiter/     — OutputLimiter, TruePeakLimiter
+│   └── Capture/     — ListenerCapture
+├── Editor/          — MixerKit, SoundCueEditor
+└── Tests/           — EditMode (service, cues, math, space, mix kit, loudness, delay) and PlayMode (pause)
+```

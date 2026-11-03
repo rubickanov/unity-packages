@@ -12,7 +12,7 @@ Versions: `audio` `3.1.2`, `log` `1.2.0`, `eqs` `2.0.0`, `ui` `4.1.0`, `devconso
 
 | Package | Purpose |
 |---|---|
-| `audio` | Audio service: SFX pooling, music, AudioMixer volume. |
+| `audio` | Audio service: SFX pooling, music, AudioMixer volume; 3D sound kinds (distance, air, width, reverb send, head shadow, occlusion) through `SoundSpace`, a lookahead true-peak `OutputLimiter` on the listener, `MixerKit` for mixer layouts in the editor, `ListenerCapture` for checks. |
 | `devconsole` | In-game dev console: one IMGUI window the package creates, `[ConsoleCommand]` methods registered by a source generator (no reflection, safe under code stripping), autocomplete, chains, aliases, bindings and history in plain files, `autoexec.cfg` and `-command` run on the first frame, optional `log` commands. |
 | `character` | Character body of beach (leonid carries an embedded copy, 2.2.0, since 2026-10-16): motor over KCC, animator on Animancer, ragdoll + get-up, IK (feet, head look, turn lean, seat holds and item grips, climb), configs and hooks; an optional module `Rubickanov.Characters.Netcode` (compiled only with NGO, versionDefines) replicates it with game parts and glue. KCC (`KCC`) and Animancer (`Kybernetik.Animancer`) are Asset Store code: referenced by asmdef name only, never copied here; the game provides them and `com.rubickanov.log`. Not in `unity-project-pckgs` (would not compile there); its tests (`Rubickanov.Rig.Tests`, `Rubickanov.Characters.Netcode.Tests`) run from a game linked `local`. |
 | `eqs` | Environment Query System — data-driven spatial queries for AI. |

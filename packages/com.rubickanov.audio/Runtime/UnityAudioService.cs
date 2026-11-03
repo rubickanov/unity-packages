@@ -1,7 +1,11 @@
+// The SoundConfig API stays for older users; the package itself still serves it.
+#pragma warning disable CS0618
+
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using Rubickanov.Log;
 using UnityEngine;
 using UnityEngine.Audio;
 using Object = UnityEngine.Object;
@@ -14,7 +18,9 @@ namespace Rubickanov.Audio
     /// <see cref="AudioServiceConfig.MaxSfxSources"/>: a full pool first takes the quietest one-shot fading out, then
     /// evicts the lowest priority one, oldest first; <see cref="SoundConfig.MaxInstances"/> and
     /// <see cref="SoundConfig.MinInterval"/> drop repeats of one sound before they reach the pool. A loop slot plays
-    /// in 2D, at a point or following a transform; a destroyed transform fades its loop out.
+    /// in 2D, at a point or following a transform; a destroyed transform fades its loop out. A <see cref="SoundCue"/>
+    /// plays through the same pool and loop machinery: its variant is picked here, its limits count over all its
+    /// variants, and the pool ranks it by <see cref="SoundCue.Priority"/> on the <see cref="SoundPriority"/> scale.
     /// </summary>
     public class UnityAudioService : IAudioService, IDisposable
     {
@@ -54,6 +60,24 @@ namespace Rubickanov.Audio
         private readonly List<AudioSource> _stopBuffer = new();
         private readonly Dictionary<string, float> _volumes = new();
         private readonly CancellationTokenSource _cts = new();
+        private readonly SoundSpace? _space;
+        private readonly OutputLimiterSettings _limiterSettings;
+        private AudioListener? _limitedEars;
+        private OutputLimiter? _limiter;
+        private bool _limiterAdded;
+        private bool _limiterOn;
+        private float _nextEarsFind;
+        // Sources playing a kind: their volume is owned by the space (it carries head shadow and occlusion).
+        private readonly Dictionary<AudioSource, SpatialHandle> _spatial = new();
+        private readonly Dictionary<AudioSource, Adopted> _adopted = new();
+
+        // Cues: pick state and counters, and the loops their handles own (under a private slot key).
+        private readonly Dictionary<SoundCue, CueState> _cues = new();
+        private readonly Dictionary<long, CueLoop> _cueLoops = new();
+        private readonly Dictionary<string, long> _loopIds = new();
+        private ICueRandom _random = UnityCueRandom.Shared;
+        private bool _logPlays;
+        private static readonly LogChannel Log = LogChannel.Get("Audio");
 
         // Clock for MinInterval, the same time the fades run on.
         private readonly Func<double> _now;
@@ -65,10 +89,15 @@ namespace Rubickanov.Audio
 
         // Silence on the mixer, the floor of its volume faders.
         private const float MinDecibels = -80f;
+        // Unity's own default AudioSource.priority: what the SoundConfig path always plays with in 2D.
+        private const int UnityDefaultPriority = 128;
 
-        public UnityAudioService(AudioServiceConfig config)
+        /// <param name="space">Applies <see cref="SoundConfig.Kind"/> to point and attached plays; null: kinds are ignored.</param>
+        public UnityAudioService(AudioServiceConfig config, SoundSpace? space = null)
         {
             if (config == null) throw new ArgumentNullException(nameof(config));
+
+            _space = space;
 
             _mixer = config.Mixer;
             _musicGroup = config.MusicGroup;
@@ -80,6 +109,8 @@ namespace Rubickanov.Audio
             _maxDistance = Mathf.Max(config.MinDistance, config.MaxDistance);
             _dopplerLevel = config.DopplerLevel;
             _lostTargetFadeOut = config.LostTargetFadeOut;
+            _limiterSettings = config.Limiter ?? new OutputLimiterSettings();
+            _limiterOn = _limiterSettings.Enabled;
             _now = _unscaledTime ? () => Time.realtimeSinceStartupAsDouble : () => Time.timeAsDouble;
 
             _root = new GameObject("[AudioService]");
@@ -92,6 +123,74 @@ namespace Rubickanov.Audio
             int maxSources = Mathf.Max(1, config.MaxSfxSources);
             for (int i = 0; i < maxSources; i++)
                 _sfxPool.Enqueue(CreateSFXSource());
+
+            if (_space != null) TickSpaceAsync(_space, _cts.Token).Forget();
+            if (_limiterSettings.Enabled && Application.isPlaying) KeepLimiterAsync(_cts.Token).Forget();
+        }
+
+        /// <summary>The limiter on the active listener's output; null while nothing listens or it is off.</summary>
+        public OutputLimiter? Limiter => _limiter != null ? _limiter : null;
+
+        /// <summary>
+        /// The output limiter on (an A/B switch that also holds for listeners found later); false when the config
+        /// turns it off.
+        /// </summary>
+        public bool LimiterOn
+        {
+            get => _limiterOn;
+            set
+            {
+                _limiterOn = value && _limiterSettings.Enabled;
+                if (_limiter != null) _limiter.On = _limiterOn;
+            }
+        }
+
+        // The active listener carries the output limiter; a listener swap (camera, a probe's ears) moves it along.
+        private async UniTaskVoid KeepLimiterAsync(CancellationToken ct)
+        {
+            try
+            {
+                while (true)
+                {
+                    await UniTask.Yield(PlayerLoopTiming.PostLateUpdate, ct);
+                    if (_limitedEars != null && _limitedEars.isActiveAndEnabled && _limiter != null) continue;
+                    float now = Time.realtimeSinceStartup;
+                    if (now < _nextEarsFind && _limitedEars == null) continue;
+                    _nextEarsFind = now + 1f;
+                    _limitedEars = null;
+                    foreach (AudioListener l in Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude))
+                    {
+                        if (!l.isActiveAndEnabled) continue;
+                        _limitedEars = l;
+                        break;
+                    }
+                    if (_limitedEars == null) continue;
+                    _limiterAdded = !_limitedEars.TryGetComponent(out _limiter);
+                    if (_limiterAdded) _limiter = _limitedEars.gameObject.AddComponent<OutputLimiter>();
+                    _limiter!.Configure(_limiterSettings);
+                    _limiter.On = _limiterOn;
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { Debug.LogException(ex); }
+        }
+
+        /// <summary>The space kinds play through; null when the service was made without one.</summary>
+        public SoundSpace? Space => _space;
+
+        // After the camera has moved; a game that ticks the space itself sets TicksItself false.
+        private static async UniTaskVoid TickSpaceAsync(SoundSpace space, CancellationToken ct)
+        {
+            try
+            {
+                while (true)
+                {
+                    await UniTask.Yield(PlayerLoopTiming.PostLateUpdate, ct);
+                    if (space.TicksItself) space.Tick(Time.unscaledDeltaTime);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { Debug.LogException(ex); }
         }
 
         // Slow motion must not stretch fades, and a zero time scale must not freeze them.
@@ -106,6 +205,7 @@ namespace Rubickanov.Audio
             source.playOnAwake = false;
             source.spatialBlend = 0f;
             source.volume = 0f;
+            source.bypassReverbZones = true;
             if (_musicGroup != null) source.outputAudioMixerGroup = _musicGroup;
             return source;
         }
@@ -119,6 +219,7 @@ namespace Rubickanov.Audio
             source.loop = false;
             if (_sfxGroup != null) source.outputAudioMixerGroup = _sfxGroup;
             Apply3DSettings(source);
+            PrepareSpatial(source);
             return source;
         }
 
@@ -131,11 +232,121 @@ namespace Rubickanov.Audio
             source.dopplerLevel = _dopplerLevel;
         }
 
+        // A kind-less sound never sends to a reverb zone. With a space the low-pass is added now, disabled, so a
+        // play only enables it instead of rebuilding the DSP chain of a source about to start.
+        private void PrepareSpatial(AudioSource source)
+        {
+            source.bypassReverbZones = true;
+            if (_space == null) return;
+            var filter = source.gameObject.AddComponent<AudioLowPassFilter>();
+            filter.enabled = false;
+        }
+
+        // Registers a 3D play of a sound with a kind; its output: the sound's, the kind's, the SFX group.
+        private void Spatialize(AudioSource source, in Spec spec, float volume)
+        {
+            var kind = spec.Kind;
+            if (_space == null || kind == null) return;
+            source.outputAudioMixerGroup = spec.SpatialOutput;
+            _spatial[source] = _space.Add(source, kind, volume);
+        }
+
+        // Unity's voice priority after the kind's Shape: a cue's from its scale; the SoundConfig path keeps the kind's
+        // in 3D and Unity's default otherwise, as a pooled source may hold someone else's.
+        private static void ApplyPriority(AudioSource source, in Spec spec, bool shaped)
+        {
+            if (spec.UnityPriority >= 0) source.priority = spec.UnityPriority;
+            else if (!shaped) source.priority = UnityDefaultPriority;
+        }
+
+        // Back to the config's 3D settings and no reverb send.
+        private void Unspatialize(AudioSource source)
+        {
+            if (_space == null || !_spatial.Remove(source, out var handle)) return;
+            _space.Remove(handle);
+            SoundSpace.Unshape(source);
+            Apply3DSettings(source);
+        }
+
+        private float VolumeOf(AudioSource source) =>
+            _space != null && _spatial.TryGetValue(source, out var handle) ? _space.VolumeOf(handle) : source.volume;
+
+        private void SetVolumeOf(AudioSource source, float volume)
+        {
+            if (_space != null && _spatial.TryGetValue(source, out var handle)) _space.SetVolume(handle, volume);
+            else source.volume = volume;
+        }
+
         // Null when the sound may not play: invalid, over its repeat limit, or below every sound in a full pool.
         private AudioSource? RentSource(in SoundConfig sound, Transform? follow)
         {
             if (!sound.IsValid || !PassesRepeatLimit(in sound)) return null;
 
+            // The old API on the cue scale: one order for both.
+            int rank = SoundPriority.Default + sound.Priority;
+            var source = TakeSource(rank);
+            if (source == null) return null;
+
+            Admit(source, new Voice(rank, sound.Resource, null, follow));
+            _instanceCounts[sound.Resource] = InstanceCount(sound.Resource) + 1;
+            _lastStarts[sound.Resource] = _now();
+            return source;
+        }
+
+        // Null when the cue may not play: none, no variants, over its limits, or below every sound in a full pool.
+        private AudioSource? RentCue(SoundCue? cue, int variant, Transform? follow, out AudioResource resource)
+        {
+            resource = null!;
+            if (cue == null || cue.Variants == null || cue.Variants.Length == 0) return null;
+
+            _cues.TryGetValue(cue, out var state);
+            AudioSource? source = null;
+            if (PassesCueLimits(cue, in state))
+            {
+                resource = cue.Variants[CuePick.Next(cue, ref state, variant, _random)];
+                if (resource == null)
+                {
+                    _cues[cue] = state;
+                    return null;
+                }
+                source = TakeSource(cue.Priority);
+            }
+
+            if (source == null) state.Dropped++;
+            else
+            {
+                Admit(source, new Voice(cue.Priority, resource, cue, follow));
+                CountStart(ref state);
+            }
+            _cues[cue] = state;
+            return source;
+        }
+
+        private bool PassesCueLimits(SoundCue cue, in CueState state)
+        {
+            if (cue.MaxInstances > 0 && state.Playing >= cue.MaxInstances) return false;
+            if (cue.MinInterval > 0f && state.Started && _now() - state.LastStart < cue.MinInterval) return false;
+            return true;
+        }
+
+        private void CountStart(ref CueState state)
+        {
+            state.Playing++;
+            state.Played++;
+            state.Started = true;
+            state.LastStart = _now();
+        }
+
+        private void CountEnd(SoundCue cue)
+        {
+            if (!_cues.TryGetValue(cue, out var state) || state.Playing <= 0) return;
+            state.Playing--;
+            _cues[cue] = state;
+        }
+
+        // A free source for a sound of this rank; null when every playing sound outranks it.
+        private AudioSource? TakeSource(int rank)
+        {
             AudioSource source;
 
             if (_sfxPool.Count > 0)
@@ -151,38 +362,40 @@ namespace Rubickanov.Audio
             {
                 // AudioSource.priority only decides which voices Unity mutes; who leaves the pool is decided here.
                 var victim = LowestPriorityVoice();
-                if (_voices[victim].Priority > sound.Priority) return null;
+                if (_voices[victim].Priority > rank) return null;
 
                 source = victim;
                 Unlink(source);
                 EndWatch(source);
                 UntrackHandle(source);
                 source.Stop();
+                Unspatialize(source);
             }
             else
             {
                 // Every source is somewhere else: only a source destroyed from outside gets here.
                 return null;
             }
-
-            var node = _activeSources.AddLast(source);
-            _activeNodes[source] = node;
-            _voices[source] = new Voice(sound.Priority, sound.Resource, follow);
-            _instanceCounts[sound.Resource] = InstanceCount(sound.Resource) + 1;
-            _lastStarts[sound.Resource] = _now();
             return source;
+        }
+
+        private void Admit(AudioSource source, in Voice voice)
+        {
+            _activeNodes[source] = _activeSources.AddLast(source);
+            _voices[source] = voice;
         }
 
         private AudioSource TakeQuietestFading()
         {
             int quietest = 0;
             for (int i = 1; i < _fadingSources.Count; i++)
-                if (_fadingSources[i].volume < _fadingSources[quietest].volume) quietest = i;
+                if (VolumeOf(_fadingSources[i]) < VolumeOf(_fadingSources[quietest])) quietest = i;
 
             var source = _fadingSources[quietest];
             _fadingSources.RemoveAt(quietest);
             EndWatch(source);
             source.Stop();
+            Unspatialize(source);
             return source;
         }
 
@@ -223,6 +436,11 @@ namespace Rubickanov.Audio
 
             if (_voices.Remove(source, out var voice))
             {
+                if (voice.Cue != null)
+                {
+                    CountEnd(voice.Cue);
+                    return;
+                }
                 int left = InstanceCount(voice.Resource) - 1;
                 if (left > 0) _instanceCounts[voice.Resource] = left;
                 else _instanceCounts.Remove(voice.Resource);
@@ -241,11 +459,14 @@ namespace Rubickanov.Audio
         private void ReclaimToPool(AudioSource source)
         {
             source.Stop();
+            Unspatialize(source);
+            source.bypassReverbZones = true;
             source.resource = null;
             source.spatialBlend = 0f;
             source.loop = false;
             source.pitch = 1f;
             source.volume = 1f;
+            source.priority = UnityDefaultPriority;
             source.ignoreListenerPause = false;
             _sfxPool.Enqueue(source);
         }
@@ -342,17 +563,42 @@ namespace Rubickanov.Audio
         }
 
         // Where the sound goes and whether it goes on through AudioListener.pause.
-        private void ApplyRouting(AudioSource source, in SoundConfig sound)
+        private static void ApplyRouting(AudioSource source, in Spec spec)
         {
-            source.outputAudioMixerGroup = sound.Output != null ? sound.Output : _sfxGroup;
-            source.ignoreListenerPause = sound.PlaysOnPause;
+            source.outputAudioMixerGroup = spec.Output;
+            source.ignoreListenerPause = spec.PlaysOnPause;
         }
 
-        private static void ApplyPitch(AudioSource source, in SoundConfig sound)
+        private static void ApplyPitch(AudioSource source, in Spec spec)
         {
-            float variation = sound.PitchVariation;
+            float variation = spec.PitchJitter;
             source.pitch = variation > 0f ? 1f + UnityEngine.Random.Range(-variation, variation) : 1f;
         }
+
+        private Spec SpecOf(in SoundConfig sound)
+        {
+            var output = sound.Output != null ? sound.Output : _sfxGroup;
+            var kind = sound.Kind;
+            var spatial = sound.Output != null ? sound.Output : kind != null && kind.Output != null ? kind.Output : _sfxGroup;
+            return new Spec(sound.Resource, output, spatial, kind, sound.PitchVariation, sound.PlaysOnPause, -1);
+        }
+
+        private Spec SpecOf(SoundCue cue, AudioResource resource)
+        {
+            var group = GroupOf(cue);
+            return new Spec(resource, group, group, cue.Kind, cue.PitchJitter, cue.PlaysOnPause,
+                SoundPriority.ToUnity(cue.Priority));
+        }
+
+        // cue.Volume quieter by a random 0..VolumeJitter dB.
+        private static float LevelOf(SoundCue cue)
+        {
+            float jitter = cue.VolumeJitter;
+            float db = jitter > 0f ? -UnityEngine.Random.Range(0f, jitter) : 0f;
+            return cue.Volume * SoundMath.DbToGain(db);
+        }
+
+        [Obsolete("Use a SoundCue: Play, PlayAt, PlayAttached.")]
 
         public SoundHandle PlaySFX(in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f)
         {
@@ -360,8 +606,11 @@ namespace Rubickanov.Audio
             if (source == null) return SoundHandle.Invalid;
 
             source.spatialBlend = 0f;
-            return Start(source, in sound, volumeScale, fadeIn, follow: null);
+            var spec = SpecOf(in sound);
+            return Start(source, in spec, volumeScale, fadeIn, follow: null, spatial: false);
         }
+
+        [Obsolete("Use a SoundCue: Play, PlayAt, PlayAttached.")]
 
         public SoundHandle PlaySFXAtPoint(in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f)
         {
@@ -370,8 +619,11 @@ namespace Rubickanov.Audio
 
             source.transform.position = position;
             source.spatialBlend = 1f;
-            return Start(source, in sound, volumeScale, fadeIn, follow: null);
+            var spec = SpecOf(in sound);
+            return Start(source, in spec, volumeScale, fadeIn, follow: null, spatial: true);
         }
+
+        [Obsolete("Use a SoundCue: Play, PlayAt, PlayAttached.")]
 
         public SoundHandle PlaySFXAttached(in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f)
         {
@@ -381,14 +633,18 @@ namespace Rubickanov.Audio
 
             source.transform.position = follow.position;
             source.spatialBlend = 1f;
-            return Start(source, in sound, volumeScale, fadeIn, follow);
+            var spec = SpecOf(in sound);
+            return Start(source, in spec, volumeScale, fadeIn, follow, spatial: true);
         }
 
-        private SoundHandle Start(AudioSource source, in SoundConfig sound, float volumeScale, float fadeIn, Transform? follow)
+        private SoundHandle Start(AudioSource source, in Spec spec, float volumeScale, float fadeIn, Transform? follow,
+            bool spatial)
         {
-            source.resource = sound.Resource;
-            ApplyRouting(source, in sound);
-            ApplyPitch(source, in sound);
+            source.resource = spec.Resource;
+            ApplyRouting(source, in spec);
+            ApplyPitch(source, in spec);
+            if (spatial) Spatialize(source, in spec, fadeIn > 0f ? 0f : volumeScale);
+            ApplyPriority(source, in spec, _spatial.ContainsKey(source));
             var watch = BeginWatch(source);
             StartPlayWithFade(source, volumeScale, fadeIn, watch);
 
@@ -402,7 +658,7 @@ namespace Rubickanov.Audio
         {
             if (fadeIn > 0f)
             {
-                source.volume = 0f;
+                SetVolumeOf(source, 0f);
                 source.Play();
                 // Tie the fade to the per-source watcher token, not the service-lifetime _cts:
                 // if the source is returned, evicted, or stopped mid-fade, EndWatch cancels this
@@ -412,7 +668,7 @@ namespace Rubickanov.Audio
             }
             else
             {
-                source.volume = targetVolume;
+                SetVolumeOf(source, targetVolume);
                 source.Play();
             }
         }
@@ -426,14 +682,14 @@ namespace Rubickanov.Audio
                 {
                     elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
-                    if (source != null) source.volume = targetVolume * t;
+                    if (source != null) SetVolumeOf(source, targetVolume * t);
                     await UniTask.Yield(ct);
                 }
             }
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { Debug.LogException(ex); return; }
 
-            if (source != null) source.volume = targetVolume;
+            if (source != null) SetVolumeOf(source, targetVolume);
         }
 
         private async UniTaskVoid FollowAndReturnAsync(AudioSource source, Transform follow, CancellationToken ct)
@@ -460,32 +716,41 @@ namespace Rubickanov.Audio
                 ReturnSource(source);
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public void PlayLoop(string slot, in SoundConfig sound, float volumeScale = 1f, float fadeIn = 0f)
         {
             if (string.IsNullOrEmpty(slot) || !sound.IsValid) return;
 
             _loopFollows.Remove(slot);
-            StartLoop(slot, in sound, volumeScale, fadeIn, spatialBlend: 0f);
+            var spec = SpecOf(in sound);
+            StartLoop(slot, in spec, volumeScale, fadeIn, spatialBlend: 0f);
         }
+
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
 
         public void PlayLoopAtPoint(string slot, in SoundConfig sound, Vector3 position, float volumeScale = 1f, float fadeIn = 0f)
         {
             if (string.IsNullOrEmpty(slot) || !sound.IsValid) return;
 
             _loopFollows.Remove(slot);
-            StartLoop(slot, in sound, volumeScale, fadeIn, spatialBlend: 1f).transform.position = position;
+            var spec = SpecOf(in sound);
+            StartLoop(slot, in spec, volumeScale, fadeIn, spatialBlend: 1f).transform.position = position;
         }
+
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
 
         public void PlayLoopAttached(string slot, in SoundConfig sound, Transform follow, float volumeScale = 1f, float fadeIn = 0f)
         {
             if (string.IsNullOrEmpty(slot) || !sound.IsValid || follow == null) return;
 
-            StartLoop(slot, in sound, volumeScale, fadeIn, spatialBlend: 1f).transform.position = follow.position;
+            var spec = SpecOf(in sound);
+            StartLoop(slot, in spec, volumeScale, fadeIn, spatialBlend: 1f).transform.position = follow.position;
             _loopFollows[slot] = follow;
             if (!_followingLoops) FollowLoopsAsync(_cts.Token).Forget();
         }
 
-        private AudioSource StartLoop(string slot, in SoundConfig sound, float volumeScale, float fadeIn, float spatialBlend)
+        private AudioSource StartLoop(string slot, in Spec spec, float volumeScale, float fadeIn, float spatialBlend)
         {
             CancelLoopWatcher(slot);
             CancelWatcher(_loopPitchWatchers, slot);
@@ -498,15 +763,18 @@ namespace Rubickanov.Audio
             }
 
             source.Stop();
+            Unspatialize(source);
             source.spatialBlend = spatialBlend;
-            source.resource = sound.Resource;
+            source.resource = spec.Resource;
             source.loop = true;
-            ApplyRouting(source, in sound);
-            ApplyPitch(source, in sound);
+            ApplyRouting(source, in spec);
+            ApplyPitch(source, in spec);
+            if (spatialBlend > 0f) Spatialize(source, in spec, fadeIn > 0f ? 0f : volumeScale);
+            ApplyPriority(source, in spec, _spatial.ContainsKey(source));
 
             if (fadeIn > 0f)
             {
-                source.volume = 0f;
+                SetVolumeOf(source, 0f);
                 source.Play();
                 var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
                 _loopWatchers[slot] = cts;
@@ -514,7 +782,7 @@ namespace Rubickanov.Audio
             }
             else
             {
-                source.volume = volumeScale;
+                SetVolumeOf(source, volumeScale);
                 source.Play();
             }
             return source;
@@ -556,6 +824,8 @@ namespace Rubickanov.Audio
             _lostFollows.Clear();
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public void StopLoop(string slot, float fadeOut = 0f)
         {
             if (string.IsNullOrEmpty(slot)) return;
@@ -577,6 +847,8 @@ namespace Rubickanov.Audio
             }
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public bool IsLoopPlaying(string slot)
         {
             if (string.IsNullOrEmpty(slot)) return false;
@@ -594,6 +866,8 @@ namespace Rubickanov.Audio
             }
         }
 
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
+
         public void SetLoopVolume(string slot, float volumeScale, float duration = 0f)
         {
             if (!TryGetLiveLoop(slot, out var source)) return;
@@ -607,9 +881,11 @@ namespace Rubickanov.Audio
             }
             else
             {
-                source.volume = volumeScale;
+                SetVolumeOf(source, volumeScale);
             }
         }
+
+        [Obsolete("Use a SoundCue loop owned by a LoopHandle: Loop, LoopAt, LoopAttached.")]
 
         public void SetLoopPitch(string slot, float pitch, float duration = 0f)
         {
@@ -641,7 +917,7 @@ namespace Rubickanov.Audio
         {
             try
             {
-                float start = pitch ? source.pitch : source.volume;
+                float start = pitch ? source.pitch : VolumeOf(source);
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
@@ -649,7 +925,7 @@ namespace Rubickanov.Audio
                     float value = Mathf.Lerp(start, target, Mathf.Clamp01(elapsed / duration));
                     if (source == null) return;
                     if (pitch) source.pitch = value;
-                    else source.volume = value;
+                    else SetVolumeOf(source, value);
                     await UniTask.Yield(ct);
                 }
             }
@@ -658,20 +934,20 @@ namespace Rubickanov.Audio
 
             if (source == null) return;
             if (pitch) source.pitch = target;
-            else source.volume = target;
+            else SetVolumeOf(source, target);
         }
 
         private async UniTaskVoid FadeOutLoopAsync(string slot, AudioSource source, float duration, CancellationToken ct)
         {
             try
             {
-                float startVolume = source != null ? source.volume : 0f;
+                float startVolume = source != null ? VolumeOf(source) : 0f;
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
                     elapsed += DeltaTime;
                     float t = Mathf.Clamp01(elapsed / duration);
-                    if (source != null) source.volume = startVolume * (1f - t);
+                    if (source != null) SetVolumeOf(source, startVolume * (1f - t));
                     await UniTask.Yield(ct);
                 }
             }
@@ -690,6 +966,7 @@ namespace Rubickanov.Audio
         // The slot is gone once its loop stops; its source waits for the next slot to start.
         private void FreeLoop(string slot, AudioSource source)
         {
+            if (_loopIds.Remove(slot, out var id) && _cueLoops.Remove(id, out var loop)) CountEnd(loop.Cue);
             CancelLoopWatcher(slot);
             CancelWatcher(_loopPitchWatchers, slot);
             _stoppingLoops.Remove(slot);
@@ -698,6 +975,9 @@ namespace Rubickanov.Audio
             if (source == null) return;
 
             source.Stop();
+            Unspatialize(source);
+            source.bypassReverbZones = true;
+            source.priority = UnityDefaultPriority;
             source.resource = null;
             _freeLoopSources.Push(source);
         }
@@ -723,7 +1003,178 @@ namespace Rubickanov.Audio
             source.loop = true;
             if (_sfxGroup != null) source.outputAudioMixerGroup = _sfxGroup;
             Apply3DSettings(source);
+            PrepareSpatial(source);
             return source;
+        }
+
+        public SoundHandle Play(SoundCue? cue, float volume = 1f, int variant = -1, float fadeIn = 0f)
+        {
+            var source = RentCue(cue, variant, follow: null, out var resource);
+            if (source == null) return SoundHandle.Invalid;
+
+            source.spatialBlend = 0f;
+            var spec = SpecOf(cue!, resource);
+            var handle = Start(source, in spec, Mathf.Min(1f, LevelOf(cue!) * volume), fadeIn, follow: null, spatial: false);
+            if (_logPlays) Log.Info($"sound {cue!.name} flat {Played(cue!)}");
+            return handle;
+        }
+
+        public SoundHandle PlayAt(SoundCue? cue, Vector3 point, float volume = 1f, int variant = -1, float fadeIn = 0f)
+        {
+            var source = RentCue(cue, variant, follow: null, out var resource);
+            if (source == null) return SoundHandle.Invalid;
+
+            source.transform.position = point;
+            source.spatialBlend = 1f;
+            var spec = SpecOf(cue!, resource);
+            var handle = Start(source, in spec, Mathf.Min(1f, LevelOf(cue!) * volume), fadeIn, follow: null, spatial: true);
+            if (_logPlays) Log.Info($"sound {cue!.name} at {point} {Played(cue!)}");
+            return handle;
+        }
+
+        public SoundHandle PlayAttached(SoundCue? cue, Transform follow, float volume = 1f, int variant = -1, float fadeIn = 0f)
+        {
+            if (follow == null) return SoundHandle.Invalid;
+            var source = RentCue(cue, variant, follow, out var resource);
+            if (source == null) return SoundHandle.Invalid;
+
+            source.transform.position = follow.position;
+            source.spatialBlend = 1f;
+            var spec = SpecOf(cue!, resource);
+            var handle = Start(source, in spec, Mathf.Min(1f, LevelOf(cue!) * volume), fadeIn, follow, spatial: true);
+            if (_logPlays) Log.Info($"sound {cue!.name} {follow.name} {Played(cue!)}");
+            return handle;
+        }
+
+        public LoopHandle Loop(SoundCue? cue, float volume = 1f, float fadeIn = 0f) =>
+            StartCueLoop(cue, volume, fadeIn, point: null, follow: null);
+
+        public LoopHandle LoopAt(SoundCue? cue, Vector3 point, float volume = 1f, float fadeIn = 0f) =>
+            StartCueLoop(cue, volume, fadeIn, point, follow: null);
+
+        public LoopHandle LoopAttached(SoundCue? cue, Transform follow, float volume = 1f, float fadeIn = 0f) =>
+            follow == null ? LoopHandle.Invalid : StartCueLoop(cue, volume, fadeIn, point: null, follow);
+
+        // A loop is a slot under a key of its own, built once here; the slot machinery does the rest.
+        private LoopHandle StartCueLoop(SoundCue? cue, float volume, float fadeIn, Vector3? point, Transform? follow)
+        {
+            if (cue == null || cue.Variants == null || cue.Variants.Length == 0) return LoopHandle.Invalid;
+
+            _cues.TryGetValue(cue, out var state);
+            if (!PassesCueLimits(cue, in state))
+            {
+                state.Dropped++;
+                _cues[cue] = state;
+                return LoopHandle.Invalid;
+            }
+
+            var resource = cue.Variants[CuePick.Next(cue, ref state, -1, _random)];
+            if (resource == null)
+            {
+                _cues[cue] = state;
+                return LoopHandle.Invalid;
+            }
+            CountStart(ref state);
+            _cues[cue] = state;
+
+            long id = _nextHandleId++;
+            string key = $"{cue.name}#{id}";
+            float level = LevelOf(cue);
+            var spec = SpecOf(cue, resource);
+            bool spatial = point.HasValue || follow != null;
+            var source = StartLoop(key, in spec, Mathf.Min(1f, level * volume), fadeIn, spatial ? 1f : 0f);
+            _cueLoops[id] = new CueLoop(key, cue, level);
+            _loopIds[key] = id;
+
+            if (point.HasValue) source.transform.position = point.Value;
+            if (follow != null)
+            {
+                source.transform.position = follow.position;
+                _loopFollows[key] = follow;
+                if (!_followingLoops) FollowLoopsAsync(_cts.Token).Forget();
+            }
+
+            if (_logPlays)
+            {
+                string where = follow != null ? follow.name : point.HasValue ? $"at {point.Value}" : "flat";
+                Log.Info($"sound {cue.name} {where} {state.Played}");
+            }
+            return new LoopHandle(id);
+        }
+
+        public void SetVolume(LoopHandle loop, float volume, float duration = 0f)
+        {
+            if (!_cueLoops.TryGetValue(loop.Id, out var live)) return;
+            SetLoopVolume(live.Key, Mathf.Min(1f, live.Level * volume), duration);
+        }
+
+        public void SetPitch(LoopHandle loop, float pitch, float duration = 0f)
+        {
+            if (_cueLoops.TryGetValue(loop.Id, out var live)) SetLoopPitch(live.Key, pitch, duration);
+        }
+
+        public void Stop(LoopHandle loop, float fadeOut = 0f)
+        {
+            if (!_cueLoops.TryGetValue(loop.Id, out var live)) return;
+            // A loop already fading out keeps its fade; a cut ends it now.
+            if (fadeOut > 0f && _stoppingLoops.Contains(live.Key)) return;
+            StopLoop(live.Key, fadeOut);
+        }
+
+        public bool IsPlaying(LoopHandle loop) =>
+            _cueLoops.TryGetValue(loop.Id, out var live) && !_stoppingLoops.Contains(live.Key) && IsLoopPlaying(live.Key);
+
+        public SpatialHandle Adopt(AudioSource source, in SourceSetup setup)
+        {
+            if (source == null) return SpatialHandle.Invalid;
+            Release(source);
+
+            var kind = setup.Kind;
+            source.outputAudioMixerGroup = setup.Output != null ? setup.Output
+                : kind != null && kind.Output != null ? kind.Output : _sfxGroup;
+            source.ignoreListenerPause = setup.PlaysOnPause;
+
+            var handle = SpatialHandle.Invalid;
+            if (kind == null) source.bypassReverbZones = true;
+            else if (_space != null) handle = _space.Add(source, kind, setup.Volume, setup.Spatial);
+            else SoundSpace.Shape(source, kind);
+
+            source.priority = SoundPriority.ToUnity(setup.Priority);
+            _adopted[source] = new Adopted(handle, kind != null);
+            return handle;
+        }
+
+        public void Release(AudioSource source)
+        {
+            // A source destroyed with its holder is still forgotten: Unity's null would keep it here for good.
+            if (ReferenceEquals(source, null) || !_adopted.Remove(source, out var adopted)) return;
+            if (adopted.Handle.IsValid) _space?.Remove(adopted.Handle);
+            if (adopted.Shaped && source != null) SoundSpace.Unshape(source);
+        }
+
+        public bool IsAdopted(AudioSource source) => !ReferenceEquals(source, null) && _adopted.ContainsKey(source);
+
+        public AudioMixerGroup? GroupOf(SoundCue cue) => cue != null ? cue.OutputOr(_sfxGroup) : null;
+
+        public int Played(SoundCue cue) => cue != null && _cues.TryGetValue(cue, out var state) ? state.Played : 0;
+
+        public void Describe(List<CueStats> into)
+        {
+            foreach (var (cue, state) in _cues)
+                if (cue != null) into.Add(new CueStats(cue, state.Played, state.Dropped, state.Playing, state.Last));
+        }
+
+        public bool LogPlays
+        {
+            get => _logPlays;
+            set => _logPlays = value;
+        }
+
+        /// <summary>The random numbers variant picks use (tests, seeded runs). Null: UnityEngine.Random.</summary>
+        public ICueRandom CueRandom
+        {
+            get => _random;
+            set => _random = value ?? UnityCueRandom.Shared;
         }
 
         public void StopSound(SoundHandle handle, float fadeOut = 0f)
@@ -772,7 +1223,7 @@ namespace Rubickanov.Audio
             var timing = follow != null ? PlayerLoopTiming.LastPostLateUpdate : PlayerLoopTiming.Update;
             try
             {
-                float startVolume = source != null ? source.volume : 0f;
+                float startVolume = source != null ? VolumeOf(source) : 0f;
                 float elapsed = 0f;
                 while (elapsed < duration)
                 {
@@ -780,7 +1231,7 @@ namespace Rubickanov.Audio
                     float t = Mathf.Clamp01(elapsed / duration);
                     if (source != null)
                     {
-                        source.volume = startVolume * (1f - t);
+                        SetVolumeOf(source, startVolume * (1f - t));
                         if (follow != null) source.transform.position = follow.position;
                     }
                     await UniTask.Yield(timing, ct);
@@ -999,6 +1450,8 @@ namespace Rubickanov.Audio
 
             _cts.Cancel();
             _cts.Dispose();
+            if (_limiterAdded && _limiter != null) Object.Destroy(_limiter);
+            _limiter = null;
             if (_root != null)
             {
                 if (Application.isPlaying) Object.Destroy(_root);
@@ -1006,17 +1459,71 @@ namespace Rubickanov.Audio
             }
         }
 
+        // Priority: the rank on the cue scale (a SoundConfig's is Default + its Priority).
         private readonly struct Voice
         {
             public readonly int Priority;
             public readonly AudioResource Resource;
+            public readonly SoundCue? Cue;
             public readonly Transform? Follow;
 
-            public Voice(int priority, AudioResource resource, Transform? follow)
+            public Voice(int priority, AudioResource resource, SoundCue? cue, Transform? follow)
             {
                 Priority = priority;
                 Resource = resource;
+                Cue = cue;
                 Follow = follow;
+            }
+        }
+
+        // What one start sets on its source. UnityPriority -1: the SoundConfig path's own rule (ApplyPriority).
+        private readonly struct Spec
+        {
+            public readonly AudioResource Resource;
+            public readonly AudioMixerGroup? Output;
+            public readonly AudioMixerGroup? SpatialOutput;
+            public readonly SoundKind? Kind;
+            public readonly float PitchJitter;
+            public readonly bool PlaysOnPause;
+            public readonly int UnityPriority;
+
+            public Spec(AudioResource resource, AudioMixerGroup? output, AudioMixerGroup? spatialOutput, SoundKind? kind,
+                float pitchJitter, bool playsOnPause, int unityPriority)
+            {
+                Resource = resource;
+                Output = output;
+                SpatialOutput = spatialOutput;
+                Kind = kind;
+                PitchJitter = pitchJitter;
+                PlaysOnPause = playsOnPause;
+                UnityPriority = unityPriority;
+            }
+        }
+
+        private readonly struct CueLoop
+        {
+            public readonly string Key;
+            public readonly SoundCue Cue;
+            // cue.Volume with the start's jitter: what SetVolume scales.
+            public readonly float Level;
+
+            public CueLoop(string key, SoundCue cue, float level)
+            {
+                Key = key;
+                Cue = cue;
+                Level = level;
+            }
+        }
+
+        private readonly struct Adopted
+        {
+            public readonly SpatialHandle Handle;
+            public readonly bool Shaped;
+
+            public Adopted(SpatialHandle handle, bool shaped)
+            {
+                Handle = handle;
+                Shaped = shaped;
             }
         }
     }

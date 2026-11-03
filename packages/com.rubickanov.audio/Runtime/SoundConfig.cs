@@ -1,3 +1,6 @@
+// The SoundConfig API stays for older users; the package itself still serves it.
+#pragma warning disable CS0618
+
 using System;
 using UnityEngine;
 using UnityEngine.Audio;
@@ -5,6 +8,7 @@ using UnityEngine.Audio;
 namespace Rubickanov.Audio
 {
     [Serializable]
+    [Obsolete("Use a SoundCue asset.")]
     public struct SoundConfig
     {
         [SerializeField] private AudioResource _resource;
@@ -19,6 +23,8 @@ namespace Rubickanov.Audio
         private float _minInterval;
         [SerializeField, Tooltip("Keeps playing while AudioListener.pause is set: menu and on-air sounds.")]
         private bool _playsOnPause;
+        [SerializeField, Tooltip("How it sounds in 3D (distance, air, width, reverb, head shadow, occlusion). Empty: the service's global 3D settings.")]
+        private SoundKind? _kind;
 
         public AudioResource Resource => _resource;
         public float PitchVariation => _pitchVariation;
@@ -31,6 +37,8 @@ namespace Rubickanov.Audio
         public float MinInterval => _minInterval;
         /// <summary>Plays through <see cref="AudioListener.pause"/> (<see cref="AudioSource.ignoreListenerPause"/>).</summary>
         public bool PlaysOnPause => _playsOnPause;
+        /// <summary>The 3D kind a point or attached play gets through the service's <see cref="SoundSpace"/>; 2D plays ignore it.</summary>
+        public SoundKind? Kind => _kind;
         public bool IsValid => _resource != null;
     }
 }
