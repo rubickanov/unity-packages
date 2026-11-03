@@ -1,0 +1,17 @@
+{
+    "name": "Rubickanov.Settings",
+    "rootNamespace": "Rubickanov.Settings",
+    "references": [
+        "Rubickanov.Save.Runtime",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

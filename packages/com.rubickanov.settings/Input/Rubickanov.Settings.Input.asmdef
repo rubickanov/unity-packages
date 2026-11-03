@@ -1,0 +1,27 @@
+{
+    "name": "Rubickanov.Settings.Input",
+    "rootNamespace": "Rubickanov.Settings.Input",
+    "references": [
+        "Rubickanov.Settings",
+        "Rubickanov.Input",
+        "Unity.InputSystem",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "RUBICKANOV_INPUT"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.rubickanov.input",
+            "expression": "1.1.0",
+            "define": "RUBICKANOV_INPUT"
+        }
+    ],
+    "noEngineReferences": false
+}
