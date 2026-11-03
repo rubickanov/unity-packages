@@ -1,0 +1,40 @@
+{
+  "$build": "0.4.0+c9d541ea",
+  "$kind": "slot",
+  "$version": 1,
+  "created": "2026-10-20T09:12:44Z",
+  "game": {
+    "cash": 340,
+    "day": 3,
+    "scene": "Game"
+  },
+  "generation": 43,
+  "kinds": {
+    "boat": 1,
+    "jetski": 1
+  },
+  "name": "Пляж у отеля",
+  "played": 5423.5,
+  "saved": "2026-10-20T18:03:10Z",
+  "sections": {
+    "clock": {
+      "crc": "9c1e04aa",
+      "file": "clock.000043.json",
+      "size": 118,
+      "version": 1
+    },
+    "radio": {
+      "attachments": {
+        "chunk-12": {
+          "crc": "0b5e7d21",
+          "file": "radio.chunk-12.000012.bin",
+          "size": 4096
+        }
+      },
+      "crc": "51f0e2b9",
+      "file": "radio.000012.json",
+      "size": 77,
+      "version": 2
+    }
+  }
+}
