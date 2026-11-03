@@ -1,6 +1,9 @@
+using System.Collections.Generic;
+using System.Linq;
 using Animancer;
 using Rubickanov.Rig;
 using Rubickanov.Log;
+using Unity.Profiling;
 using UnityEngine;
 
 namespace Rubickanov.Characters
@@ -23,14 +26,24 @@ namespace Rubickanov.Characters
         public CharacterMotor Character;
         public AnimancerComponent Animancer;
         public CharacterAnimationsConfig Animations;
+        [Tooltip("Optional. Inertialization over the clips (the config's Inertialization switches); without it " +
+                 "every switch cross-fades and get-ups blend from a held clip.")]
+        public PoseInertia Inertia;
 
         private enum Phase { Grounded, Turning, Jumping, Falling, Landing, Down, GettingUp, Mounted, Swimming }
+
+        // Inertialization per switch kind, from the config, changed at run time by SetInertia.
+        private readonly bool[] _inertial = new bool[5];
+        private readonly float[] _inertiaLength = new float[5];
 
         private const float MinSlopeSpeed = 0.1f;
         // A larger turn of the body between two frames is a teleport or a snap; the model goes with it.
         private const float MaxBodyTurnPerFrame = 90f;
         // Rising faster than this, m/s, a swimmer lunges out of the water; waves never lift one that fast.
         private const float LungeRiseSpeed = 2f;
+        // A blend parameter this close to its target holds still: a mixer recalculates its weights whenever its
+        // parameter is set, so one left alone costs nothing. A thousandth of the range does not show in the pose.
+        private const float Settled = 1e-3f;
         private Phase _phase;
         // Blends downhill (-1), flat (0) and uphill (1) locomotion by the grade along the movement.
         private LinearMixerState _locomotion;
@@ -56,6 +69,15 @@ namespace Rubickanov.Characters
         private bool _holdingLeft;
         private Transform _rightShoulder;
         private Transform _leftShoulder;
+        // The arms poses in place of HoldArms (PoseArms) and how far each is in now; HoldArms has the rest.
+        private readonly List<(ArmsPose Pose, float Weight)> _poses = new();
+        private ArmsPose _pose;
+        private ArmsPose _poseAimed;
+        private float _poseAim;
+        private float _holdRest = 1f;
+        private Transform _spine;
+        private Transform _chest;
+        private Transform _upperChest;
         private float _landAuthoredSpeed;
         private ICharacterMotionSource _source;
         private Transform _model;
@@ -69,16 +91,54 @@ namespace Rubickanov.Characters
         private float _aimYaw;
         private bool _facing;
         private const float FacingCatch = 2f;
+        // First person stride: degrees the model faces off the look onto the walk, positive to the right.
+        private float _stride;
+        // Slower than this, the walk has no direction worth turning the hips onto.
+        private const float StrideMinSpeed = 0.05f;
         // How long the look has been past TurnAngle.
         private float _turnPending;
         // Stretches the clip's root rotation to the turn actually needed.
         private float _turnScale;
+        // Stride sync: the shown pose's reach (left foot minus right along the model's forward, m) and how fast it
+        // changes; a falling reach is the left foot's stance.
+        private static readonly ProfilerMarker StrideMarker = new("CharacterAnimator.StrideSync");
+        private Transform _leftFoot;
+        private Transform _rightFoot;
+        private float _shownReach;
+        private float _reachRate;
+        private bool _reachKnown;
+        private bool _strideStaleWarned;
+        // Culling: the renderers whose sight keeps the bones written, and bones as last drawn, read before the Animator
+        // runs, to tell whether it wrote them this frame.
+        private Renderer[] _renderers;
+        private Transform[] _watched;
+        private Vector3 _watchedHips;
+        private readonly Quaternion[] _watchedTurns = new Quaternion[4];
 
         /// <summary>
         /// Degrees the model is turned from the body while it turns in place, positive to the right.
         /// Changes when a turn animation or settling turns the model, not when the body turns under it.
         /// </summary>
         public float TurnOffset => _turn.Value;
+
+        /// <summary>
+        /// Degrees the model faces off the look onto the walk while facing it with a stride
+        /// (<see cref="CharacterInput.Stride"/>), positive to the right; part of <see cref="TurnOffset"/>.
+        /// </summary>
+        public float StrideTurn => _stride;
+
+        /// <summary>
+        /// The Animator may skip writing the bones while none of the character's renderers is drawn (shadows count):
+        /// time, events and root motion go on. The game turns it off for whatever reads the drawn pose; never while
+        /// lying or getting up. Off by default.
+        /// </summary>
+        public bool MayCull { get; set; }
+
+        /// <summary>
+        /// The Animator left the bones as last drawn this frame: whatever poses on top of the clip skips the frame,
+        /// or its offsets would pile up.
+        /// </summary>
+        public bool Culled { get; private set; }
 
         /// <summary>The ragdoll is the body: nothing here plays until a get-up.</summary>
         public bool IsDown => _phase == Phase.Down;
@@ -107,6 +167,102 @@ namespace Rubickanov.Characters
             FadeHold(_holdLeft, ref _holdingLeft, left);
         }
 
+        /// <summary>
+        /// The pose held arms take in place of <see cref="CharacterAnimationsConfig.HoldArms"/> from now on:
+        /// <paramref name="pose"/> blended toward <paramref name="aimed"/> by <paramref name="aim"/> (0..1), its clip over
+        /// the arms, its clavicles and, while the right arm holds, its trunk stance; null puts HoldArms back. Each pose
+        /// eases in and out over <see cref="CharacterAnimationsConfig.HoldFade"/>; it holds until called again.
+        /// </summary>
+        public void PoseArms(ArmsPose pose, ArmsPose aimed = null, float aim = 0f)
+        {
+            _pose = pose != null && pose.Clip != null ? pose : null;
+            _poseAimed = _pose != null && aimed != null && aimed.Clip != null ? aimed : _pose;
+            _poseAim = _poseAimed != _pose ? Mathf.Clamp01(aim) : 0f;
+        }
+
+        // Each arms pose toward its share of the hold, the clips' weights on both hold layers, HoldArms the rest.
+        private void EasePoses(float deltaTime)
+        {
+            if ((_holdRight == null && _holdLeft == null) || (_pose == null && _poses.Count == 0))
+            {
+                return;
+            }
+
+            Want(_pose);
+            Want(_poseAimed);
+            float step = Animations.HoldFade > 0f ? deltaTime / Animations.HoldFade : 1f;
+            float sum = 0f;
+            for (int i = _poses.Count - 1; i >= 0; i--)
+            {
+                (ArmsPose pose, float weight) = _poses[i];
+                float wanted = (pose == _pose ? 1f - _poseAim : 0f) + (pose == _poseAimed ? _poseAim : 0f);
+                weight = Mathf.MoveTowards(weight, _pose != null ? wanted : 0f, step);
+                if (weight <= 0f && pose != _pose && pose != _poseAimed)
+                {
+                    _poses.RemoveAt(i);
+                }
+                else
+                {
+                    _poses[i] = (pose, weight);
+                }
+
+                sum += weight;
+                PoseWeight(pose.Clip, weight);
+            }
+
+            if (sum > 1f)
+            {
+                for (int i = 0; i < _poses.Count; i++)
+                {
+                    _poses[i] = (_poses[i].Pose, _poses[i].Weight / sum);
+                    PoseWeight(_poses[i].Pose.Clip, _poses[i].Weight);
+                }
+            }
+
+            _holdRest = Mathf.Max(0f, 1f - sum);
+            PoseWeight(Animations.HoldArms, _holdRest);
+        }
+
+        private void Want(ArmsPose pose)
+        {
+            if (pose != null && _poses.FindIndex(p => p.Pose == pose) < 0)
+            {
+                _poses.Add((pose, 0f));
+            }
+        }
+
+        private void PoseWeight(AnimationClip clip, float weight)
+        {
+            foreach (AnimancerLayer layer in new[] { _holdRight, _holdLeft })
+            {
+                if (layer == null)
+                {
+                    continue;
+                }
+
+                AnimancerState state = layer.GetOrCreateState(clip);
+                state.IsPlaying = weight > 0f;
+                state.Weight = weight;
+            }
+        }
+
+        // The poses' blend of a turn, HoldArms' share at rest.
+        private Quaternion Blend(Quaternion rest, System.Func<ArmsPose, Quaternion> turn)
+        {
+            Quaternion blended = rest;
+            float total = _holdRest;
+            foreach ((ArmsPose pose, float weight) in _poses)
+            {
+                total += weight;
+                if (weight > 0f)
+                {
+                    blended = Quaternion.Slerp(blended, turn(pose), weight / total);
+                }
+            }
+
+            return blended;
+        }
+
         private void FadeHold(AnimancerLayer layer, ref bool holding, bool hold)
         {
             if (layer == null || holding == hold)
@@ -119,11 +275,32 @@ namespace Rubickanov.Characters
         }
 
         // Mecanim leaves a clavicle to the base layer unless both arms are masked over: a held arm's goes where the
-        // hold pose has it here.
+        // hold pose (or the arms poses) has it here, and the right arm's hold brings the poses' trunk stance.
         private void HoldShoulders()
         {
-            HoldShoulder(_holdRight, _rightShoulder, Animations.HoldShoulderRight);
-            HoldShoulder(_holdLeft, _leftShoulder, Animations.HoldShoulderLeft);
+            bool posed = _poses.Count > 0;
+            HoldShoulder(_holdRight, _rightShoulder,
+                posed ? Blend(Animations.HoldShoulderRight, p => p.ShoulderRight) : Animations.HoldShoulderRight);
+            HoldShoulder(_holdLeft, _leftShoulder,
+                posed ? Blend(Animations.HoldShoulderLeft, p => p.ShoulderLeft) : Animations.HoldShoulderLeft);
+            float weight = _holdRight != null ? _holdRight.Weight : 0f;
+            if (!posed || weight <= 0f)
+            {
+                return;
+            }
+
+            // The trunk's stance on top of the clip's, by how far the right arm holds.
+            Stance(_spine, Blend(Quaternion.identity, p => p.Spine), weight);
+            Stance(_chest, Blend(Quaternion.identity, p => p.Chest), weight);
+            Stance(_upperChest, Blend(Quaternion.identity, p => p.UpperChest), weight);
+        }
+
+        private static void Stance(Transform bone, Quaternion turn, float weight)
+        {
+            if (bone != null)
+            {
+                bone.localRotation *= Quaternion.Slerp(Quaternion.identity, turn, weight);
+            }
         }
 
         private static void HoldShoulder(AnimancerLayer layer, Transform shoulder, Quaternion held)
@@ -198,8 +375,21 @@ namespace Rubickanov.Characters
             }
 
             _modelRest = Quaternion.Inverse(Body.rotation) * _model.rotation;
+            _inertial[(int)InertiaKind.GetUp] = Animations.InertialGetUp;
+            _inertial[(int)InertiaKind.Jump] = Animations.InertialJump;
+            _inertial[(int)InertiaKind.Land] = Animations.InertialLand;
+            _inertial[(int)InertiaKind.Turn] = Animations.InertialTurn;
+            _inertial[(int)InertiaKind.WaterEntry] = Animations.InertialWaterEntry;
+            _inertiaLength[(int)InertiaKind.GetUp] = Animations.GetUpInertia;
+            for (int i = 1; i < _inertiaLength.Length; i++)
+            {
+                _inertiaLength[i] = Animations.SwitchInertia;
+            }
+
+            TrackInertia();
             _lastBodyForward = PlanarForward(Body);
             _turn.Reset();
+            _stride = 0f;
             _aimYaw = 0f;
             _turnPending = 0f;
             ICharacterMotionSource source = Source;
@@ -209,8 +399,20 @@ namespace Rubickanov.Characters
             Character.MountChanged += OnMountChanged;
 
             _locomotion ??= CreateLocomotion();
+            Animator animator = Animancer.Animator;
+            _renderers = animator.GetComponentsInChildren<Renderer>(true)
+                .OrderBy(r => r is SkinnedMeshRenderer ? 0 : 1).ToArray();
+            _watched = new[]
+            {
+                animator.GetBoneTransform(HumanBodyBones.Hips), animator.GetBoneTransform(HumanBodyBones.Head),
+                animator.GetBoneTransform(HumanBodyBones.LeftLowerLeg), animator.GetBoneTransform(HumanBodyBones.RightLowerArm),
+            };
+            Culled = false;
             _rightShoulder = Animancer.Animator.GetBoneTransform(HumanBodyBones.RightShoulder);
             _leftShoulder = Animancer.Animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
+            _spine = animator.GetBoneTransform(HumanBodyBones.Spine);
+            _chest = animator.GetBoneTransform(HumanBodyBones.Chest);
+            _upperChest = animator.GetBoneTransform(HumanBodyBones.UpperChest);
             _holdRight ??= CreateHold(1, Animations.RightArmMask, "Hold Right");
             _holdLeft ??= CreateHold(2, Animations.LeftArmMask, "Hold Left");
             CharacterMotion motion = source.Motion;
@@ -236,6 +438,12 @@ namespace Rubickanov.Characters
 
         private void OnDisable()
         {
+            Culled = false;
+            if (Animancer != null && Animancer.Animator != null)
+            {
+                Animancer.Animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
+
             if (_model != null && _rootMotion)
             {
                 Animancer.Animator.applyRootMotion = false;
@@ -260,17 +468,34 @@ namespace Rubickanov.Characters
 
         private void Update()
         {
+            EasePoses(Time.deltaTime);
             // The motor steps at a fixed rate; smoothing here keeps the blend from stepping with it.
             CharacterMotion motion = Source.Motion;
-            Vector2 target = PlanarVelocity(motion);
-            _moveParameter = Vector2.Lerp(_moveParameter, target, Smoothing(Animations.ParameterSharpness));
-            _slope = Mathf.Lerp(_slope, SlopeAlongMovement(motion), Smoothing(Animations.SlopeSharpness));
+            if (StrideSyncs)
+            {
+                TrackReach();
+            }
+
+            UpdateStride(motion);
+            // The mixer walks the model: with the hips turned onto the walk, the velocity in their frame.
+            Vector2 target = TurnedBy(PlanarVelocity(motion), -_stride);
+            if ((target - _moveParameter).sqrMagnitude > Settled * Settled)
+            {
+                _moveParameter = Vector2.Lerp(_moveParameter, target, Smoothing(Animations.ParameterSharpness));
+            }
+
+            float slope = SlopeAlongMovement(motion);
+            if (Mathf.Abs(slope - _slope) > Settled)
+            {
+                _slope = Mathf.Lerp(_slope, slope, Smoothing(Animations.SlopeSharpness));
+            }
+
             if (!IsHeld)
             {
                 bool swimming = motion.IsSwimming && Animations.Swim.IsValid;
                 if (swimming && _phase != Phase.Swimming)
                 {
-                    PlaySwim(Animations.Swim.FadeDuration);
+                    PlaySwim(SwitchFade(InertiaKind.WaterEntry, Animations.Swim.FadeDuration));
                 }
                 else if (!swimming && _phase == Phase.Swimming)
                 {
@@ -307,11 +532,101 @@ namespace Rubickanov.Characters
 
                     break;
             }
+
+            ChooseCulling();
+        }
+
+        // Before the Animator runs: may it skip the bones this frame, and how they stand as last drawn.
+        private void ChooseCulling()
+        {
+            bool cull = MayCull && !IsLyingOrRising && _watched[0] != null;
+            Animator animator = Animancer.Animator;
+            AnimatorCullingMode mode = cull ? AnimatorCullingMode.CullUpdateTransforms : AnimatorCullingMode.AlwaysAnimate;
+            if (animator.cullingMode != mode)
+            {
+                animator.cullingMode = mode;
+            }
+
+            if (!cull)
+            {
+                return;
+            }
+
+            _watchedHips = _watched[0].localPosition;
+            for (int i = 0; i < _watched.Length; i++)
+            {
+                _watchedTurns[i] = _watched[i] != null ? _watched[i].localRotation : Quaternion.identity;
+            }
+        }
+
+        /// <summary>
+        /// Writes the pose the clips are at now onto bones left as last drawn (<see cref="Culled"/>), for whatever is
+        /// about to take the pose over (a fall). Nothing happens when the bones are written already.
+        /// </summary>
+        public void Redraw()
+        {
+            if (!Culled)
+            {
+                return;
+            }
+
+            AnimateAlways();
+            Animancer.Evaluate();
+            Culled = false;
+        }
+
+        // A manual evaluation writes the bones whether the character is seen or not.
+        private void AnimateAlways()
+        {
+            Animator animator = Animancer.Animator;
+            if (animator.cullingMode != AnimatorCullingMode.AlwaysAnimate)
+            {
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
+        }
+
+        // After the Animator: culled when it may cull, nothing of the character was drawn last frame and the bones are
+        // still exactly as drawn. The two together, so a still clip on a seen character never counts as culled.
+        private bool CheckCulled()
+        {
+            if (Animancer.Animator.cullingMode != AnimatorCullingMode.CullUpdateTransforms
+                || _watched[0].localPosition != _watchedHips)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < _watched.Length; i++)
+            {
+                if (_watched[i] != null && _watched[i].localRotation != _watchedTurns[i])
+                {
+                    return false;
+                }
+            }
+
+            foreach (Renderer r in _renderers)
+            {
+                if (r != null && r.isVisible)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void LateUpdate()
         {
-            HoldShoulders();
+            Culled = CheckCulled();
+            if (Inertia != null)
+            {
+                Inertia.Paused = Culled;
+            }
+
+            if (!Culled)
+            {
+                HoldShoulders();
+            }
+
             if (!_rootMotion)
             {
                 return;
@@ -351,14 +666,16 @@ namespace Rubickanov.Characters
 
             // First person: the model faces the look this frame, whatever the simulated body's step has reached; coming
             // into it (a get-up, a seat left) it turns there first.
-            _facing = motion.FacesLook && (_facing || Mathf.Abs(_turn.ErrorTo(_aimYaw)) <= FacingCatch);
+            // A stride turns the hips onto the walk on top of the look.
+            float facing = _aimYaw + _stride;
+            _facing = motion.FacesLook && (_facing || Mathf.Abs(_turn.ErrorTo(facing)) <= FacingCatch);
             if (_facing)
             {
-                _turn.Face(_aimYaw);
+                _turn.Face(facing);
             }
             else if (motion.FacesLook)
             {
-                _turn.Toward(_aimYaw, Smoothing(Animations.TurnSettleSharpness));
+                _turn.Toward(facing, Smoothing(Animations.TurnSettleSharpness));
             }
 
             // A rider faces the way the seat does, however the vehicle turns under it.
@@ -409,8 +726,45 @@ namespace Rubickanov.Characters
             _turn.Turn(Mathf.Atan2(turned.x, turned.z) * Mathf.Rad2Deg * _turnScale);
         }
 
+        // Facing the look with a stride, a walk ahead or aside turns the hips onto it, so the legs run their forward
+        // clip under a chest that stays on the look; walking back or straight aside they strafe. In the air the
+        // hips keep their turn.
+        private void UpdateStride(CharacterMotion motion)
+        {
+            bool strides = motion.Strides && Animations.StrideAngle > 0f && !IsLyingOrRising && !IsMounted
+                           && _phase != Phase.Swimming && !motion.IsSwimming;
+            if (!strides && (IsLyingOrRising || IsMounted))
+            {
+                _stride = 0f;
+                return;
+            }
+
+            if (strides && !motion.IsGrounded)
+            {
+                return;
+            }
+
+            float target = 0f;
+            float speed = motion.PlanarSpeed;
+            if (strides && speed > StrideMinSpeed)
+            {
+                float off = Mathf.DeltaAngle(_aimYaw,
+                    Mathf.Atan2(motion.LocalVelocity.x, motion.LocalVelocity.z) * Mathf.Rad2Deg);
+                float past = Mathf.Abs(off) - Animations.StrideAngle;
+                float share = past <= 0f ? 1f : Mathf.Clamp01(1f - past / Mathf.Max(Animations.StrideFade, 0.01f));
+                target = off * share * Mathf.Clamp01(speed / Animations.StrideSpeed);
+            }
+
+            _stride = Mathf.Lerp(_stride, target, Smoothing(Animations.StrideSharpness));
+        }
+
         private void UpdateLocomotion()
         {
+            if (_flat.Parameter.Equals(_moveParameter) && _locomotion.Parameter.Equals(_slope))
+            {
+                return;
+            }
+
             float speed = _moveParameter.magnitude;
             _flat.Parameter = _moveParameter;
             if (_uphill != null)
@@ -478,7 +832,7 @@ namespace Rubickanov.Characters
                 return;
             }
             _phase = Phase.Jumping;
-            AnimancerState state = Animancer.Play(jump);
+            AnimancerState state = Animancer.Play(jump, SwitchFade(InertiaKind.Jump, jump.FadeDuration));
             state.Events(this).OnEnd ??= OnJumpEnd;
         }
 
@@ -504,7 +858,7 @@ namespace Rubickanov.Characters
             }
             _phase = Phase.Landing;
             _landAuthoredSpeed = land.AuthoredSpeed;
-            _land = Animancer.Play(land.Animation);
+            _land = Animancer.Play(land.Animation, SwitchFade(InertiaKind.Land, land.Animation.FadeDuration));
             _land.Events(this).OnEnd ??= OnLandEnd;
         }
 
@@ -554,7 +908,8 @@ namespace Rubickanov.Characters
             // Lands the turn on the look; stretching the clip's rotation a little barely shows in the feet.
             _turnScale = Mathf.Abs(degrees) / angle;
             // From the start even when a turn to the same side is still fading out, or it would end at once.
-            AnimancerState state = Animancer.Play(turn, turn.FadeDuration, FadeMode.FromStart);
+            AnimancerState state = Animancer.Play(turn, SwitchFade(InertiaKind.Turn, turn.FadeDuration),
+                FadeMode.FromStart);
             state.Events(this).OnEnd ??= OnTurnEnd;
         }
 
@@ -572,6 +927,55 @@ namespace Rubickanov.Characters
             // The ragdoll moves only the bones it has; the feet and hands hang on them in the animated pose, which
             // a clip left playing would keep walking or flailing. Held, they keep the pose the body fell in.
             Animancer.Graph.PauseGraph();
+        }
+
+        /// <summary>Whether the config has the three flail clips a flying ragdoll reaches for.</summary>
+        public bool HasFlails
+        {
+            get
+            {
+                ClipTransition[] flails = Animations != null ? Animations.Flails : null;
+                if (flails == null || flails.Length < 3)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < 3; i++)
+                {
+                    if (flails[i] == null || !flails[i].IsValid)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// While down, plays flail clip <paramref name="kind"/> (head first, along the fall, feet first) from its
+        /// start, fading in over <paramref name="fade"/> seconds, and evaluates it so its pose is on the bones now.
+        /// </summary>
+        public void PlayFlail(int kind, float fade)
+        {
+            if (_phase != Phase.Down || !HasFlails)
+            {
+                return;
+            }
+
+            Animancer.Graph.UnpauseGraph();
+            Animancer.Play(Animations.Flails[kind], fade, FadeMode.FromStart);
+            AnimateAlways();
+            Animancer.Evaluate();
+        }
+
+        /// <summary>Holds the pose again, as <see cref="EnterDown"/> does, once the body stops flailing.</summary>
+        public void StopFlail()
+        {
+            if (_phase == Phase.Down)
+            {
+                Animancer.Graph.PauseGraph();
+            }
         }
 
         /// <summary>
@@ -600,8 +1004,88 @@ namespace Rubickanov.Characters
             }
 
             _phase = Phase.GettingUp;
+            AnimateAlways();
             Animancer.Evaluate();
             return state;
+        }
+
+        /// <summary>The model's rotation in the body's space when it is not turned.</summary>
+        public Quaternion ModelRest => _modelRest;
+
+        /// <summary>Whether the config has nearest-frame get-ups (<see cref="CharacterAnimationsConfig.GetUps"/>).</summary>
+        public bool HasGetUps => Animations.GetUps != null && Animations.GetUps.Length > 0 && Animations.GetUpPoses != null;
+
+        /// <summary>
+        /// Plays nearest-frame get-up <paramref name="index"/> of the config from <paramref name="time"/> s, its pose
+        /// on the bones now. With an inertia, the clip is first evaluated a step later so it knows the new pose's
+        /// velocity. The clip's travel moves the body when <paramref name="moveBody"/>. It hands back to locomotion
+        /// at <paramref name="standTime"/> s, where the body stands, not at the clip's end.
+        /// </summary>
+        public AnimancerState PlayGetUpAt(int index, float time, float standTime, bool moveBody, PoseInertia inertia)
+        {
+            Animancer.Graph.UnpauseGraph();
+            AlignModel();
+            DropHold();
+            // Setting the time is no travel: nothing moves the body while the start is found.
+            _getUpMovesBody = false;
+            AnimancerState state = Animancer.Play(Animations.GetUps[index], 0f, FadeMode.FromStart);
+            AnimancerEvent.Sequence events = state.Events(this);
+            events.OnEnd ??= OnGetUpEnd;
+            events.NormalizedEndTime = state.Length > 0f ? Mathf.Clamp01(standTime / state.Length) : 1f;
+            _phase = Phase.GettingUp;
+            if (inertia != null)
+            {
+                const float step = 1f / 60f;
+                state.Time = time + step;
+                AnimateAlways();
+            Animancer.Evaluate();
+                inertia.TargetBefore(-step);
+            }
+
+            state.Time = time;
+            AnimateAlways();
+            Animancer.Evaluate();
+            _getUpMovesBody = moveBody && _rootMotion;
+            return state;
+        }
+
+        /// <summary>Whether a switch of <paramref name="kind"/> is inertialized now, and over how long.</summary>
+        public bool InertiaOf(InertiaKind kind, out float seconds)
+        {
+            seconds = _inertiaLength[(int)kind];
+            return _inertial[(int)kind] && Inertia != null && seconds > 0f;
+        }
+
+        /// <summary>Turns inertialization of <paramref name="kind"/> on or off for this character (not saved).</summary>
+        public void SetInertia(InertiaKind kind, bool on)
+        {
+            _inertial[(int)kind] = on;
+            TrackInertia();
+        }
+
+        /// <summary>Sets how long the old pose of <paramref name="kind"/> takes to die away (not saved).</summary>
+        public void SetInertiaLength(InertiaKind kind, float seconds) => _inertiaLength[(int)kind] = Mathf.Max(0f, seconds);
+
+        // A switch inertialized from the last frame's pose: no cross-fade, the inertia begins once Animancer evaluated.
+        private float SwitchFade(InertiaKind kind, float fade)
+        {
+            if (!InertiaOf(kind, out float seconds))
+            {
+                return fade;
+            }
+
+            Inertia.Request(seconds);
+            return 0f;
+        }
+
+        // The inertia reads every frame only while a switch begun from the last frame is on.
+        private void TrackInertia()
+        {
+            if (Inertia != null)
+            {
+                Inertia.Tracking = _inertial[(int)InertiaKind.Jump] || _inertial[(int)InertiaKind.Land] ||
+                                   _inertial[(int)InertiaKind.Turn] || _inertial[(int)InertiaKind.WaterEntry];
+            }
         }
 
         /// <summary>
@@ -623,6 +1107,7 @@ namespace Rubickanov.Characters
             _swim = (MixerState<Vector2>)Animancer.Play(Animations.Swim, 0f);
             _swim.Parameter = Vector2.zero;
             _phase = Phase.GettingUp;
+            AnimateAlways();
             Animancer.Evaluate();
             return true;
         }
@@ -644,6 +1129,7 @@ namespace Rubickanov.Characters
         public void AlignModel()
         {
             _turn.Reset();
+            _stride = 0f;
             _turnPending = 0f;
             _lastBodyForward = PlanarForward(Body);
             if (_model != null)
@@ -715,7 +1201,101 @@ namespace Rubickanov.Characters
             _phase = Phase.Grounded;
             // Parameters were left alone while airborne or landing; bring them up to date before the fade shows them.
             UpdateLocomotion();
+            // Animancer stops a state whose fade-out ends, and stopping rewinds it: the loops come back from their
+            // start unless stride sync picks the stance the shown pose is in.
+            bool restarts = _locomotion.Weight <= 0f;
             Animancer.Play(_locomotion, fadeDuration);
+            if (restarts && StrideSyncs)
+            {
+                SyncStride();
+            }
+        }
+
+        private bool StrideSyncs => Animations.StrideSync && Animations.StrideMarkers != null;
+
+        // Bones still hold the pose shown last frame (after IK) when Update runs.
+        private void TrackReach()
+        {
+            if (_leftFoot == null || _rightFoot == null)
+            {
+                _leftFoot = Animancer.Animator.GetBoneTransform(HumanBodyBones.LeftFoot);
+                _rightFoot = Animancer.Animator.GetBoneTransform(HumanBodyBones.RightFoot);
+                _reachKnown = false;
+                if (_leftFoot == null || _rightFoot == null)
+                {
+                    return;
+                }
+            }
+
+            float reach = (Quaternion.Inverse(_model.rotation) * (_leftFoot.position - _rightFoot.position)).z;
+            _reachRate = _reachKnown && Time.deltaTime > 0f ? (reach - _shownReach) / Time.deltaTime : 0f;
+            _shownReach = reach;
+            _reachKnown = true;
+        }
+
+        // On the stride the shown pose is on (Sinew ActorController.EndAction/SetPhase: the loops carry on the
+        // stride the clip was on), here judged by the feet: the dominant loop's frame in the bearing foot's stance
+        // with the shown reach. The mixer keeps its children in step by normalized time, so one time sets them all.
+        private void SyncStride()
+        {
+            using ProfilerMarker.AutoScope scope = StrideMarker.Auto();
+            AnimationClip clip = DominantClip();
+            if (clip == null || !_reachKnown)
+            {
+                return;
+            }
+
+            StrideMarkers markers = Animations.StrideMarkers;
+            if (!markers.TryGet(clip, out StrideMarkers.Entry entry, out bool stale))
+            {
+                if (stale && !_strideStaleWarned)
+                {
+                    _strideStaleWarned = true;
+                    Log.Warn($"Stride markers {markers.name} do not match {clip.name}: rebuild them. That loop " +
+                             "starts from its first frame meanwhile.", this);
+                }
+
+                return;
+            }
+
+            float time = markers.StanceTime(entry, _shownReach, _reachRate < 0f);
+            if (time >= 0f)
+            {
+                _locomotion.NormalizedTime = time;
+            }
+        }
+
+        // The clip that weighs most in the locomotion blend, through the slope mixers.
+        private AnimationClip DominantClip()
+        {
+            _locomotion.RecalculateWeights();
+            AnimancerState slope = Heaviest(_locomotion);
+            if (slope is MixerState<Vector2> flat)
+            {
+                flat.RecalculateWeights();
+            }
+            else if (slope is MixerState<float> linear)
+            {
+                linear.RecalculateWeights();
+            }
+
+            AnimancerState leaf = slope is ManualMixerState mixer ? Heaviest(mixer) : slope;
+            return leaf is ClipState clipState ? clipState.Clip : null;
+        }
+
+        private static AnimancerState Heaviest(ManualMixerState mixer)
+        {
+            AnimancerState heaviest = null;
+            for (int i = 0; i < mixer.ChildCount; i++)
+            {
+                AnimancerState child = mixer.GetChild(i);
+                if (heaviest == null || child.Weight > heaviest.Weight)
+                {
+                    heaviest = child;
+                }
+            }
+
+            return heaviest;
         }
 
         private void PlaySwim(float fadeDuration)
@@ -741,6 +1321,11 @@ namespace Rubickanov.Characters
             }
 
             if (_lunging)
+            {
+                return;
+            }
+
+            if (_swim.Parameter.Equals(_moveParameter))
             {
                 return;
             }
@@ -830,6 +1415,19 @@ namespace Rubickanov.Characters
 
         private static float Smoothing(float sharpness) =>
             sharpness > 0f ? 1f - Mathf.Exp(-sharpness * Time.deltaTime) : 1f;
+
+        // Degrees positive to the right, X right and Y forward.
+        private static Vector2 TurnedBy(Vector2 planar, float degrees)
+        {
+            if (degrees == 0f)
+            {
+                return planar;
+            }
+
+            float radians = degrees * Mathf.Deg2Rad;
+            float cos = Mathf.Cos(radians), sin = Mathf.Sin(radians);
+            return new Vector2(planar.x * cos + planar.y * sin, planar.y * cos - planar.x * sin);
+        }
 
         private static Vector2 PlanarVelocity(CharacterMotion motion) =>
             new(motion.LocalVelocity.x, motion.LocalVelocity.z);

@@ -31,8 +31,12 @@ namespace Rubickanov.Characters
         public BodyTurn FirstPersonTurn = BodyTurn.Eased;
 
         [Header("Air movement")]
+        [Tooltip("Ceiling for controlled air speed; walking and sprinting also keep their own speed limits.")]
         [Min(0)] public float MaxAirMoveSpeed = 15f;
         [Min(0)] public float AirAccelerationSpeed = 15f;
+        [Tooltip("Braking toward a slower speed, no input, or the opposite direction, m/s².")]
+        [Min(0)] public float AirDecelerationSpeed = 15f;
+        [Tooltip("Horizontal air resistance per second. Does not change the vertical jump trajectory.")]
         [Min(0)] public float Drag = 0.1f;
 
         [Header("Jumping")]
@@ -41,6 +45,10 @@ namespace Rubickanov.Characters
         [Min(0)] public float JumpScalableForwardSpeed = 10f;
         [Min(0)] public float JumpPreGroundingGraceTime;
         [Min(0)] public float JumpPostGroundingGraceTime;
+        [Tooltip("Gravity multiplier when descending. 1 keeps the same gravity as ascent.")]
+        [Min(1)] public float FallGravityMultiplier = 1f;
+        [Tooltip("Gravity multiplier for the rest of a jump's ascent after releasing Jump. 1 disables short jumps.")]
+        [Min(1)] public float JumpReleaseGravityMultiplier = 1f;
 
         [Header("Up alignment")]
         public CharacterUpMode UpMode;
