@@ -1,0 +1,20 @@
+{
+    "name": "Rubickanov.Characters.Editor",
+    "rootNamespace": "Rubickanov.Characters.Editor",
+    "references": [
+        "Rubickanov.Characters.Runtime",
+        "Rubickanov.Rig.Runtime",
+        "Kybernetik.Animancer"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,29 @@
+{
+    "name": "Rubickanov.Characters.Netcode",
+    "rootNamespace": "Rubickanov.Characters.Netcode",
+    "references": [
+        "Rubickanov.Characters.Runtime",
+        "Rubickanov.Rig.Runtime",
+        "Rubickanov.Log.Runtime",
+        "Unity.Netcode.Runtime",
+        "Unity.Collections",
+        "KCC"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "RUBICKANOV_CHARACTER_NETCODE"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.netcode.gameobjects",
+            "expression": "2.0.0",
+            "define": "RUBICKANOV_CHARACTER_NETCODE"
+        }
+    ],
+    "noEngineReferences": false
+}

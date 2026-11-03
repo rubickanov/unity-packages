@@ -78,11 +78,31 @@ namespace Rubickanov.Characters
                  "still takes the hold's turn.")]
         [Range(0, 180)] public float MountWristTwist = 120f;
 
+        [Tooltip("The way both palms face in their hand bones' space at rest, for a hand whose thumb grows out under " +
+                 "the palm rather than off its edge. Zero: the palm faces away from the back of the hand, square to " +
+                 "the fingers and the thumb's root.")]
+        public Vector3 PalmFacing;
+
         [Header("Hand shapes")]
         [Tooltip("Fingers round a bar, handle or bottle.")]
         public HandShapePose Fist = new(65f, 40f, 10f);
         [Tooltip("Fingers flat on a big round thing, such as a ball.")]
         public HandShapePose OpenPalm = new(-5f, 0f, 30f);
+        [Tooltip("Fingers round a gun's grip, the index finger hooked on the trigger, the thumb on the grip's far side.")]
+        public HandShapePose Trigger = new(65f, 40f, 10f);
+
+        [Header("Swimming")]
+        [Tooltip("A swimmer's body rises by this much over the swimming clips, metres, so the chin clears the water " +
+                 "treading it.")]
+        [Min(0)] public float TreadLift = 0.08f;
+        [Tooltip("Swimming forward at swimming speed, the body rises by this much more, metres: the crawling clips " +
+                 "lie lower than the upright treading one. Slower takes a share.")]
+        [Min(0)] public float CrawlLift = 0.18f;
+        [Tooltip("Swimming forward at swimming speed, the body tilts nose up around the hips by this much, degrees, " +
+                 "so the head comes out of the water and the legs sink. Slower takes a share.")]
+        [Range(0, 60)] public float CrawlPitch = 26f;
+        [Tooltip("How quickly the swimming pose follows the speed, and comes and goes with swimming, seconds.")]
+        [Min(0)] public float SwimPoseTime = 0.15f;
 
         [Header("Look")]
         public bool Look = true;
@@ -105,6 +125,10 @@ namespace Rubickanov.Characters
             new() { Bone = HumanBodyBones.Neck, Yaw = 0.25f, Pitch = 0.1f, Aims = true },
             new() { Bone = HumanBodyBones.Head, Yaw = 0.35f, Pitch = 0.1f, Aims = true },
         };
+        [Tooltip("Share of a first-person stride's turn of the hips (CharacterAnimationsConfig.StrideAngle) the spine "
+                 + "takes back, so the chest faces the look; the neck and head aim the rest. Below the spine bones' "
+                 + "own yaw shares it adds nothing.")]
+        [Range(0, 1)] public float StrideTwist = 1f;
         [Tooltip("Spring of the lowest bone. Bones up the chain blend toward Head Spring, " +
                  "so the head leads and the body follows.")]
         public SpringSettings SpineSpring = new(2.5f, 0.75f);
@@ -137,7 +161,12 @@ namespace Rubickanov.Characters
         [Tooltip("How much of the roll the head takes back to keep the eyes level.")]
         [Range(0, 1)] public float HeadStabilize = 0.8f;
 
-        public HandShapePose Shape(HandShape shape) => shape == HandShape.OpenPalm ? OpenPalm : Fist;
+        public HandShapePose Shape(HandShape shape) => shape switch
+        {
+            HandShape.OpenPalm => OpenPalm,
+            HandShape.Trigger => Trigger,
+            _ => Fist,
+        };
     }
 
     /// <summary>How a seated character's hands take the seat's hand holds.</summary>

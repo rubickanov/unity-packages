@@ -77,8 +77,11 @@ namespace Rubickanov.Characters
         /// <summary>
         /// Aim is the look direction in the character's space, pitch included. Zero looks ahead.
         /// ModelTurn is how far the model turned in place since the last call, in degrees positive to the right.
+        /// Stride is how far the hips face off the look onto the walk, degrees positive to the right: the spine takes
+        /// <see cref="CharacterRigConfig.StrideTwist"/> of it back.
         /// </summary>
-        public void Apply(CharacterRigConfig config, Vector3 aim, float modelTurn, float weight, float deltaTime)
+        public void Apply(CharacterRigConfig config, Vector3 aim, float modelTurn, float weight, float deltaTime,
+            float stride = 0f)
         {
             if (Mathf.Abs(modelTurn) <= MaxModelTurnPerFrame)
             {
@@ -93,6 +96,17 @@ namespace Rubickanov.Characters
 
             Vector3 up = _body.up;
             Quaternion facing = _body.rotation;
+            // The spine's own shares already take part of the stride back with the look; a twist adds the rest.
+            float spineShare = 0f;
+            for (int i = 0; i < _bones.Count && _bones[i].Entry < config.LookBones.Length; i++)
+            {
+                CharacterRigConfig.LookBone entry = config.LookBones[_bones[i].Entry];
+                spineShare += entry.Aims ? 0f : entry.Yaw;
+            }
+
+            float twist = spineShare > 0f && looking
+                ? -stride * Mathf.Max(0f, config.StrideTwist - spineShare) / spineShare * weight
+                : 0f;
             float turned = 0f;
             float aimingYaw = 0f, aimingPitch = 0f;
             foreach (Bone bone in _bones)
@@ -115,6 +129,7 @@ namespace Rubickanov.Characters
                     continue;
                 }
 
+                yaw += twist * share.Yaw;
                 turned += yaw;
                 // Pitch about the side axis as the bones below have already turned it.
                 Vector3 right = Quaternion.AngleAxis(turned, up) * (facing * Vector3.right);

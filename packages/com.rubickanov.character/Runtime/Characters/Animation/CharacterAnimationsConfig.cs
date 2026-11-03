@@ -15,6 +15,19 @@ namespace Rubickanov.Characters
         [Tooltip("How quickly the mixer parameter follows velocity. 0 follows it instantly.")]
         [Min(0)] public float ParameterSharpness = 12f;
 
+        [Header("First person stride")]
+        [Tooltip("A body that faces the look with CharacterInput.Stride: walking up to this many degrees off the look "
+                 + "turns the hips and legs onto the walk, so they run their forward clip, while the chest stays on "
+                 + "the look (CharacterRigConfig.StrideTwist). 0 keeps the hips on the look: the legs strafe.")]
+        [Range(0, 90)] public float StrideAngle;
+        [Tooltip("Past Stride Angle, the hips come back onto the look over this many more degrees; beyond, the legs "
+                 + "strafe.")]
+        [Range(0, 90)] public float StrideFade = 30f;
+        [Tooltip("Planar speed, m/s, from which the hips turn fully onto the walk; slower turns them a share.")]
+        [Min(0.01f)] public float StrideSpeed = 0.6f;
+        [Tooltip("How quickly the hips follow the walk's direction. 0 follows it instantly.")]
+        [Min(0)] public float StrideSharpness = 8f;
+
         [Header("Slopes")]
         [Tooltip("Optional. Forward locomotion uphill. Parameter is planar speed in m/s. " +
                  "Leave Extrapolate Speed off: Locomotion already scales the whole blend.")]
@@ -25,6 +38,15 @@ namespace Rubickanov.Characters
         [Range(1, 89)] public float SlopeClipAngle = 25f;
         [Tooltip("How quickly the slope blend follows the ground. 0 follows it instantly.")]
         [Min(0)] public float SlopeSharpness = 8f;
+
+        [Header("Stride sync")]
+        [Tooltip("When locomotion comes back after another clip (a landing, a jump, a turn), its loops start in the " +
+                 "stance of the foot the shown pose bears on, at the matching reach, instead of from their first " +
+                 "frame. Needs StrideMarkers baked from the locomotion clips. Off: from the start.")]
+        public bool StrideSync;
+        [Tooltip("Every locomotion loop's feet baked on the character's rig (package editor StrideBaker). A clip " +
+                 "changed without a rebake starts from its first frame, with one warning.")]
+        public StrideMarkers StrideMarkers;
 
         [Header("Turning in place")]
         [Tooltip("Optional. Standing turns whose root rotation turns the model, picked by the nearest angle. " +
@@ -76,6 +98,34 @@ namespace Rubickanov.Characters
         public ClipTransition GetUpFaceDown = new();
         [Tooltip("Fade from a get-up that reached its end time back to locomotion.")]
         [Min(0)] public float GetUpBlendOut = 0.25f;
+        [Tooltip("Get-ups started from the frame nearest the lying body, its heading and place found by the search " +
+                 "(clips that end facing the root's forward, root motion on the level travel). Empty: the face up / " +
+                 "face down get-ups above. Needs GetUpPoses baked from this list.")]
+        public ClipTransition[] GetUps = { };
+        [Tooltip("Every frame of GetUps baked on the character's ragdoll (package editor GetUpBaker). A list " +
+                 "changed without a rebake falls back to the face up / face down get-ups with a warning.")]
+        public GetUpPoses GetUpPoses;
+
+        [Header("Inertialization")]
+        [Tooltip("A nearest-frame get-up starts its clip at once and the ragdoll's pose dies away over it " +
+                 "(PoseInertia on the model) instead of a held clip blending in. Off: the held blend.")]
+        public bool InertialGetUp;
+        [Min(0)] public float GetUpInertia = 0.25f;
+        [Tooltip("A jump starts with no cross-fade and the old pose dies away over it (PoseInertia).")]
+        public bool InertialJump;
+        [Tooltip("A landing, the same.")]
+        public bool InertialLand;
+        [Tooltip("A turn in place, the same.")]
+        public bool InertialTurn;
+        [Tooltip("Going into the water (swimming), the same.")]
+        public bool InertialWaterEntry;
+        [Tooltip("How long the old pose takes to die away on a jump, landing, turn or water entry, s.")]
+        [Min(0)] public float SwitchInertia = 0.2f;
+
+        [Header("Flailing")]
+        [Tooltip("Flail clips a flying ragdoll's muscles reach for (RagdollConfig.Flail), in this order: head first, " +
+                 "along the fall, feet first. Played in place and looped. Empty: no flailing.")]
+        public ClipTransition[] Flails = { };
 
         [Header("Riding")]
         [Tooltip("Optional. Held while riding in or on something whose seat has no pose of its own. Without it " +
