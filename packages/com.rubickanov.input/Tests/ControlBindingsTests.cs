@@ -65,6 +65,28 @@ namespace Rubickanov.Input.Tests
         }
 
         [Test]
+        public void Slots_AStickAxisBoundAlone_IsNoSlot()
+        {
+            var asset = ScriptableObject.CreateInstance<InputActionAsset>();
+            try
+            {
+                InputAction steer = asset.AddActionMap("Vehicle")
+                    .AddAction("Steer", InputActionType.Value, expectedControlLayout: "Axis");
+                steer.AddBinding("<Gamepad>/leftStick/x");
+                steer.AddCompositeBinding("1DAxis").With("Negative", "<Keyboard>/a").With("Positive", "<Keyboard>/d");
+                using var blocker = new InputBlocker(asset);
+                using var bindings = new ControlBindings(asset, blocker, new RebindOptions("Vehicle/Steer"));
+
+                Assert.That(bindings.Slots.Select(slot => slot.Id), Is.EqualTo(new[] { "steer.negative", "steer.positive" }),
+                    "a button would steer one way only");
+            }
+            finally
+            {
+                TestInput.Destroy(asset);
+            }
+        }
+
+        [Test]
         public void Slots_TwoBindingsOfOneScheme_TheSecondGetsANumber()
         {
             using var bindings = new ControlBindings(_input, _blocker, new RebindOptions("Menu/Submit"));
@@ -315,6 +337,34 @@ namespace Rubickanov.Input.Tests
             {
                 TestInput.Destroy(input);
             }
+        }
+
+        [Test]
+        public void MapsApart_ShareAKey_NoClashNorOnLoad()
+        {
+            RebindOptions apart = new RebindOptions("Gameplay/Jump", "Menu/Restart").Apart("Gameplay", "Menu");
+            using var bindings = new ControlBindings(_input, _blocker, apart);
+
+            Assert.That(_bindings.Set(Slot("restart"), "<Keyboard>/space").Kind, Is.EqualTo(RebindKind.Taken),
+                "maps not said apart clash");
+            Assert.That(bindings.Set(bindings.Find("restart"), "<Keyboard>/space").Kind, Is.EqualTo(RebindKind.Bound));
+            string json = bindings.ToJson();
+
+            using var again = new ControlBindings(_input, _blocker, apart);
+            again.LoadJson(json);
+            Assert.That(again.Current(again.Find("restart")), Is.EqualTo("<Keyboard>/space"), "a load keeps them");
+            Assert.That(again.Current(again.Find("jump")), Is.EqualTo("<Keyboard>/space"));
+        }
+
+        [Test]
+        public void ActionsApart_ShareAKey_OthersOfTheirMapStillClash()
+        {
+            RebindOptions apart = new RebindOptions("Gameplay/Jump", "Gameplay/Sprint", "Gameplay/Crouch")
+                .Apart("Gameplay/Jump", "Gameplay/Sprint, Gameplay/Interact");
+            using var bindings = new ControlBindings(_input, _blocker, apart);
+
+            Assert.That(bindings.Set(bindings.Find("sprint"), "<Keyboard>/space").Kind, Is.EqualTo(RebindKind.Bound));
+            Assert.That(bindings.Set(bindings.Find("crouch"), "<Keyboard>/space").Kind, Is.EqualTo(RebindKind.Taken));
         }
 
         [Test]

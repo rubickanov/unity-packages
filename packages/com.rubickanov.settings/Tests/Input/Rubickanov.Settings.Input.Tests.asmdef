@@ -1,0 +1,37 @@
+{
+    "name": "Rubickanov.Settings.Input.Tests",
+    "rootNamespace": "Rubickanov.Settings.Input.Tests",
+    "references": [
+        "Rubickanov.Settings",
+        "Rubickanov.Settings.Input",
+        "Rubickanov.Input",
+        "Unity.InputSystem",
+        "Unity.InputSystem.TestFramework",
+        "UniTask",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "R3.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "RUBICKANOV_INPUT"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.rubickanov.input",
+            "expression": "1.1.0",
+            "define": "RUBICKANOV_INPUT"
+        }
+    ],
+    "noEngineReferences": false
+}

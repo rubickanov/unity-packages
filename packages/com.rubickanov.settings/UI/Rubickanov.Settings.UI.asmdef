@@ -1,0 +1,26 @@
+{
+    "name": "Rubickanov.Settings.UI",
+    "rootNamespace": "Rubickanov.Settings.UI",
+    "references": [
+        "Rubickanov.Settings",
+        "Rubickanov.UI",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "RUBICKANOV_UI"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.rubickanov.ui",
+            "expression": "4.1.0",
+            "define": "RUBICKANOV_UI"
+        }
+    ],
+    "noEngineReferences": false
+}

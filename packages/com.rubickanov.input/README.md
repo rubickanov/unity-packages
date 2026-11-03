@@ -133,7 +133,7 @@ bindings.Reset(jump);
 bindings.ResetAll(ControlScheme.Pad);
 ```
 
-A keyboard slot takes keys (not Esc, Win/Cmd, Menu) and mouse buttons; a pad slot takes pad buttons, not the ways of sticks and the d-pad. A key another slot of the same scheme has comes back `Taken` and changes nothing until `Swap`. `RebindOptions` changes the cancel keys and the exclusions.
+A keyboard slot takes keys (not Esc, Win/Cmd, Menu) and mouse buttons; a pad slot takes pad buttons, not the ways of sticks and the d-pad. A stick, the d-pad or one of their axes bound alone (`leftStick/x`) is no slot: no button could stand in for it. A key another slot of the same scheme has comes back `Taken` and changes nothing until `Swap`. Sides the game never reads at once may share keys: `new RebindOptions(...).Apart("Player", "Vehicle")` lets W walk and drive, `.Apart("Vehicle/Throttle, Vehicle/Brake", "Vehicle/GripLeft, Vehicle/GripRight")` lets a trigger drive and hold on, so neither a rebind nor `LoadJson` calls it a clash. `RebindOptions` changes the cancel keys and the exclusions.
 
 ### Keeping the keys
 

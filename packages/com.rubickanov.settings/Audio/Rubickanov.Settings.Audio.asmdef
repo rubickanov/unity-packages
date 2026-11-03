@@ -1,0 +1,26 @@
+{
+    "name": "Rubickanov.Settings.Audio",
+    "rootNamespace": "Rubickanov.Settings.Audio",
+    "references": [
+        "Rubickanov.Settings",
+        "Rubickanov.Audio.Runtime",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "RUBICKANOV_AUDIO"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.rubickanov.audio",
+            "expression": "3.1.0",
+            "define": "RUBICKANOV_AUDIO"
+        }
+    ],
+    "noEngineReferences": false
+}

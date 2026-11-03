@@ -65,5 +65,68 @@ namespace Rubickanov.Input
 
         /// <summary>How long a chosen control waits for a stronger one (a stick pushed a little sideways first).</summary>
         public float SettleTime { get; set; } = 0.1f;
+
+        private readonly List<HashSet<string>[]> _apart = new();
+
+        /// <summary>
+        /// Sides the game never reads at once (on foot and in a vehicle; driving and holding on): their slots may share a
+        /// key, so W walks and drives. A side names maps or actions, several split by commas: <c>"Player"</c>,
+        /// <c>"Vehicle/Throttle, Vehicle/Brake"</c>. A key is Taken only by a slot no side keeps apart from its own.
+        /// </summary>
+        public RebindOptions Apart(params string[] sides)
+        {
+            if (sides == null || sides.Length < 2)
+            {
+                throw new ArgumentException("Name at least two sides that are never read at once", nameof(sides));
+            }
+
+            var group = new HashSet<string>[sides.Length];
+            for (int i = 0; i < sides.Length; i++)
+            {
+                group[i] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string name in sides[i].Split(','))
+                {
+                    if (name.Trim().Length > 0)
+                    {
+                        group[i].Add(name.Trim());
+                    }
+                }
+            }
+
+            _apart.Add(group);
+            return this;
+        }
+
+        /// <summary>Whether the actions <paramref name="a"/> and <paramref name="b"/> ("Map/Action") are never read at once.</summary>
+        public bool AreApart(string a, string b)
+        {
+            foreach (HashSet<string>[] group in _apart)
+            {
+                int sideA = SideOf(group, a);
+                int sideB = SideOf(group, b);
+                if (sideA >= 0 && sideB >= 0 && sideA != sideB)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // The side naming the action or its map; -1 for none.
+        private static int SideOf(HashSet<string>[] group, string action)
+        {
+            int slash = action.IndexOf('/');
+            string map = slash > 0 ? action[..slash] : "";
+            for (int i = 0; i < group.Length; i++)
+            {
+                if (group[i].Contains(action) || group[i].Contains(map))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
     }
 }
