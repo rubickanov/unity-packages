@@ -25,14 +25,17 @@ namespace Rubickanov.Log
         }
 
         /// <summary>
-        /// The exception as Unity prints it, type, message and a stack trace to click through, behind the
-        /// channel's tag and scope; still an exception to anything listening to Application.logMessageReceived.
+        /// Two lines: the channel's own, Info, with its tag, scope, the exception's type and message and no stack
+        /// trace; then the exception itself through <see cref="ILogger.LogException(Exception, Object)"/>, as Unity
+        /// prints it, with its own stack trace to click through. Crash reporters (Sentry) take an exception only as
+        /// that object, never as a line of the exception log type, so the channel's line stays a plain one.
         /// </summary>
         [HideInCallstack]
         public static void WriteException(LogChannel channel, Exception exception, Object context)
         {
-            string text = StackTraceUtility.ExtractStringFromException(exception);
-            Debug.unityLogger.Log(LogType.Exception, (object)Format(channel, LogLevel.Error, text), context);
+            string text = $"{exception.GetType().Name}: {exception.Message}";
+            Debug.unityLogger.Log(LogType.Log, (object)Format(channel, LogLevel.Info, text), context);
+            Debug.unityLogger.LogException(exception, context);
         }
 
         private static LogType TypeOf(LogLevel level)
