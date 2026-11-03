@@ -2,7 +2,8 @@
     "name": "Rubickanov.Audio.Runtime",
     "rootNamespace": "Rubickanov.Audio",
     "references": [
-        "UniTask"
+        "UniTask",
+        "Rubickanov.Log.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
