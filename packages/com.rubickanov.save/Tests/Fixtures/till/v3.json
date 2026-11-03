@@ -1,0 +1,9 @@
+{
+  "$build": "0.3.0",
+  "$kind": "till",
+  "$version": 3,
+  "till": {
+    "cash": 12000,
+    "tips": 250
+  }
+}
