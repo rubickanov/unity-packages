@@ -86,7 +86,7 @@ git commit && git push                    # 3. here
 | `devconsole` | 5.1.0 | In-game dev console |
 | `eqs` | 2.0.0 | Environment Query System |
 | `input` | 1.2.0 | Input System helpers each game needs |
-| `log` | 1.2.0 | Named log channels |
+| `log` | 1.3.0 | Named log channels |
 | `save` | 1.2.0 | Player data store; versioned documents with migrations; world slots committed by generation |
 | `settings` | 1.1.0 | Player settings the game declares: display, volume, look, keys, and a menu model for a settings screen |
 | `ui` | 4.1.0 | UI Toolkit framework |

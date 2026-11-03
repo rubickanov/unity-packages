@@ -172,10 +172,12 @@ namespace Rubickanov.Log.Tests
         }
 
         [Test]
-        public void Exception_ChannelWrites_CarriesChannelTagAndScope()
+        public void Exception_ChannelWrites_InfoLineWithChannelTagScopeAndType()
         {
             LogChannel course = NewChannel();
-            LogAssert.Expect(LogType.Exception, new Regex(Regex.Escape(course.Name) + @".*\[Host\] .*InvalidOperationException.*Piston stuck"));
+            LogAssert.Expect(LogType.Log,
+                new Regex(Regex.Escape(course.Name) + @".*\[Host\] InvalidOperationException: Piston stuck"));
+            LogAssert.Expect(LogType.Exception, new Regex(@"InvalidOperationException: Piston stuck"));
             LogChannel.Scope = "Host";
 
             try
@@ -193,18 +195,33 @@ namespace Rubickanov.Log.Tests
         {
             LogChannel course = NewChannel();
             course.Level = LogLevel.Off;
-            LogAssert.Expect(LogType.Exception, new Regex(Regex.Escape(course.Name) + @".*Piston stuck"));
+            LogAssert.Expect(LogType.Log, new Regex(Regex.Escape(course.Name) + @".*Piston stuck"));
+            LogAssert.Expect(LogType.Exception, new Regex(@"Piston stuck"));
 
             course.Exception(new InvalidOperationException("Piston stuck"));
         }
 
         [Test]
-        public void Exception_ThrownException_KeepsItsStackTrace()
+        public void Exception_ThrownException_ReachesLoggerAsObjectWithItsStackTrace()
         {
             LogChannel course = NewChannel();
-            LogAssert.Expect(LogType.Exception, new Regex(nameof(Throw)));
+            var handler = new CatchingHandler(Debug.unityLogger.logHandler);
+            Debug.unityLogger.logHandler = handler;
+            try
+            {
+                course.Exception(Throw());
+            }
+            finally
+            {
+                Debug.unityLogger.logHandler = handler.Inner;
+            }
 
-            course.Exception(Throw());
+            Assert.IsInstanceOf<InvalidOperationException>(handler.Caught);
+            StringAssert.Contains(nameof(Throw), handler.Caught.StackTrace);
+            // The channel's line carries no stack trace of its own: one line, type and message.
+            Assert.AreEqual(1, handler.Lines.Count);
+            StringAssert.Contains("InvalidOperationException: Piston stuck", handler.Lines[0]);
+            StringAssert.DoesNotContain(nameof(Throw), handler.Lines[0]);
         }
 
         [Test]
@@ -297,6 +314,23 @@ namespace Rubickanov.Log.Tests
             string line = LogWriter.PlayerLine(time, "-", "Elevenchars", LogLevel.Info, null, "Up");
 
             Assert.AreEqual("14:03:09.007 f-      I Elevenchars Up", line);
+        }
+
+        // Takes what reaches Unity's logger, as a crash reporter's handler would.
+        private sealed class CatchingHandler : ILogHandler
+        {
+            public CatchingHandler(ILogHandler inner) => Inner = inner;
+
+            public ILogHandler Inner { get; }
+
+            public Exception Caught { get; private set; }
+
+            public List<string> Lines { get; } = new();
+
+            public void LogFormat(LogType logType, Object context, string format, params object[] args) =>
+                Lines.Add(string.Format(format, args));
+
+            public void LogException(Exception exception, Object context) => Caught = exception;
         }
 
         private static Exception Throw()

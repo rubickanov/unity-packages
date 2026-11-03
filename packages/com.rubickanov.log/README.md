@@ -57,7 +57,7 @@ Log.Exception(exception, this);
 
 `Verbose`, `Info`, `Warn` and `Error` take interpolated strings (a plain `string` works too). Holes format numbers with the invariant culture and Unity objects by name (`null` if destroyed). When the channel would not write the message, holes are not evaluated at all.
 
-`Exception` writes the exception as Unity prints it (type, message, clickable stack trace, still an exception for `Application.logMessageReceived`) behind the channel's tag and scope. It is written whatever the channel's level, `Off` included: an exception is never hidden.
+`Exception` writes two lines: the channel's own Info line (tag, scope, `Type: message`, no stack trace), then the exception itself through `Debug.unityLogger.LogException`, as Unity prints it with its clickable stack trace. Crash reporters such as Sentry take an exception only as that object (a line of `LogType.Exception` is not one), and the channel's line is their breadcrumb. It is written whatever the channel's level, `Off` included: an exception is never hidden.
 
 ### Levels
 

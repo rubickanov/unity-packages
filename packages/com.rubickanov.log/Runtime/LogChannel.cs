@@ -138,8 +138,9 @@ namespace Rubickanov.Log
         public void Error(string message, Object context = null) => Write(LogLevel.Error, message, context);
 
         /// <summary>
-        /// Logs the exception with its own stack trace and the channel's tag and scope in front. Always written,
-        /// whatever the channel's level: an exception is never something to hide.
+        /// Logs the channel's Info line (tag, scope, the exception's type and message), then the exception itself
+        /// with its own stack trace, as an exception object for crash reporters. Always written, whatever the
+        /// channel's level: an exception is never something to hide.
         /// </summary>
         [HideInCallstack]
         public void Exception(System.Exception exception, Object context = null) => LogWriter.WriteException(this, exception, context);
