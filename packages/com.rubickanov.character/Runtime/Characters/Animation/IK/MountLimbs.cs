@@ -31,11 +31,12 @@ namespace Rubickanov.Characters
             // The palm's middle and the way it faces, in the hand's space.
             public Vector3 Middle, Facing;
             // The fingers (the index first) and the thumb the hand shapes turn, each joint about its own axis; the
-            // thumb's root also folds and spreads about two axes in the hand's space.
+            // thumb's root turns about three square axes in the hand's space: over the palm's face, in its plane away
+            // from the fingers, and about the thumb's own line.
             public Digit[] Fingers;
             public Digit Thumb;
             public bool HasIndex;
-            public Vector3 FoldAxis, SpreadAxis, OpposeAxis;
+            public Vector3 ThumbFold, ThumbSpread, ThumbTwist;
         }
 
         // A finger's or the thumb's bones from its root out, their rest turns under their parents, and the axis each
@@ -164,15 +165,15 @@ namespace Rubickanov.Characters
 
             if (palm.Thumb != null)
             {
-                // A thumb with joints folds its root the way it curls; a mitten's thumb over the palm.
+                // About fixed axes the twist goes first: the same as the spread, then the fold and the twist about
+                // where the turns before left the thumb.
                 Transform root = palm.Thumb.Bones[0];
-                bool joints = palm.Thumb.Bones.Length > 1;
-                Vector3 fold = joints ? palm.Thumb.Axes[0] : palm.FoldAxis;
-                Quaternion turned = Quaternion.AngleAxis(shape.ThumbSpread, joints ? palm.OpposeAxis : palm.SpreadAxis)
-                                    * Quaternion.AngleAxis(shape.ThumbFold, fold) * palm.Thumb.Rests[0];
+                Quaternion turned = Quaternion.AngleAxis(shape.ThumbSpread, palm.ThumbSpread)
+                                    * Quaternion.AngleAxis(shape.ThumbFold, palm.ThumbFold)
+                                    * Quaternion.AngleAxis(shape.ThumbTwist, palm.ThumbTwist) * palm.Thumb.Rests[0];
                 root.localRotation = Quaternion.Slerp(root.localRotation, turned, weight);
                 Curl(palm.Thumb, 1, shape.ThumbCurl, weight);
-                Curl(palm.Thumb, 2, shape.ThumbCurl, weight);
+                Curl(palm.Thumb, 2, shape.ThumbTip, weight);
             }
         }
 
@@ -415,14 +416,21 @@ namespace Rubickanov.Characters
                 right ? HumanBodyBones.RightThumbProximal : HumanBodyBones.LeftThumbProximal,
                 along => Vector3.Cross(thumbAlong = along, (Vector3.ProjectOnPlane(-side, along).normalized * Mathf.Sin(across)
                                                + facing * Mathf.Cos(across)).normalized).normalized);
+            // The thumb's root axes, square to each other: a turn about the fold moves the thumb toward the palm's
+            // face, about the spread away from the fingers in the palm's plane (out to the thumb's side and back
+            // toward the wrist, wherever between the two the thumb points), about the twist its face-side toward the
+            // fingers. The same words on either hand.
+            Vector3 face = Vector3.ProjectOnPlane(facing, thumbAlong).normalized;
+            Vector3 thumbFold = Vector3.Cross(thumbAlong, face).normalized;
+            float toFingers = Vector3.Dot(thumbFold, side - fingers) <= 0f ? 1f : -1f;
             return new Palm
             {
                 Fingers = digits.Count > 0 && thumbDigit != null ? digits.ToArray() : null,
                 Thumb = digits.Count > 0 ? thumbDigit : null,
                 HasIndex = animator.GetBoneTransform(roots[0]) != null,
-                FoldAxis = Vector3.Cross(side, facing).normalized,
-                OpposeAxis = thumbDigit != null ? Vector3.Cross(thumbAlong, facing).normalized : Vector3.zero,
-                SpreadAxis = Vector3.Cross(fingers, side).normalized,
+                ThumbFold = thumbFold,
+                ThumbSpread = face * toFingers,
+                ThumbTwist = thumbAlong * toFingers,
                 Rest = rest,
                 Axis = (Quaternion.Inverse(rest) * limb.End.localPosition).normalized,
                 FromGrip = Quaternion.Inverse(Quaternion.LookRotation(facing, fingers)),
