@@ -18,10 +18,12 @@ namespace Rubickanov.Characters
     /// The fingers of a <see cref="HandShape"/>, degrees from the avatar's rest. Each finger bends at its knuckle
     /// (<see cref="Curl"/>), its middle joint (<see cref="Bend"/>) and its last joint (<see cref="Tip"/>); with
     /// <see cref="IndexApart"/> the index finger takes its own three (<see cref="Index"/>: knuckle, middle, last), such
-    /// as a hook on a trigger. A hand with one bone for its fingers (a mitten) bends that bone by <see cref="Curl"/>. The
-    /// thumb's root folds it the way it curls (a mitten's over the palm) and turns it by <see cref="ThumbSpread"/>:
-    /// a thumb with joints toward the palm's face, round a grip, a mitten's off the fingers. Its other two joints
-    /// curl it the way it folds.
+    /// as a hook on a trigger. A hand with one bone for its fingers (a mitten) bends that bone by <see cref="Curl"/>.
+    /// The thumb's root turns three ways, square to each other and named from the hand at rest: out of the palm's plane
+    /// over its face (<see cref="ThumbFold"/>), in that plane away from the fingers (<see cref="ThumbSpread"/>), and
+    /// about the thumb's own line, its pad toward the fingers (<see cref="ThumbTwist"/>); the spread first, then the
+    /// fold, then the twist, each about where the turns before left it. Its middle joint and its last curl it by
+    /// <see cref="ThumbCurl"/> and <see cref="ThumbTip"/>.
     /// </summary>
     [Serializable]
     public struct HandShapePose
@@ -31,16 +33,14 @@ namespace Rubickanov.Characters
         [Range(-30f, 120f)] public float Tip;
         public bool IndexApart;
         public Vector3 Index;
-        [Range(-30f, 120f)] public float ThumbFold;
-        [Range(-45f, 90f)] public float ThumbSpread;
+        [Range(-90f, 120f)] public float ThumbFold;
+        [Range(-90f, 90f)] public float ThumbSpread;
+        [Range(-120f, 120f)] public float ThumbTwist;
         [Range(-30f, 120f)] public float ThumbCurl;
+        [Range(-30f, 120f)] public float ThumbTip;
 
-        public HandShapePose(float curl, float thumbFold, float thumbSpread)
-            : this(curl, 0f, 0f, thumbFold, thumbSpread, 0f)
-        {
-        }
-
-        public HandShapePose(float curl, float bend, float tip, float thumbFold, float thumbSpread, float thumbCurl)
+        public HandShapePose(float curl, float bend, float tip, float thumbFold, float thumbSpread, float thumbTwist,
+            float thumbCurl, float thumbTip)
         {
             Curl = curl;
             Bend = bend;
@@ -49,7 +49,9 @@ namespace Rubickanov.Characters
             Index = Vector3.zero;
             ThumbFold = thumbFold;
             ThumbSpread = thumbSpread;
+            ThumbTwist = thumbTwist;
             ThumbCurl = thumbCurl;
+            ThumbTip = thumbTip;
         }
     }
 
