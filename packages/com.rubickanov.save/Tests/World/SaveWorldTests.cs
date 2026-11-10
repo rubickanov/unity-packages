@@ -186,6 +186,33 @@ namespace Rubickanov.Save.Tests.World
         }
 
         [Test]
+        public void SaveAsync_ASectionWhoseRestoreThrew_KeepsItsFileUntilARestoreSucceeds()
+        {
+            Game full = Started(out string slot);
+            full.Radio = 42;
+            Saved(full);
+            full.World.Close();
+
+            Game broken = Loaded(slot, out SaveReport report, radioThrows: true);
+            for (int i = 0; i < 4; i++)
+            {
+                broken.A = i;
+                broken.Radio = 0;
+                Saved(broken);
+            }
+
+            broken.World.Close();
+            Game back = Loaded(slot, out SaveReport after);
+
+            Assert.That(report.Ok, Is.True);
+            Assert.That(report.Unrestored, Is.EqualTo(new[] { "radio" }));
+            Assert.That(_errors.Any(e => e.Contains("radio could not be restored")), Is.True, "the failure is told");
+            Assert.That(Manifest(slot, 6).At("sections/radio/file").String, Is.EqualTo("radio.000002.json"));
+            Assert.That(after.Unrestored, Is.Empty);
+            Assert.That((back.A, back.Radio), Is.EqualTo((3, 42)));
+        }
+
+        [Test]
         public void Save_ThreeWhileOneWrites_TwoGenerationsAndTheNewestCaptureLands()
         {
             Game game = Started(out string slot);
@@ -281,9 +308,9 @@ namespace Rubickanov.Save.Tests.World
             return game;
         }
 
-        private Game Loaded(string slot, out SaveReport report, bool radio = true)
+        private Game Loaded(string slot, out SaveReport report, bool radio = true, bool radioThrows = false)
         {
-            var game = new Game(_store, _errors.Add, 1, radio);
+            var game = new Game(_store, _errors.Add, 1, radio, radioThrows);
             report = Wait(game.World.LoadAsync(slot));
             return game;
         }
@@ -352,7 +379,7 @@ namespace Rubickanov.Save.Tests.World
             public int Radio;
             public byte[] Blob;
 
-            public Game(ISaveStore store, Action<string> logError, int aVersion, bool radio)
+            public Game(ISaveStore store, Action<string> logError, int aVersion, bool radio, bool radioThrows = false)
             {
                 Slots = new SaveSlots(store, Saves, "test", logError);
                 SaveMigrations aMigrations = aVersion > 1 ? new SaveMigrations().Step(2, _ => { }) : null;
@@ -374,7 +401,7 @@ namespace Rubickanov.Save.Tests.World
                 };
                 if (radio)
                 {
-                    order.Add(SaveSection.Of("radio", null, w => w.Int("v", Radio), r => Radio = r.Int("v")));
+                    order.Add(SaveSection.Of("radio", null, w => w.Int("v", Radio), r => Radio = radioThrows ? throw new InvalidOperationException("radio broke") : r.Int("v")));
                 }
 
                 World = Slots.Open(order);

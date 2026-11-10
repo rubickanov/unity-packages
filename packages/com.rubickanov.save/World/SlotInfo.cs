@@ -68,6 +68,12 @@ namespace Rubickanov.Save.World
         /// <summary>Unknown sections, values of the wrong kind, migrations, the fallback.</summary>
         public IReadOnlyList<string> Notes { get; internal set; }
 
+        /// <summary>
+        /// Sections whose restore threw: their files are kept as read, and saves of this world name them unchanged, so
+        /// the next load that restores them gets what was there. Empty when every section restored.
+        /// </summary>
+        public IReadOnlyList<string> Unrestored { get; internal set; } = Array.Empty<string>();
+
         /// <summary>Main-thread time of every section's restore.</summary>
         public float RestoreMs { get; internal set; }
 
@@ -79,6 +85,7 @@ namespace Rubickanov.Save.World
         public override string ToString() =>
             Refused != null ? $"refused: {Refused}" :
             Error != null ? $"error: {Error}" :
-            $"generation {Generation}" + (FellBackFrom != null ? $" (fell back from {FellBackFrom})" : "") + $", {Notes.Count} notes";
+            $"generation {Generation}" + (FellBackFrom != null ? $" (fell back from {FellBackFrom})" : "") + $", {Notes.Count} notes"
+            + (Unrestored.Count > 0 ? $", not restored: {string.Join(", ", Unrestored)}" : "");
     }
 }

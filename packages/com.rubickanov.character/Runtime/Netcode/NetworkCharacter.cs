@@ -728,8 +728,13 @@ namespace Rubickanov.Characters.Netcode
                 return;
             }
 
-            double interval = 1.0 / NetworkManager.NetworkConfig.TickRate;
-            _nextSendTime = time < _nextSendTime + interval ? _nextSendTime + interval : time + interval;
+            // A send ahead of the schedule leaves it be: moving it on would run it ahead with every change.
+            if (time >= _nextSendTime)
+            {
+                double interval = 1.0 / NetworkManager.NetworkConfig.TickRate;
+                _nextSendTime = time < _nextSendTime + interval ? _nextSendTime + interval : time + interval;
+            }
+
             _sentGrounded = motion.IsGrounded;
             _sentSwimming = motion.IsSwimming;
             _sentSeated = seated;

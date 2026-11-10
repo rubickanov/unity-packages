@@ -66,17 +66,47 @@ namespace Rubickanov.Save.Tests
         public void ReadAndWrite_StoreFails_ReportedToTheOwnerNotThrown()
         {
             var errors = new List<string>();
-            var document = new SaveDocument(new FailingStore(), Key, errors.Add);
+            var store = new FailingStore { Fails = false };
+            var document = new SaveDocument(store, Key, errors.Add);
+            document.ReadAsync(_ => { }).GetAwaiter().GetResult();
+            store.Fails = true;
+
+            string written = document.WriteAsync(() => "x").GetAwaiter().GetResult();
+
+            Assert.That(written, Is.Null);
+            Assert.That(errors, Has.Count.EqualTo(1));
+            Assert.That(errors[0], Does.Match("could not be written: disk gone"));
+        }
+
+        [Test]
+        public void WriteAsync_AfterAFailedRead_KeepsTheFileUntilAReadSucceeds()
+        {
+            var errors = new List<string>();
+            var store = new FailingStore();
+            store.Inner.WriteTextAsync(Key, "real").GetAwaiter().GetResult();
+            var document = new SaveDocument(store, Key, errors.Add);
+            store.Fails = true;
             string read = "not called";
 
             document.ReadAsync(text => read = text).GetAwaiter().GetResult();
-            string written = document.WriteAsync(() => "x").GetAwaiter().GetResult();
+            store.Fails = false;
+            string first = document.WriteAsync(() => "defaults").GetAwaiter().GetResult();
+            string second = document.WriteAsync(() => "defaults").GetAwaiter().GetResult();
 
             Assert.That(read, Is.Null);
-            Assert.That(written, Is.Null);
-            Assert.That(errors, Has.Count.EqualTo(2));
+            Assert.That(document.ReadFailed, Is.True);
+            Assert.That((first, second), Is.EqualTo(((string)null, (string)null)));
+            Assert.That(store.Inner.ReadTextAsync(Key).GetAwaiter().GetResult(), Is.EqualTo("real"));
+            Assert.That(errors, Has.Count.EqualTo(2), "the read, then one line for the writes it stops");
             Assert.That(errors[0], Does.Match("could not be read: disk gone"));
-            Assert.That(errors[1], Does.Match("could not be written: disk gone"));
+            Assert.That(errors[1], Does.Match("is not written"));
+
+            document.ReadAsync(text => read = text).GetAwaiter().GetResult();
+            string third = document.WriteAsync(() => "new").GetAwaiter().GetResult();
+
+            Assert.That(read, Is.EqualTo("real"));
+            Assert.That(document.ReadFailed, Is.False);
+            Assert.That(third, Is.EqualTo("new"));
         }
 
         [Test]
@@ -131,22 +161,30 @@ namespace Rubickanov.Save.Tests
             public string Describe(SaveKey key) => Inner.Describe(key);
         }
 
+        // A memory store that throws on everything while Fails.
         private sealed class FailingStore : ISaveStore
         {
-            public UniTask<byte[]> ReadAsync(SaveKey key, CancellationToken ct = default) => throw Gone();
+            public bool Fails = true;
 
-            public UniTask<byte[]> ReadStartAsync(SaveKey key, int count, CancellationToken ct = default) => throw Gone();
+            public MemorySaveStore Inner { get; } = new();
 
-            public UniTask WriteAsync(SaveKey key, byte[] bytes, CancellationToken ct = default) => throw Gone();
+            public UniTask<byte[]> ReadAsync(SaveKey key, CancellationToken ct = default) => Fails ? throw Gone() : Inner.ReadAsync(key, ct);
 
-            public UniTask<bool> DeleteAsync(SaveKey key, CancellationToken ct = default) => throw Gone();
+            public UniTask<byte[]> ReadStartAsync(SaveKey key, int count, CancellationToken ct = default) =>
+                Fails ? throw Gone() : Inner.ReadStartAsync(key, count, ct);
 
-            public UniTask<SaveEntry?> FindAsync(SaveKey key, CancellationToken ct = default) => throw Gone();
+            public UniTask WriteAsync(SaveKey key, byte[] bytes, CancellationToken ct = default) =>
+                Fails ? throw Gone() : Inner.WriteAsync(key, bytes, ct);
+
+            public UniTask<bool> DeleteAsync(SaveKey key, CancellationToken ct = default) => Fails ? throw Gone() : Inner.DeleteAsync(key, ct);
+
+            public UniTask<SaveEntry?> FindAsync(SaveKey key, CancellationToken ct = default) => Fails ? throw Gone() : Inner.FindAsync(key, ct);
 
             public UniTask<IReadOnlyList<SaveEntry>> ListAsync(SaveArea area, string prefix = "", CancellationToken ct = default) =>
-                throw Gone();
+                Fails ? throw Gone() : Inner.ListAsync(area, prefix, ct);
 
-            public UniTask<Texture2D> ReadPictureAsync(SaveKey key, CancellationToken ct = default) => throw Gone();
+            public UniTask<Texture2D> ReadPictureAsync(SaveKey key, CancellationToken ct = default) =>
+                Fails ? throw Gone() : Inner.ReadPictureAsync(key, ct);
 
             public string Describe(SaveKey key) => key.ToString();
 
