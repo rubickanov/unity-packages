@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0 — 2026-11-10
+
+- A section whose `Restore` throws is named in `SaveReport.Unrestored`; saves of that world name its file as read instead of capturing it, so autosaves no longer write its unrestored state over it.
+- `SaveDocument.ReadFailed`: after a read the store fails (not "there is none"), writes do nothing until a read succeeds, so the file is not replaced by defaults.
+
 ## 1.2.0 — 2026-10-20
 
 - `ListMetadataAsync` and `FindMetadataAsync` read manifests on the pool without section or attachment reads. `SlotInfo.IntegrityChecked` distinguishes metadata from a verified result. Existing `ListAsync` and `FindAsync` keep their verification behavior.

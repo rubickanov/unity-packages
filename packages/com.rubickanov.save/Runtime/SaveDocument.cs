@@ -9,8 +9,9 @@ namespace Rubickanov.Save
     /// are: read once, then written whole after each change. Reads and writes take turns, the read first, and a write
     /// takes its text when its turn comes, so what is kept is always the owner's latest and never anything made before
     /// the document was read. Text its owner cannot understand is kept aside under <see cref="BrokenKey"/>
-    /// (<c>progress.broken.json</c> beside <c>progress.json</c>) before it is written over. The store's failures are
-    /// reported, not thrown.
+    /// (<c>progress.broken.json</c> beside <c>progress.json</c>) before it is written over. A document the store could
+    /// not read is not written until a read succeeds, so what is there is never replaced by what the owner made without
+    /// it. The store's failures are reported, not thrown.
     /// </summary>
     public sealed class SaveDocument
     {
@@ -19,6 +20,7 @@ namespace Rubickanov.Save
         private readonly ISaveStore _store;
         private readonly Action<string> _logError;
         private UniTask _turn = UniTask.CompletedTask;
+        private bool _toldUnread;
 
         /// <param name="logError">
         /// Where the store's failures go, as one line naming the document and what failed: the owner's own log channel.
@@ -44,8 +46,13 @@ namespace Rubickanov.Save
         public string BrokenWhere => _store.Describe(BrokenKey);
 
         /// <summary>
+        /// Whether the last read failed in the store (not "there is none"): writes then do nothing until a read succeeds.
+        /// </summary>
+        public bool ReadFailed { get; private set; }
+
+        /// <summary>
         /// Reads the document and hands its text to <paramref name="take"/>, null when there is none or the store could
-        /// not read it; no write comes before <paramref name="take"/> is done.
+        /// not read it (then <see cref="ReadFailed"/>); no write comes before <paramref name="take"/> is done.
         /// </summary>
         public UniTask ReadAsync(Action<string> take) => InTurn(async () =>
         {
@@ -53,10 +60,13 @@ namespace Rubickanov.Save
             try
             {
                 text = await _store.ReadTextAsync(Key);
+                ReadFailed = false;
+                _toldUnread = false;
             }
             catch (SaveStoreException e)
             {
-                _logError($"{Where} could not be read: {e.Message}");
+                ReadFailed = true;
+                _logError($"{Where} could not be read: {e.Message}; it is not written until a read succeeds");
             }
 
             take(text);
@@ -76,8 +86,9 @@ namespace Rubickanov.Save
         });
 
         /// <summary>
-        /// Writes the text <paramref name="text"/> gives when its turn comes; null from it writes nothing. Comes back with
-        /// the text written, or null when nothing was or the store could not.
+        /// Writes the text <paramref name="text"/> gives when its turn comes; null from it writes nothing, nor does a
+        /// document whose read failed (<see cref="ReadFailed"/>). Comes back with the text written, or null when nothing
+        /// was or the store could not.
         /// </summary>
         public async UniTask<string> WriteAsync(Func<string> text)
         {
@@ -87,6 +98,17 @@ namespace Rubickanov.Save
                 string now = text();
                 if (now == null)
                 {
+                    return;
+                }
+
+                if (ReadFailed)
+                {
+                    if (!_toldUnread)
+                    {
+                        _toldUnread = true;
+                        _logError($"{Where} is not written: it could not be read, what is there is kept");
+                    }
+
                     return;
                 }
 

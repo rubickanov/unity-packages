@@ -177,6 +177,7 @@ namespace Rubickanov.Save.World
             _playedAtLoad = Math.Max(0, SaveReader.Of(picked.Manifest).Double("played"));
             _loadedAt = DateTime.UtcNow;
 
+            var unrestored = new List<string>();
             var watch = Stopwatch.StartNew();
             for (int i = 0; i < _sections.Length; i++)
             {
@@ -192,7 +193,10 @@ namespace Rubickanov.Save.World
                 }
                 catch (Exception e)
                 {
-                    string message = $"{slot}: {section.Known.Id} could not be restored: {e.Message}";
+                    // Its state in the game is unknown: saves leave its file as read rather than write that state over it.
+                    section.Held = true;
+                    unrestored.Add(section.Known.Id);
+                    string message = $"{slot}: {section.Known.Id} could not be restored, its file is kept as read: {e.Message}";
                     notes.Add(message);
                     _slots.LogError(message);
                 }
@@ -200,6 +204,7 @@ namespace Rubickanov.Save.World
 
             report.RestoreMs = (float)watch.Elapsed.TotalMilliseconds;
             report.Notes = notes;
+            report.Unrestored = unrestored;
             Loaded = true;
             return report;
         }
@@ -391,6 +396,19 @@ namespace Rubickanov.Save.World
             for (int i = 0; i < _sections.Length; i++)
             {
                 Section section = _sections[i];
+                if (section.Held)
+                {
+                    shot.Trees[i] = section.Base;
+                    shot.Attachments[i] = section.Attachments;
+                    if (section.Known.Section is ISaveSectionKinds held)
+                    {
+                        shot.Kinds ??= new Dictionary<string, int>(StringComparer.Ordinal);
+                        held.Collect(section.Base, shot.Kinds);
+                    }
+
+                    continue;
+                }
+
                 var attachments = new SaveAttachments();
                 SaveWriter w = SaveWriter.Over(section.Base, attachments);
                 try
@@ -578,6 +596,12 @@ namespace Rubickanov.Save.World
                 {
                     Section section = _sections[i];
                     string id = section.Known.Id;
+                    if (section.Held)
+                    {
+                        // The manifest's base names its file as read, version and attachments too.
+                        continue;
+                    }
+
                     string text = section.Known.Format.Write(shot.Trees[i], build, errors.Add);
                     FileRef file;
                     Verified verified;
@@ -734,6 +758,9 @@ namespace Rubickanov.Save.World
             public Verified Verified;
             public readonly Dictionary<string, FileRef> AttachmentFiles = new(StringComparer.Ordinal);
             public int AttachmentsGeneration;
+
+            /// <summary>Its restore threw: every generation this world writes names the file it was read from.</summary>
+            public bool Held;
 
             public void Loaded(ReadSection read)
             {

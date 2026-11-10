@@ -120,7 +120,7 @@ Decoding belongs to the store because each platform has its own way off the main
 
 ### Small Documents
 
-`SaveDocument` keeps one text document — settings, progress, rebinds — over a store. Reads and writes take turns, the read first; a write takes its text when its turn comes, so the newest state is what lands.
+`SaveDocument` keeps one text document — settings, progress, rebinds — over a store. Reads and writes take turns, the read first; a write takes its text when its turn comes, so the newest state is what lands. A read the store fails (not "there is none") sets `ReadFailed`, and writes do nothing until a read succeeds, so a file that is there is never replaced by defaults made without it.
 
 ```csharp
 public sealed class CrewSettings
@@ -302,6 +302,7 @@ Saves/3f9a2c71/
 
 - **Commit by generation.** A save writes new files `<section>.<N>.json` (unchanged text names the old file), then `manifest.<N>.json` last: before that write generation N does not exist, so a crash leaves N-1 whole. N is one more than the highest number in any file of the slot, so a number is never reused.
 - **Fallback.** A load takes the newest manifest that reads and whose every file has its length and CRC-32, whose known sections parse and migrate and pass their `ISaveSectionCheck`; a broken one is copied to `*.broken.json`, told in `SaveReport.Notes` and the log, and the previous generation loads. A store failure while reading is an error, not a broken file.
+- **A restore that throws.** The load goes on, the section is named in `SaveReport.Unrestored` (and `Notes`, and the log), and every save of that world names its file as read instead of capturing it, so the next load that restores it gets what was there.
 - **Newer is refused.** A manifest, a known section or a known kind newer than the build refuses the whole slot: no restore, and saves, `RenameAsync` and `DeleteAsync` leave every byte as it was. Unknown sections and unknown fields are kept.
 - **Sweep.** After a commit the 3 newest whole manifests stay; older ones and those a load found broken go, then every file no kept manifest names. Copies of broken files stay.
 - **Saves in flight.** One write per slot at a time (renames queue behind it); a save asked meanwhile is captured at once and waits, a newer one replaces it.
