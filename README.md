@@ -82,7 +82,7 @@ git commit && git push                    # 3. here
 | Package | Version | What |
 |---|---|---|
 | `audio` | 3.4.2 | Audio service: SFX pooling, music, mixer volume, 3D sound kinds, propagation delay, loudness, output true-peak limiter, mixer kit |
-| `character` | 5.1.0 | Character body: KCC motor, Animancer animator, ragdoll and get-up, feet/head/seat IK (the game provides KCC and Animancer; not in `unity-project-pckgs`) |
+| `character` | 5.2.0 | Character body: KCC motor, Animancer animator, ragdoll and get-up, feet/head/seat IK (the game provides KCC and Animancer; not in `unity-project-pckgs`) |
 | `devconsole` | 5.1.0 | In-game dev console |
 | `eqs` | 2.0.0 | Environment Query System |
 | `input` | 1.2.0 | Input System helpers each game needs |

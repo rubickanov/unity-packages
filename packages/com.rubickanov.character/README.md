@@ -199,6 +199,10 @@ newer): its asmdef turns `versionDefines` on that package into `RUBICKANOV_CHARA
 on its own step whenever a jump, landing, knockdown, get-up, sitting down or standing up, going in or out of the water
 or a part asks for it (unreliable RPC to everyone else); such a send leaves the tick schedule as it was. Other machines play the snapshots back `InterpolationDelay`
 behind (`Remote`, a `RemoteCharacterMotion` that drives the animator) and fire the events when playback reaches them.
+Playback is a clock aimed at the newest snapshot less the delay (`Remote.Lead` is how far that snapshot is ahead of it):
+near the aim it drifts back at most 10 % faster or slower, past half a delay behind it catches up up to 50 % faster, and
+past 0.25 s behind (or 0.5 s ahead) it jumps, so a replica that fell behind in a hitch shows a fall on time again within
+about half a second.
 While the ragdoll is the body, its bones go too (`RagdollSnapshot`, 72 B per step, played by `RemoteRagdoll` on the same
 clock, or a ragdoll frame's, below). `Knockdown(impulse, point)` works on any machine: a non-owner sends it to the owner (reliable). `Knockdown(impulse, point, striker)` names the striker's `NetworkObjectId`: the machine that simulates the fall raises `KnockedBy(striker)` there, so a game can let the fall pass through the striker's replica, which shows the hit up to a round trip later. Ownership of a
 character is fixed: neither spawn order nor despawn handles an owner change.
