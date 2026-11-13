@@ -29,6 +29,18 @@ namespace Rubickanov.Characters
         HandShape LeftHandShape => HandShape.Fist;
         HandShape RightHandShape => HandShape.Fist;
 
+        /// <summary>
+        /// The share of the look's turn the spine takes here, 0..1: a body lying back on the seat turns its neck and
+        /// head to look about, not its chest, which would roll on the seat and drag the shoulders off the hand holds.
+        /// </summary>
+        float SpineLook => 1f;
+
+        /// <summary>
+        /// Where the elbows of hands on holds point, in the chest's frame (x out to the arm's side, y up the spine,
+        /// z ahead of the chest), the same on either arm. Zero: where the pose points them.
+        /// </summary>
+        Vector3 ElbowHint => Vector3.zero;
+
         /// <summary>The rider's hands are free to work while seated, such as throwing snowballs or digging.</summary>
         bool HandsFree { get; }
 

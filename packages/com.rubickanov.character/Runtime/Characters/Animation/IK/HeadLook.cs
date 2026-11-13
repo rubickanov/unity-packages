@@ -78,10 +78,11 @@ namespace Rubickanov.Characters
         /// Aim is the look direction in the character's space, pitch included. Zero looks ahead.
         /// ModelTurn is how far the model turned in place since the last call, in degrees positive to the right.
         /// Stride is how far the hips face off the look onto the walk, degrees positive to the right: the spine takes
-        /// <see cref="CharacterRigConfig.StrideTwist"/> of it back.
+        /// <see cref="CharacterRigConfig.StrideTwist"/> of it back. Spine scales the spine bones' shares of the look
+        /// (<see cref="ICharacterMount.SpineLook"/>); the neck and head aim the rest.
         /// </summary>
         public void Apply(CharacterRigConfig config, Vector3 aim, float modelTurn, float weight, float deltaTime,
-            float stride = 0f)
+            float stride = 0f, float spine = 1f)
         {
             if (Mathf.Abs(modelTurn) <= MaxModelTurnPerFrame)
             {
@@ -120,8 +121,10 @@ namespace Rubickanov.Characters
                 var spring = new SpringSettings(
                     Mathf.Lerp(config.SpineSpring.Frequency, config.HeadSpring.Frequency, bone.Height),
                     Mathf.Lerp(config.SpineSpring.Damping, config.HeadSpring.Damping, bone.Height));
-                float yaw = bone.Yaw.Step(angles.Yaw * share.Yaw, spring, deltaTime) * weight;
-                float pitch = bone.Pitch.Step(angles.Pitch * share.Pitch, spring, deltaTime) * weight;
+                // The spine's own share scaled by Spine; the aiming bones take what it leaves.
+                float scale = share.Aims ? 1f : spine;
+                float yaw = bone.Yaw.Step(angles.Yaw * share.Yaw * scale, spring, deltaTime) * weight;
+                float pitch = bone.Pitch.Step(angles.Pitch * share.Pitch * scale, spring, deltaTime) * weight;
                 if (share.Aims && _head != null)
                 {
                     aimingYaw += share.Yaw;

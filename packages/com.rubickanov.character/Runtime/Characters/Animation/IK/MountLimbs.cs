@@ -66,6 +66,8 @@ namespace Rubickanov.Characters
         private readonly Palm _rightPalm;
         private readonly Limb _leftFoot;
         private readonly Limb _rightFoot;
+        // The chest's frame for a seat's elbow hint: up from the hips to the neck, across the shoulders.
+        private readonly Transform _hips, _neck;
         // 0 when the character has just sat down, 1 once the limbs are on the holds.
         private float _reach;
         // The last bend and twist each wrist was asked for.
@@ -93,6 +95,8 @@ namespace Rubickanov.Characters
                 HumanBodyBones.LeftFoot);
             _rightFoot = Create(animator, HumanBodyBones.RightUpperLeg, HumanBodyBones.RightLowerLeg,
                 HumanBodyBones.RightFoot);
+            _hips = animator.GetBoneTransform(HumanBodyBones.Hips);
+            _neck = animator.GetBoneTransform(HumanBodyBones.Neck) ?? animator.GetBoneTransform(HumanBodyBones.Head);
         }
 
         /// <summary>Lets go of the holds: the next seat is reached for from the clip's pose.</summary>
@@ -123,15 +127,18 @@ namespace Rubickanov.Characters
 
             Reach(_leftFoot, mount.LeftFoot, weight);
             Reach(_rightFoot, mount.RightFoot, weight);
+            Vector3 elbows = mount.ElbowHint;
+            Vector3? leftHint = ElbowPoint(false, mount.LeftHand, elbows);
+            Vector3? rightHint = ElbowPoint(true, mount.RightHand, elbows);
             if (config.MountGrip == MountGrip.Wrist)
             {
-                Reach(_leftHand, mount.LeftHand, weight);
-                Reach(_rightHand, mount.RightHand, weight);
+                Reach(_leftHand, mount.LeftHand, leftHint, weight);
+                Reach(_rightHand, mount.RightHand, rightHint, weight);
                 return;
             }
 
-            GripHand(false, mount.LeftHand, config.MountPalmDepth, weight);
-            GripHand(true, mount.RightHand, config.MountPalmDepth, weight);
+            GripHand(false, mount.LeftHand, config.MountPalmDepth, weight, leftHint);
+            GripHand(true, mount.RightHand, config.MountPalmDepth, weight, rightHint);
             if (mount.LeftHand != null)
             {
                 ShapeFingers(false, config.Shape(mount.LeftHandShape), weight);
@@ -487,6 +494,48 @@ namespace Rubickanov.Characters
             }
 
             Reach(limb, target.position, weight);
+        }
+
+        private static void Reach(Limb limb, Transform target, Vector3? hint, float weight)
+        {
+            if (limb == null || target == null || weight <= 0f)
+            {
+                return;
+            }
+
+            if (hint.HasValue)
+            {
+                TwoBoneIK.Solve(limb.Upper, limb.Middle, limb.End, target.position, hint.Value, weight);
+            }
+            else
+            {
+                Reach(limb, target.position, weight);
+            }
+        }
+
+        // A point the elbow of a hand on target bends toward: off the middle of the reach from the shoulder, along hint
+        // in the chest's frame as the bones have it now (x out to the arm's side, y up the spine, z ahead). Null for no
+        // hint, no target or a chest without its frame: the pose bends the elbow then.
+        private Vector3? ElbowPoint(bool right, Transform target, Vector3 hint)
+        {
+            Limb limb = right ? _rightHand : _leftHand;
+            if (hint == Vector3.zero || target == null || limb == null || _leftHand == null || _rightHand == null
+                || _hips == null || _neck == null)
+            {
+                return null;
+            }
+
+            Vector3 across = _rightHand.Upper.position - _leftHand.Upper.position;
+            Vector3 up = Vector3.ProjectOnPlane(_neck.position - _hips.position, across);
+            if (across.sqrMagnitude < 1e-8f || up.sqrMagnitude < 1e-8f)
+            {
+                return null;
+            }
+
+            across.Normalize();
+            up.Normalize();
+            Vector3 toward = across * (right ? hint.x : -hint.x) + up * hint.y + Vector3.Cross(across, up) * hint.z;
+            return Vector3.Lerp(limb.Upper.position, target.position, 0.5f) + toward.normalized * 0.5f;
         }
 
         private static void Reach(Limb limb, Vector3 target, Vector3? hint)
