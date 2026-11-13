@@ -286,7 +286,8 @@ namespace Rubickanov.Characters
                 float stride = Animator.StrideTurn;
                 float strideTurn = Mathf.DeltaAngle(_lastStride, stride);
                 _lastStride = stride;
-                _look.Apply(Config, aim, motion.FacesLook ? strideTurn : modelTurn, Weight, deltaTime, stride);
+                _look.Apply(Config, aim, motion.FacesLook ? strideTurn : modelTurn, Weight, deltaTime, stride,
+                    mounted ? Mathf.Clamp01(mount.SpineLook) : 1f);
             }
 
             if (mounted)
