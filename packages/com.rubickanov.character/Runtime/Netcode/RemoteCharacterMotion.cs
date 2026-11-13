@@ -12,10 +12,18 @@ namespace Rubickanov.Characters.Netcode
     /// </summary>
     public sealed class RemoteCharacterMotion : ICharacterMotionSource
     {
-        // Playback runs this much faster or slower at most to drift back to the target delay.
-        private const float MaxClockCorrection = 0.1f;
-        // Further off than this, playback jumps to the target instead, e.g. after a hitch.
-        private const double MaxClockError = 0.5;
+        // Playback is a snapshot-interpolation clock aimed at the newest snapshot less the delay. Near the aim it
+        // drifts back at most this much faster or slower, which a walk does not show.
+        private const float MaxDrift = 0.1f;
+        // Behind by more than half the delay (the buffer holds over 1.5 delays) it catches up faster: this much more
+        // speed per second of error past that, up to MaxCatchUp. A body shown late would show a fall late too.
+        private const float CatchUpGain = 4f;
+        private const float MaxCatchUp = 0.5f;
+        // Further behind than this playback jumps to the aim, e.g. after a hitch; ahead (a stalled stream) MaxAhead.
+        private const double MaxBehind = 0.25;
+        private const double MaxAhead = 0.5;
+        // The error is smoothed over this long, s, so the snapshots' spacing does not wobble the rate.
+        private const float ErrorSmoothing = 0.1f;
 
         public CharacterMotion Motion { get; private set; }
 
@@ -37,6 +45,10 @@ namespace Rubickanov.Characters.Netcode
         /// <summary>The owner's time the character is shown at.</summary>
         public double Playback => _playback;
 
+        /// <summary>How far the newest snapshot is ahead of <see cref="Playback"/>, s: the interpolation delay when
+        /// the clock is on target.</summary>
+        public double Lead => _buffer.Count > 0 && _started ? _buffer[^1].Time - _playback : 0.0;
+
         /// <summary>The space the shown pose is in (a frame part's, e.g. a deck), or null for the world.</summary>
         public ICharacterSpace Space { get; private set; }
 
@@ -56,6 +68,7 @@ namespace Rubickanov.Characters.Netcode
         // Sorted by time. The first entry is at or before playback once it has started.
         private readonly List<CharacterNetSnapshot> _buffer = new();
         private double _playback;
+        private float _error;
         private bool _started;
         private int _applied = -1;
         private bool _grounded;
@@ -218,19 +231,35 @@ namespace Rubickanov.Characters.Netcode
             MotionUpdated?.Invoke(Motion);
         }
 
-        // Playback follows the newest snapshot at a fixed delay, speeding up or slowing down slightly
-        // rather than jumping, so the pose stays smooth while network jitter is absorbed.
+        // Playback follows the newest snapshot at a fixed delay, its rate set from how far it trails that aim, so the
+        // pose stays smooth while network jitter is absorbed and a replica that fell behind does not stay behind.
         private void AdvanceClock(float deltaTime)
         {
             double target = _buffer[^1].Time - _delay;
-            if (!_started || Math.Abs(target - _playback) > MaxClockError)
+            double error = target - _playback;
+            if (!_started || error > MaxBehind || error < -MaxAhead)
             {
                 _playback = target;
+                _error = 0f;
                 _started = true;
                 return;
             }
-            float correction = Mathf.Clamp((float)(target - _playback), -MaxClockCorrection, MaxClockCorrection);
-            _playback += deltaTime * (1f + correction);
+
+            _error += ((float)error - _error) * Mathf.Clamp01(deltaTime / ErrorSmoothing);
+            _playback += deltaTime * Rate(_error, _delay);
+        }
+
+        /// <summary>How fast playback runs, 1 being the owner's pace, when it trails its aim by
+        /// <paramref name="error"/> s (ahead of it below zero) with an interpolation delay of <paramref name="delay"/>.</summary>
+        private static float Rate(float error, float delay)
+        {
+            float band = delay * 0.5f;
+            if (error <= band)
+            {
+                return 1f + Mathf.Clamp(error, -MaxDrift, MaxDrift);
+            }
+
+            return 1f + Mathf.Min(Mathf.Min(band, MaxDrift) + (error - band) * CatchUpGain, MaxCatchUp);
         }
 
         // Replays knockdowns and get-ups among the snapshots ApplyEvents is about to reach. A get-up counts only
