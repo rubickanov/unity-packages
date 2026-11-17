@@ -77,3 +77,12 @@ ProjectSettings/Packages/com.unity.services.vivox/*
 **/bin/
 **/bin~/
 **/obj~/
+
+# NuGet restore output of the test project: NuGetForUnity (Assets/packages.config) and Unity-MCP bring it back on load.
+unity-project-pckgs/Assets/Packages/
+unity-project-pckgs/Assets/Packages.meta
+unity-project-pckgs/Assets/Plugins/NuGet/
+unity-project-pckgs/Assets/Plugins/NuGet.meta
+
+# Code coverage reports.
+**/CodeCoverage/
