@@ -28,12 +28,6 @@
         "com.unity.inputsystem": "1.7.0"
       }
     },
-    "com.rubickanov.eqs": {
-      "version": "file:../../packages/com.rubickanov.eqs",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {}
-    },
     "com.rubickanov.input": {
       "version": "file:../../packages/com.rubickanov.input",
       "depth": 0,
