@@ -289,17 +289,19 @@ Binaural.Stop();                // every kind panned now, playing sources too; S
 
 Scopes nest: HRTF stays while any `Begin` scope lives. Steam Audio is loaded once per process and kept through `Stop` (the audio thread may still be inside the spatializer of a source just switched; releasing the HRTF under it would crash), so `Start` after `Stop` only switches the sources back. An editor domain reload loses the managed state but not the plugin's: the next `Start` terminates the context the old domain left before making its own. A playing source switches with the kind: on `Stop` or `On = false` it goes on to Unity's panner with its head shadow, never silent; a binaural kind that never started stays panned.
 
-The source runs the spatializer after its filters (`spatializePostEffects`), so the air low-pass and a voice chat that makes its sound in `OnAudioFilterRead` over a flat clip are both placed. Measured in a Linux player at 3 m to the right: the near ear 13.8 dB louder (9 dB at 1–4 kHz, 27–31 dB above 4 kHz) and 690 µs earlier, against 9.8 dB flat and no delay from Unity's panner; a source made in `OnAudioFilterRead` the same (15 dB, 600 µs). Cost: 40 binaural sources ≈ 5 % of one core on the audio thread over 40 panned (9.4 % against 4.4 %), nothing on the main thread; HRTF adds ~6 ms of latency.
+The source runs the spatializer after its filters (`spatializePostEffects`), so the air low-pass and a voice chat that makes its sound in `OnAudioFilterRead` over a flat clip are both placed. Measured in a Linux player at 3 m to the right: the near ear 13.8 dB louder (9 dB at 1–4 kHz, 27–31 dB above 4 kHz) and 690 µs earlier, against 9.8 dB flat and no delay from Unity's panner; a source made in `OnAudioFilterRead` the same (15 dB, 600 µs). Cost: 40 binaural sources ≈ 5 % of one core on the audio thread over 40 panned (9.4 % against 4.4 %), nothing on the main thread; HRTF adds ~6 ms of latency. In a game's gunfight (16 armed bots, 12 guests, fires; about 30 of 35–40 real voices on HRTF) the audio thread took 6.8–7.3 % of a core with HRTF and 2.7–3.4 % without, so no cap on the number of binaural sources.
 
-Level, HRTF on minus panned, both ears' energy summed (white-noise bursts, a kind with spread 100°→90°, head shadow 1; Linux player, `HrtfVolume` 1.07, no HRTF normalisation; captured at the listener with the output limiter and the mixer's limiter off, since a near ear peaks over the ceiling):
+Level, HRTF on minus panned, both ears' energy summed (white-noise bursts, a kind with spread 100°→90°, head shadow 1; Linux player, `HrtfVolume` 1.46, no HRTF normalisation; captured at the listener with the output limiter and the mixer's limiter off, since a near ear peaks over the ceiling; after a panned 3D sound has played, see below):
 
 | | ahead | right | behind | left | up 60° |
 |---|---|---|---|---|---|
-| 1 m | −0.3 | +0.1 | +0.4 | −1.2 | −2.4 |
-| 3 m | +0.2 | 0.0 | +2.1 | +1.2 | −1.8 |
-| 10 m | −0.9 | −0.2 | +3.0 | +0.9 | −0.2 |
+| 1 m | −0.8 | −0.3 | +1.2 | +0.3 | −2.7 |
+| 3 m | −0.1 | +0.3 | +1.8 | −1.1 | −2.0 |
+| 10 m | −1.3 | +1.1 | +2.4 | +1.5 | −0.7 |
 
-The mean over the 15 is +0.1 dB, ahead and to the sides 0.0 dB (+0.4 dB at volume 1.12, −0.5 dB at 1.0). What is left is the HRTF's own direction: behind, the panned source has the head shadow (−1.25 dB and an octave duller), the HRTF a brighter back; up and the sides follow the default HRTF's ears, which are not symmetric. Steam's RMS normalisation of the HRTF was measured too and was further off (−1.6 to −4.2 dB at the sides).
+The mean over the 15 is 0.0 dB, ahead and to the sides 0.0 dB. Other kinds ahead and to the sides at 1, 3 and 10 m, mean (range): spread 90° −0.1 (−1.2..+0.9), 90°→70° −0.1 (−1.2..+1.1), 90°→60° −0.3 (−1.6..+0.9), 120°→60° −0.2 (−2.2..+2.0), external level 0.0 (−1.4..+0.9).
+
+Steam's spatializer (or Unity's voice under it) is ~2.7 dB louder in a process that has not yet played any panned 3D source; the first one moves it for good (measured: one panned noise is enough, and the state stays through `On` switches). A game always has panned 3D sounds, so the volume is calibrated after one; a probe that measures levels plays a panned sound first. (The earlier 1.07 had been calibrated in the fresh state.) What is left is the HRTF's own direction: behind, the panned source has the head shadow (−1.25 dB and an octave duller), the HRTF a brighter back; up and the sides follow the default HRTF's ears, which are not symmetric. Steam's RMS normalisation of the HRTF was measured too and was further off (−1.6 to −4.2 dB at the sides).
 
 Steam Audio's native libraries only load in a player or an editor with audio: a batch-mode editor has no audio, so `Binaural` stays off there.
 
@@ -483,7 +485,7 @@ foreach (var (param, volume) in settings.Volumes)
 - **Cues are assets, picked by the service** — a sound with its variants and settings in one asset means a new clip or a new sound is data, not code. Unity's `AudioRandomContainer` cannot be read or indexed from code (internal type), so the list is the package's own: an explicit index for picks that must match on every machine, visible to consoles, testable.
 - **One priority scale** — 0..100 for cues and own sources, mapped both to the pool's eviction and to Unity's voices, so a horn and a shot are ranked the same way everywhere; the old API ranks at `Default` + its priority in the same order.
 - **Loops by handle on the slot machinery** — a cue loop is a slot under a private key built once, so fades, following and lost targets are the same code; per-frame `SetVolume` by handle allocates nothing.
-- **3.5.1 fixes level** — a binaural source was 0.3–2 dB louder than panned (the spread compensation applied to a source with no spread); now matched on average, and `Begin` scopes nest.
+- **3.5.1 fixes level** — a binaural source was 0.3–2 dB louder than panned (the spread compensation applied to a source with no spread); now matched on average after the first panned 3D sound (`HrtfVolume` 1.46), and `Begin` scopes nest.
 - **3.5.0 is additive** — `Binaural` is off until a game starts it, and `SoundKind.Binaural` is false by default: nothing changes for a game that does neither.
 - **3.4.0 is additive** — the old API (`SoundConfig`, `PlaySFX*`, string loop slots) behaves as before except the pool rank of a `SoundConfig`, now `Default` + `Priority` (the same order among old sounds).
 - **3.2.0 is additive** — `IAudioService` is unchanged; nothing to migrate. Sounds without a kind and services without a space behave as in 3.1.

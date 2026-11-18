@@ -17,8 +17,9 @@ namespace Rubickanov.Audio
 
         private static readonly LogChannel Channel = LogChannel.Get("Audio");
 
-        // Steam's HRTF gain, so a binaural source sums as loud in both ears as the panned one (measured, README).
-        internal const float HrtfVolume = 1.07f;
+        // Steam's HRTF gain, so a binaural source sums as loud in both ears as the panned one once any panned 3D sound
+        // has played (before that the spatializer is ~2.7 dB louder; measured, README).
+        internal const float HrtfVolume = 1.46f;
 
         // Kept alive for the context's life: native code calls it, and a collected delegate would crash it.
         private static readonly Native.LogCallback LogKept = Log;
