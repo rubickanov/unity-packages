@@ -1135,12 +1135,16 @@ namespace Rubickanov.Audio
             source.ignoreListenerPause = setup.PlaysOnPause;
 
             var handle = SpatialHandle.Invalid;
-            if (kind == null) source.bypassReverbZones = true;
+            if (kind == null)
+            {
+                source.bypassReverbZones = true;
+                if (setup.Binaural) SoundSpace.ShapeBinaural(source);
+            }
             else if (_space != null) handle = _space.Add(source, kind, setup.Volume, setup.Spatial);
             else SoundSpace.Shape(source, kind);
 
             source.priority = SoundPriority.ToUnity(setup.Priority);
-            _adopted[source] = new Adopted(handle, kind != null);
+            _adopted[source] = new Adopted(handle, kind != null, kind == null && setup.Binaural);
             return handle;
         }
 
@@ -1150,6 +1154,7 @@ namespace Rubickanov.Audio
             if (ReferenceEquals(source, null) || !_adopted.Remove(source, out var adopted)) return;
             if (adopted.Handle.IsValid) _space?.Remove(adopted.Handle);
             if (adopted.Shaped && source != null) SoundSpace.Unshape(source);
+            if (adopted.Loose) SoundSpace.UnshapeBinaural(source);
         }
 
         public bool IsAdopted(AudioSource source) => !ReferenceEquals(source, null) && _adopted.ContainsKey(source);
@@ -1519,11 +1524,14 @@ namespace Rubickanov.Audio
         {
             public readonly SpatialHandle Handle;
             public readonly bool Shaped;
+            // A kind-less source on HRTF (SourceSetup.Binaural).
+            public readonly bool Loose;
 
-            public Adopted(SpatialHandle handle, bool shaped)
+            public Adopted(SpatialHandle handle, bool shaped, bool loose)
             {
                 Handle = handle;
                 Shaped = shaped;
+                Loose = loose;
             }
         }
     }

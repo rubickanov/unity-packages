@@ -51,6 +51,9 @@ namespace Rubickanov.Audio
         /// <summary>The kind gets HRTF now.</summary>
         public static bool Applies(SoundKind kind) => Ready && _on && kind.Binaural;
 
+        /// <summary>A kind-less source marked binaural (<see cref="SoundSpace.ShapeBinaural"/>) gets HRTF now.</summary>
+        public static bool AppliesLoose => Ready && _on;
+
         /// <summary>
         /// Loads Steam Audio with its default HRTF and hands both to its spatializer, once per process: after
         /// <see cref="Stop"/> it is reused. Safe to call again; false (and <see cref="Error"/>) when the platform or the

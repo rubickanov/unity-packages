@@ -102,6 +102,8 @@ namespace Rubickanov.Audio
         // Sources a Shape touched and their kind, for Strays and Reshape.
         private static readonly Dictionary<AudioSource, SoundKind> Shaped = new();
         private static readonly List<AudioSource> Gone = new();
+        // Kind-less sources placed by HRTF (ShapeBinaural): their own level and curves, only the spatializer switches.
+        private static readonly HashSet<AudioSource> Loose = new();
         // Filters carrying the static air curve: a ticking kind must clear it before writing the cutoff.
         private static readonly HashSet<AudioLowPassFilter> Curved = new();
         private static readonly AnimationCurve NoCurve = new();
@@ -191,6 +193,38 @@ namespace Rubickanov.Audio
                 if (pair.Key == null || pair.Value == null) Gone.Add(pair.Key!);
                 else if (pair.Value.Binaural && pair.Key.spatialize != Binaural.Applies(pair.Value)) Spatialize(pair.Key, pair.Value);
             foreach (AudioSource s in Gone) Shaped.Remove(s);
+            Gone.Clear();
+            foreach (AudioSource s in Loose)
+                if (s == null) Gone.Add(s!);
+                else if (s.spatialize != Binaural.AppliesLoose) SpatializeLoose(s);
+            foreach (AudioSource s in Gone) Loose.Remove(s);
+        }
+
+        /// <summary>
+        /// A kind-less 3D source (its own rolloff, as an engine) placed by HRTF while <see cref="Binaural"/> is up and
+        /// on, panned by Unity otherwise; nothing else of it changes.
+        /// </summary>
+        public static void ShapeBinaural(AudioSource source)
+        {
+            if (source == null) return;
+            Loose.Add(source);
+            SpatializeLoose(source);
+        }
+
+        /// <summary>Undoes <see cref="ShapeBinaural"/>: back on Unity's panner for good.</summary>
+        public static void UnshapeBinaural(AudioSource source)
+        {
+            if (!Loose.Remove(source) || source == null) return;
+            source.spatialize = false;
+            source.spatializePostEffects = false;
+        }
+
+        private static void SpatializeLoose(AudioSource source)
+        {
+            bool on = Binaural.AppliesLoose;
+            source.spatialize = on;
+            source.spatializePostEffects = on;
+            if (on) Binaural.Configure(source);
         }
 
         // HRTF takes the source after its filters, so the air low-pass and a voice chat's OnAudioFilterRead (which

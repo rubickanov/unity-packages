@@ -78,6 +78,28 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
+        public void ShapeBinaural_KindLessSource_FollowsReadyAndOn_KeepsItsCurve_UnshapeLeavesItPanned()
+        {
+            AudioSource source = Source(Vector3.right * 3f);
+            source.rolloffMode = AudioRolloffMode.Logarithmic;
+            SoundSpace.ShapeBinaural(source);
+            Assert.IsFalse(source.spatialize, "not ready");
+            Binaural.Pretend(true);
+            Assert.IsTrue(source.spatialize);
+            Assert.IsTrue(source.spatializePostEffects);
+            Binaural.On = false;
+            Assert.IsFalse(source.spatialize, "switched off");
+            Binaural.On = true;
+            Assert.IsTrue(source.spatialize, "back on");
+            SoundSpace.UnshapeBinaural(source);
+            Assert.IsFalse(source.spatialize);
+            Binaural.On = false;
+            Binaural.On = true;
+            Assert.IsFalse(source.spatialize, "forgotten");
+            Assert.AreEqual(AudioRolloffMode.Logarithmic, source.rolloffMode);
+        }
+
+        [Test]
         public void LevelBinaural_IsThePannedLoudness()
         {
             // A panned source is heard at its rolloff × Unity's spread loss; HRTF has no spread loss.

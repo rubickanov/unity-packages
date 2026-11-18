@@ -16,6 +16,8 @@ namespace Rubickanov.Audio
         /// <summary>ExternalGain for streamed voices.</summary>
         public SpatialOptions Spatial;
         public bool PlaysOnPause;
+        /// <summary>Without a kind: a 3D source on its own curve (an engine) placed by HRTF while it is on, as a binaural kind.</summary>
+        public bool Binaural;
 
         public SourceSetup(SoundKind? kind, int priority = SoundPriority.Default, float volume = 1f,
             AudioMixerGroup? output = null)
@@ -26,6 +28,7 @@ namespace Rubickanov.Audio
             Volume = volume;
             Spatial = default;
             PlaysOnPause = false;
+            Binaural = false;
         }
     }
 }
