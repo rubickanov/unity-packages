@@ -100,6 +100,36 @@ namespace Rubickanov.Audio.Tests
         }
 
         [Test]
+        public void KeepSpread_WhileOn_RaisesSpreadZeroOfSourcesWithoutSpatializer_OnlyEvery2s()
+        {
+            AudioSource panned = Source(Vector3.right * 3f), later = Source(Vector3.left * 3f);
+            panned.spread = 0f;
+            Binaural.KeepSpread(10f);
+            Assert.AreEqual(0f, panned.spread, "not ready: left alone");
+            Binaural.Pretend(true);
+            Binaural.KeepSpread(10f);
+            Assert.AreEqual(SoundMath.MinSpread, panned.spread, 1e-6f);
+            later.spread = 0f;
+            Binaural.KeepSpread(11f);
+            Assert.AreEqual(0f, later.spread, "within the 2 s");
+            Binaural.KeepSpread(12.1f);
+            Assert.AreEqual(SoundMath.MinSpread, later.spread, 1e-6f);
+        }
+
+        [Test]
+        public void SpreadCurve_NeverZero_UnshapeLeavesTheMinimum()
+        {
+            SoundKind kind = SoundKind.Create(spreadNear: 0f, spreadFar: 0f);
+            _made.Add(kind);
+            AudioSource source = Source(Vector3.forward * 3f);
+            SoundSpace.Shape(source, kind);
+            AnimationCurve spread = source.GetCustomCurve(AudioSourceCurveType.Spread);
+            Assert.AreEqual(SoundMath.MinSpread / 360f, spread.Evaluate(0.5f), 1e-6f);
+            SoundSpace.Unshape(source);
+            Assert.AreEqual(SoundMath.MinSpread, source.spread, 1e-6f);
+        }
+
+        [Test]
         public void LevelBinaural_IsThePannedLoudness()
         {
             // A panned source is heard at its rolloff × Unity's spread loss; HRTF has no spread loss.

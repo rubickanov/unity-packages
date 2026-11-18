@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using AOT;
 using Rubickanov.Log;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace Rubickanov.Audio
 {
@@ -50,6 +51,41 @@ namespace Rubickanov.Audio
 
         /// <summary>The kind gets HRTF now.</summary>
         public static bool Applies(SoundKind kind) => Ready && _on && kind.Binaural;
+
+        /// <summary>Sources without the spatializer whose spread 0 was raised by <see cref="KeepSpread"/> (consoles).</summary>
+        public static int SpreadRaised { get; private set; }
+
+        private const float SpreadSweepEvery = 2f;
+        private const float AnchorEvery = 0.5f;
+        private static float _nextSweep;
+        private static float _nextAnchor;
+        private static AudioSource? _anchor;
+
+        /// <summary>
+        /// While HRTF is on, every 2 s: a playing scene's sources without the spatializer get at least
+        /// <see cref="SoundMath.MinSpread"/>, those the game or a plugin left at 0 (see MinSpread: one of them would put
+        /// every HRTF sound 3 dB up until another sound plays). The first few are logged, to fix at their source.
+        /// </summary>
+        internal static void KeepSpread(float now)
+        {
+            if (!Ready || !_on) return;
+            if (now >= _nextAnchor)
+            {
+                // The state follows the last voice started without the spatializer: a sound of ours a plugin's
+                // spread-0 one cannot outlast for more than this.
+                _nextAnchor = now + AnchorEvery;
+                Anchor()?.Play();
+            }
+
+            if (now < _nextSweep) return;
+            _nextSweep = now + SpreadSweepEvery;
+            foreach (AudioSource s in Object.FindObjectsByType<AudioSource>(FindObjectsInactive.Exclude))
+            {
+                if (s.spatialize || s.spread >= SoundMath.MinSpread) continue;
+                s.spread = SoundMath.MinSpread;
+                if (++SpreadRaised <= 20) Channel.Info($"spread 0 raised to {SoundMath.MinSpread} on {s.name}");
+            }
+        }
 
         /// <summary>A kind-less source marked binaural (<see cref="SoundSpace.ShapeBinaural"/>) gets HRTF now.</summary>
         public static bool AppliesLoose => Ready && _on;
@@ -137,6 +173,23 @@ namespace Rubickanov.Audio
             source.SetSpatializerFloat(Native.DirectBinaural, 1f);
         }
 
+        // A silent 2D voice at the least spread, restarted by KeepSpread. Never in tests or edit mode.
+        private static AudioSource? Anchor()
+        {
+            if (_anchor != null || !Application.isPlaying) return _anchor;
+            var go = new GameObject("[Binaural spread anchor]") { hideFlags = HideFlags.HideAndDontSave };
+            Object.DontDestroyOnLoad(go);
+            _anchor = go.AddComponent<AudioSource>();
+            _anchor.clip = AudioClip.Create("silence", 256, 1, Mathf.Max(8000, AudioSettings.outputSampleRate), false);
+            _anchor.spatialBlend = 0f;
+            _anchor.spread = SoundMath.MinSpread;
+            _anchor.priority = 0;
+            _anchor.playOnAwake = false;
+            _anchor.ignoreListenerPause = true;
+            _anchor.bypassReverbZones = true;
+            return _anchor;
+        }
+
         private sealed class Scope : IDisposable
         {
             private bool _done;
@@ -161,6 +214,8 @@ namespace Rubickanov.Audio
         // Tests: Ready without the native plugin (a batch editor has no audio).
         internal static void Pretend(bool ready)
         {
+            _nextSweep = 0f;
+            _nextAnchor = 0f;
             Ready = ready;
             SoundSpace.Reshape();
         }

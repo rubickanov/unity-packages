@@ -42,6 +42,13 @@ namespace Rubickanov.Audio
             return Mathf.Clamp(kHz * 1000f, MinCutoff, MaxCutoff);
         }
 
+        /// <summary>
+        /// The least spread a source without the spatializer ever has, degrees: Unity feeds every spatializer 3.01 dB
+        /// hotter while the last voice it mixed without one (2D or 3D) had spread exactly 0, so a game's HRTF level would
+        /// follow whichever sound played last. 0.1° sounds as 0.
+        /// </summary>
+        public const float MinSpread = 0.1f;
+
         /// <summary>Spread in degrees: SpreadNear up to Reference, SpreadFar from SpreadFarAt, blended on log distance.</summary>
         public static float Spread(float d, SoundKind kind) =>
             Spread(d, kind.Reference, kind.SpreadNear, kind.SpreadFar, kind.SpreadFarAt);

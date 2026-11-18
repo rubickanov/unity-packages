@@ -27,7 +27,7 @@ namespace Rubickanov.Audio
             if (kind.Binaural)
                 RolloffBinaural = SoundMath.Curve(d => SoundMath.LevelBinaural(d, kind), max, 32, reference,
                     start, start + 0.25f * w, start + 0.5f * w, start + 0.75f * w);
-            Spread = SoundMath.Curve(d => SoundMath.Spread(d, kind) / 360f, max, 16, reference, kind.SpreadFarAt);
+            Spread = SoundMath.Curve(d => Mathf.Max(SoundMath.MinSpread, SoundMath.Spread(d, kind)) / 360f, max, 16, reference, kind.SpreadFarAt);
             float cap = kind.ReverbAtReference > 0f ? reference * kind.ReverbMax / kind.ReverbAtReference : max;
             Reverb = SoundMath.Curve(d => SoundMath.ReverbSend(d, kind), max, 16, reference, cap);
             float air = Mathf.Max(kind.Air, 1e-6f);

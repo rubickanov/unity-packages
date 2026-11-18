@@ -204,6 +204,7 @@ namespace Rubickanov.Audio
             source.loop = true;
             source.playOnAwake = false;
             source.spatialBlend = 0f;
+            source.spread = SoundMath.MinSpread;
             source.volume = 0f;
             source.bypassReverbZones = true;
             if (_musicGroup != null) source.outputAudioMixerGroup = _musicGroup;
@@ -218,6 +219,7 @@ namespace Rubickanov.Audio
             source.playOnAwake = false;
             source.loop = false;
             if (_sfxGroup != null) source.outputAudioMixerGroup = _sfxGroup;
+            source.spread = SoundMath.MinSpread;
             Apply3DSettings(source);
             PrepareSpatial(source);
             return source;
@@ -1002,6 +1004,7 @@ namespace Rubickanov.Audio
             source.playOnAwake = false;
             source.loop = true;
             if (_sfxGroup != null) source.outputAudioMixerGroup = _sfxGroup;
+            source.spread = SoundMath.MinSpread;
             Apply3DSettings(source);
             PrepareSpatial(source);
             return source;
@@ -1143,6 +1146,7 @@ namespace Rubickanov.Audio
             else if (_space != null) handle = _space.Add(source, kind, setup.Volume, setup.Spatial);
             else SoundSpace.Shape(source, kind);
 
+            if (source.spread < SoundMath.MinSpread) source.spread = SoundMath.MinSpread;
             source.priority = SoundPriority.ToUnity(setup.Priority);
             _adopted[source] = new Adopted(handle, kind != null, kind == null && setup.Binaural);
             return handle;

@@ -250,7 +250,7 @@ namespace Rubickanov.Audio
             source.spatialize = false;
             source.spatializePostEffects = false;
             source.rolloffMode = AudioRolloffMode.Logarithmic;
-            source.spread = 0f;
+            source.spread = SoundMath.MinSpread;
             source.reverbZoneMix = 1f;
             source.bypassReverbZones = true;
             source.priority = 128;
@@ -366,6 +366,7 @@ namespace Rubickanov.Audio
 
         public void Tick(float deltaTime)
         {
+            Binaural.KeepSpread(Time.realtimeSinceStartup);
             Transform? ears = ResolveListener();
             if (ears == null || _count == 0) return;
             Vector3 at = ears.position, forward = ears.forward;
