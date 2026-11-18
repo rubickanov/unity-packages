@@ -291,15 +291,15 @@ Scopes nest: HRTF stays while any `Begin` scope lives. Steam Audio is loaded onc
 
 The source runs the spatializer after its filters (`spatializePostEffects`), so the air low-pass and a voice chat that makes its sound in `OnAudioFilterRead` over a flat clip are both placed. Measured in a Linux player at 3 m to the right: the near ear 13.8 dB louder (9 dB at 1–4 kHz, 27–31 dB above 4 kHz) and 690 µs earlier, against 9.8 dB flat and no delay from Unity's panner; a source made in `OnAudioFilterRead` the same (15 dB, 600 µs). Cost: 40 binaural sources ≈ 5 % of one core on the audio thread over 40 panned (9.4 % against 4.4 %), nothing on the main thread; HRTF adds ~6 ms of latency.
 
-Level, HRTF on minus panned, both ears' energy summed (white-noise bursts, a kind with spread 100°→90°, head shadow 1; Linux player, `HrtfVolume` 1.12, no HRTF normalisation):
+Level, HRTF on minus panned, both ears' energy summed (white-noise bursts, a kind with spread 100°→90°, head shadow 1; Linux player, `HrtfVolume` 1.07, no HRTF normalisation; captured at the listener with the output limiter and the mixer's limiter off, since a near ear peaks over the ceiling):
 
 | | ahead | right | behind | left | up 60° |
 |---|---|---|---|---|---|
-| 1 m | 0.0 | −1.4 | +0.8 | −2.8 | −2.0 |
-| 3 m | +0.6 | −0.1 | +2.5 | +0.8 | −1.4 |
-| 10 m | −0.8 | −0.1 | +3.0 | +1.5 | −0.2 |
+| 1 m | −0.3 | +0.1 | +0.4 | −1.2 | −2.4 |
+| 3 m | +0.2 | 0.0 | +2.1 | +1.2 | −1.8 |
+| 10 m | −0.9 | −0.2 | +3.0 | +0.9 | −0.2 |
 
-The mean over the 15 is 0.0 dB (1.0 dB quieter at volume 1, hence 1.12). What is left is the HRTF's own direction: behind, the panned source has the head shadow (−1.25 dB and an octave duller), the HRTF a brighter back; up and the sides follow the default HRTF's ears, which are not symmetric. Steam's RMS normalisation of the HRTF was measured too and was further off (−1.6 to −4.2 dB at the sides).
+The mean over the 15 is +0.1 dB, ahead and to the sides 0.0 dB (+0.4 dB at volume 1.12, −0.5 dB at 1.0). What is left is the HRTF's own direction: behind, the panned source has the head shadow (−1.25 dB and an octave duller), the HRTF a brighter back; up and the sides follow the default HRTF's ears, which are not symmetric. Steam's RMS normalisation of the HRTF was measured too and was further off (−1.6 to −4.2 dB at the sides).
 
 Steam Audio's native libraries only load in a player or an editor with audio: a batch-mode editor has no audio, so `Binaural` stays off there.
 
