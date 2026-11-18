@@ -1,6 +1,6 @@
 # Audio
 
-Audio service with sound cues (one asset per sound: variants picked without repeat or by index, volume and pitch jitter, group, kind, priority, limits), SFX source pooling (priority eviction on one 0..100 scale, per-sound repeat limits), loops owned by handles, loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, sounds that play through a paused listener, mixer snapshots, and mixer volume control; 3D sound kinds (inverse-distance level, air absorption, width by distance, outdoor reverb send, head shadow, occlusion) on Unity's own `AudioSource`, a lookahead true-peak limiter on the listener's output, a mixer layout kit for the editor, and an output capture for checks.
+Audio service with sound cues (one asset per sound: variants picked without repeat or by index, volume and pitch jitter, group, kind, priority, limits), SFX source pooling (priority eviction on one 0..100 scale, per-sound repeat limits), loops owned by handles, loop slots in 2D, at a point or attached to a transform with live volume and pitch, music crossfade, fade in/out, sounds that play through a paused listener, mixer snapshots, and mixer volume control; 3D sound kinds (inverse-distance level, air absorption, width by distance, outdoor reverb send, head shadow, occlusion) on Unity's own `AudioSource`, HRTF for chosen kinds through Steam Audio's spatializer, a lookahead true-peak limiter on the listener's output, a mixer layout kit for the editor, and an output capture for checks.
 
 ## Dependencies
 
@@ -8,6 +8,7 @@ Audio service with sound cues (one asset per sound: variants picked without repe
 
 - `UniTask` — async crossfade, fades, ramps, and source lifecycle watchers
 - `com.rubickanov.log` (assembly `Rubickanov.Log.Runtime`) — the `Audio` channel for `LogPlays`
+- Steam Audio 4.8.1 (Valve, Apache 2.0) — native libraries shipped in `Plugins/SteamAudio` (Windows x64, Linux x64), used only by `Binaural`; licence and third-party notices beside them
 
 Requires Unity 6000.0 or newer (uses `AudioResource` and `AudioSource.resource`).
 
@@ -26,6 +27,7 @@ SoundCue                 — ScriptableObject: one sound, its variants and setti
 SoundSpace               — applies SoundKinds to sources: static curves once, head shadow + occlusion per frame
 ├── SoundKind            — ScriptableObject: what a kind of 3D sound does with distance and the listener
 ├── SoundOccluder        — on an object: how much its colliders block sound (0 passes … 1 rock)
+├── Binaural             — Steam Audio's HRTF on kinds marked Binaural: direct path only, the rest stays the kind's
 └── SoundMath            — the numbers: distance law, air cutoff, spread, reverb send, back amount, curves
 
 OutputLimiter            — lookahead true-peak limiter on the active listener, after the whole mixer
@@ -264,10 +266,29 @@ What each kind sets:
 | `Air` | Low-pass where air absorption takes 3 dB: 3 m → 13.9 kHz, 10 m → 7.6 kHz, 40 m → 3.8 kHz at `Air` 4 |
 | `SpreadNear` → `SpreadFar` at `SpreadFarAt` | Width blended on log distance from `Reference`; ≤ 110° keeps a side source ≥ 6 dB louder in its ear (Unity's spread 0 is a hard pan, 180° has no direction) |
 | `ReverbAtReference`, `ReverbMax` | Reverb-zone send `min(ReverbMax, ReverbAtReference · d / Reference)` |
+| `Binaural` | HRTF round the head once `Binaural` is started (see below); width and head shadow then do not apply |
 | `HeadShadow` | Straight behind: −1.25 dB and the cutoff × 0.55, near an octave duller (`SoundSpaceSettings.ShadowDb`, `ShadowCutoff`), smoothed over 60 ms |
 | `Occlusion`, `OcclusionMask`, `OcclusionRadius` | Rays from the listener to the source and to 7 points on a half-ring of `OcclusionRadius` round it (across the line, over the top, never below); occlusion is the share blocked, so a table or a post blocks little and a rock all (round-robin, `RaysPerFrame` 16, one point per ray). A collider blocks by its `SoundOccluder.Strength` (0 passes, 1 rock), else fully. Fully occluded: −9 dB and ×0.3 cutoff, attack 0.12 s, release 0.3 s |
 
 Unity's panner loses up to 3 dB as a mono source widens (measured: −1.28 dB at 90°, −3.04 dB at 180°); the rolloff curve undoes it relative to the kind's widest spread, so width never changes loudness.
+
+### Binaural (HRTF)
+
+A kind with `Binaural` set is placed round the head by Steam Audio's HRTF once the game starts it: left and right by the time and level between the ears, front, back, up and down by the ears' spectrum. Everything else stays the kind's: the rolloff curve sets the level, the low-pass carries air and occlusion, the zone the reverb. Width (`Spread*`) and head shadow do not apply to a binaural source. Off until started, so a project without it sounds as before.
+
+1. Project Settings → Audio → Spatializer Plugin: **Steam Audio Spatializer** (a player cannot pick it at run time).
+2. Tick `Binaural` on the kinds that should have it (voices, near and important sounds; not beds or far sounds).
+3. Start it for the app's life:
+
+```csharp
+life.Own(Binaural.Begin());     // false start (no plugin, other platform) leaves every kind panned
+Binaural.On = false;            // A/B: Unity's panner and head shadow back on every binaural kind
+Binaural.Ready;                 // Steam Audio is up; Binaural.Error says why not
+```
+
+The source runs the spatializer after its filters (`spatializePostEffects`), so the air low-pass and a voice chat that makes its sound in `OnAudioFilterRead` over a flat clip are both placed. Measured in a Linux player at 3 m to the right: the near ear 13.8 dB louder (9 dB at 1–4 kHz, 27–31 dB above 4 kHz) and 690 µs earlier, against 9.8 dB flat and no delay from Unity's panner; a source made in `OnAudioFilterRead` the same (15 dB, 600 µs). Cost: 40 binaural sources ≈ 4 % of one core on the audio thread (40 panned ≈ 0 %), nothing on the main thread; HRTF adds ~6 ms of latency.
+
+Steam Audio's native libraries only load in a player or an editor with audio: a batch-mode editor has no audio, so `Binaural` stays off there.
 
 ### Own Sources in the Space
 
@@ -434,7 +455,8 @@ foreach (var (param, volume) in settings.Volumes)
 - **A paused source is busy** — the pool waits for a sound to end, and `isPlaying` is false under `AudioListener.pause`, so a paused source with a resource still counts as playing; otherwise pausing the game would cut every sound and hand its source to the next one.
 - **Real time by default** — a game with slow motion or a paused time scale expects its audio fades to keep their length; following the time scale is the opt-in.
 - **Kinds are data, the space is one loop** — a kind's curves are built once and shared; the per-frame part (head shadow, occlusion) is one array walked by `Tick`, not a `MonoBehaviour` per source. 32 ticking sources cost ~20 µs per frame on the main thread and ~0.3 ms/s per low-pass on the audio threads.
-- **No HRTF, no spatializer plugin** — front/back is a spectral cue a single native low-pass gives (head shadow); a managed per-ear filter costs 3× the native one. Left/right comes from Unity's panner with a spread that never reaches 0 (hard pan, −∞ dB in the far ear).
+- **HRTF from Steam Audio, opt-in per kind** — a managed per-ear filter costs 3× a native one, and a native spatializer of our own would be a C++ build per platform; Steam Audio's spatializer is native, free and open. Only its direct path is used: our curves already set level, air, occlusion and reverb, so the kinds keep their numbers. Kinds without `Binaural` keep the head shadow (a single native low-pass) and Unity's panner with a spread that never reaches 0 (hard pan, −∞ dB in the far ear).
+- **Thin glue instead of Steam Audio's Unity scripts** — its manager, components and scene export are for reflections and baking; a context, the default HRTF and the spatializer's parameters on the source are all the direct path needs.
 - **Rolloff, spread, reverb mix and air as custom curves** — Unity evaluates them on the audio side per source at no main-thread cost; only shadow and occlusion need per-frame writes, and only for kinds that use them.
 - **Low-pass Q 0.707** — Unity's default Q 1 bumps +1.25 dB at the cutoff; a moving cutoff on it sounds like a wah.
 - **Smoothed shadow and occlusion** — a one-pole on the back amount (60 ms) and on occlusion (attack/release) so a fast turn or a passing rock sweeps the filter instead of stepping it: no clicks, no level jumps.
@@ -446,6 +468,7 @@ foreach (var (param, volume) in settings.Volumes)
 - **Cues are assets, picked by the service** — a sound with its variants and settings in one asset means a new clip or a new sound is data, not code. Unity's `AudioRandomContainer` cannot be read or indexed from code (internal type), so the list is the package's own: an explicit index for picks that must match on every machine, visible to consoles, testable.
 - **One priority scale** — 0..100 for cues and own sources, mapped both to the pool's eviction and to Unity's voices, so a horn and a shot are ranked the same way everywhere; the old API ranks at `Default` + its priority in the same order.
 - **Loops by handle on the slot machinery** — a cue loop is a slot under a private key built once, so fades, following and lost targets are the same code; per-frame `SetVolume` by handle allocates nothing.
+- **3.5.0 is additive** — `Binaural` is off until a game starts it, and `SoundKind.Binaural` is false by default: nothing changes for a game that does neither.
 - **3.4.0 is additive** — the old API (`SoundConfig`, `PlaySFX*`, string loop slots) behaves as before except the pool rank of a `SoundConfig`, now `Default` + `Priority` (the same order among old sounds).
 - **3.2.0 is additive** — `IAudioService` is unchanged; nothing to migrate. Sounds without a kind and services without a space behave as in 3.1.
 - **Main thread only** — all methods use `AudioSource`, `AudioMixer`, `Time.unscaledDeltaTime` (or `Time.deltaTime`), and `UniTask.Yield`, none of which are thread-safe. Call from the Unity main thread.
@@ -455,10 +478,11 @@ foreach (var (param, volume) in settings.Volumes)
 ```
 com.rubickanov.audio/
 ├── Runtime/         — service, SoundCue, CuePick, SoundPriority, LoopHandle, SourceSetup, CueStats, SoundCueCatalog
-│   ├── Space/       — SoundKind, SoundMath, SoundSpace, SoundOccluder, KindCurves, PropagationDelay
+│   ├── Space/       — SoundKind, SoundMath, SoundSpace, SoundOccluder, KindCurves, PropagationDelay, Binaural
 │   ├── Loudness/    — LoudnessMeter, LoudnessGain
 │   ├── Limiter/     — OutputLimiter, TruePeakLimiter
 │   └── Capture/     — ListenerCapture
+├── Plugins/         — SteamAudio: phonon and audioplugin_phonon for Windows x64 and Linux x64, LICENSE, THIRDPARTY
 ├── Editor/          — MixerKit, SoundCueEditor
 └── Tests/           — EditMode (service, cues, math, space, mix kit, loudness, delay) and PlayMode (pause)
 ```

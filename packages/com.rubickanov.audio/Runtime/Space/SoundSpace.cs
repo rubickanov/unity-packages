@@ -99,8 +99,9 @@ namespace Rubickanov.Audio
         private const float RayShortfall = 0.3f;
         private const float FindEvery = 1f;
 
-        // Sources a Shape touched, for Strays.
-        private static readonly HashSet<AudioSource> Shaped = new();
+        // Sources a Shape touched and their kind, for Strays and Reshape.
+        private static readonly Dictionary<AudioSource, SoundKind> Shaped = new();
+        private static readonly List<AudioSource> Gone = new();
         // Filters carrying the static air curve: a ticking kind must clear it before writing the cutoff.
         private static readonly HashSet<AudioLowPassFilter> Curved = new();
         private static readonly AnimationCurve NoCurve = new();
@@ -178,7 +179,28 @@ namespace Rubickanov.Audio
                 filter.enabled = kind.Air > 0f;
             }
 
-            Shaped.Add(source);
+            Spatialize(source, kind);
+            Shaped[source] = kind;
+        }
+
+        /// <summary>Every shaped source back on Unity's panner or on HRTF, as <see cref="Binaural"/> now says.</summary>
+        public static void Reshape()
+        {
+            Gone.Clear();
+            foreach (KeyValuePair<AudioSource, SoundKind> pair in Shaped)
+                if (pair.Key == null || pair.Value == null) Gone.Add(pair.Key!);
+                else Spatialize(pair.Key, pair.Value);
+            foreach (AudioSource s in Gone) Shaped.Remove(s);
+        }
+
+        // HRTF takes the source after its filters, so the air low-pass and a voice chat's OnAudioFilterRead (which
+        // makes the sound over a flat clip) reach it; the rolloff curve still sets the level.
+        private static void Spatialize(AudioSource source, SoundKind kind)
+        {
+            bool on = Binaural.Applies(kind);
+            source.spatialize = on;
+            source.spatializePostEffects = on;
+            if (on) Binaural.Configure(source);
         }
 
         /// <summary>
@@ -188,6 +210,8 @@ namespace Rubickanov.Audio
         public static void Unshape(AudioSource source)
         {
             Shaped.Remove(source);
+            source.spatialize = false;
+            source.spatializePostEffects = false;
             source.rolloffMode = AudioRolloffMode.Logarithmic;
             source.spread = 0f;
             source.reverbZoneMix = 1f;
@@ -329,11 +353,14 @@ namespace Rubickanov.Audio
         /// </summary>
         public static List<AudioSource> Strays()
         {
-            Shaped.RemoveWhere(s => s == null);
+            Gone.Clear();
+            foreach (AudioSource s in Shaped.Keys)
+                if (s == null) Gone.Add(s!);
+            foreach (AudioSource s in Gone) Shaped.Remove(s);
             Curved.RemoveWhere(f => f == null);
             var strays = new List<AudioSource>();
             foreach (AudioSource s in Object.FindObjectsByType<AudioSource>(FindObjectsInactive.Exclude))
-                if (!s.bypassReverbZones && s.reverbZoneMix > 0f && !Shaped.Contains(s)) strays.Add(s);
+                if (!s.bypassReverbZones && s.reverbZoneMix > 0f && !Shaped.ContainsKey(s)) strays.Add(s);
             return strays;
         }
 
@@ -392,7 +419,8 @@ namespace Rubickanov.Audio
         {
             SoundSpaceSettings s = _settings;
             Vector3 to = e.Source.transform.position - at;
-            float back = SoundMath.BackAmount(forward, to) * e.Kind.HeadShadow;
+            // HRTF is the head: no shadow of ours on top of it.
+            float back = Binaural.Applies(e.Kind) ? 0f : SoundMath.BackAmount(forward, to) * e.Kind.HeadShadow;
             e.Back = snap ? back : SoundMath.Smooth(e.Back, back, dt, s.ShadowSmoothing);
             e.Occ = snap ? e.OccTarget : SoundMath.Smooth(e.Occ, e.OccTarget, dt, s.OcclusionAttack, s.OcclusionRelease);
 

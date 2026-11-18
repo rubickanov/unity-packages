@@ -8,11 +8,11 @@ Monorepo of personal reusable Unity packages under `packages/com.rubickanov.*`. 
 
 ### Packages
 
-Versions: `audio` `3.4.2`, `log` `1.3.0`, `ui` `4.1.0`, `devconsole` `5.1.0`, `save` `1.3.0`, `input` `1.2.0`, `character` `5.2.0`, `settings` `1.1.0`:
+Versions: `audio` `3.5.0`, `log` `1.3.0`, `ui` `4.1.0`, `devconsole` `5.1.0`, `save` `1.3.0`, `input` `1.2.0`, `character` `5.2.0`, `settings` `1.1.0`:
 
 | Package | Purpose |
 |---|---|
-| `audio` | Audio service: SFX pooling, music, AudioMixer volume; 3D sound kinds (distance, air, width, reverb send, head shadow, occlusion) through `SoundSpace`, a lookahead true-peak `OutputLimiter` on the listener, `MixerKit` for mixer layouts in the editor, `ListenerCapture` for checks. |
+| `audio` | Audio service: SFX pooling, music, AudioMixer volume; 3D sound kinds (distance, air, width, reverb send, head shadow, occlusion) through `SoundSpace`, HRTF on kinds marked binaural through Steam Audio's spatializer (`Binaural`, native libraries in the package), a lookahead true-peak `OutputLimiter` on the listener, `MixerKit` for mixer layouts in the editor, `ListenerCapture` for checks. |
 | `devconsole` | In-game dev console: one IMGUI window the package creates, `[ConsoleCommand]` methods registered by a source generator (no reflection, safe under code stripping), autocomplete, chains, aliases, bindings and history in plain files, `autoexec.cfg` and `-command` run on the first frame, optional `log` commands. |
 | `character` | Character body of beach (leonid carries an embedded copy, 2.2.0, since 2026-10-16): motor over KCC, animator on Animancer, ragdoll + get-up, IK (feet, head look, turn lean, seat holds and item grips, climb), configs and hooks; an optional module `Rubickanov.Characters.Netcode` (compiled only with NGO, versionDefines) replicates it with game parts and glue. KCC (`KCC`) and Animancer (`Kybernetik.Animancer`) are Asset Store code: referenced by asmdef name only, never copied here; the game provides them and `com.rubickanov.log`. Not in `unity-project-pckgs` (would not compile there); its tests (`Rubickanov.Rig.Tests`, `Rubickanov.Characters.Netcode.Tests`) run from a game linked `local`. |
 | `input` | What Input System leaves to each game, on its own action types: the device in hand (Steam Input's duplicate pad included), key names for the player's layout and pad family, an action's keys for hints, rebind slots with conflicts, swaps and JSON (kept in the save store by an optional assembly), maps blocked by reason, local players seated by a press with their own input copy (Steam Input copies kept out), devices fed from code for Remote Play Together guests. |
