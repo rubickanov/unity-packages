@@ -2,13 +2,15 @@ using UnityEngine;
 
 namespace Rubickanov.Audio
 {
-    // A kind's four curves, built once and reused by every source of the kind (rebuilt after an Inspector edit).
+    // A kind's curves (a binaural kind has a second rolloff), built once and reused by every source of the kind (rebuilt after an Inspector edit).
     internal sealed class KindCurves
     {
         // Builds so far: tests check plays reuse them.
         internal static int Built;
 
         public readonly AnimationCurve Rolloff;
+        // The rolloff on HRTF: no spread to compensate. Null for a kind that is not binaural.
+        public readonly AnimationCurve? RolloffBinaural;
         public readonly AnimationCurve Spread;
         public readonly AnimationCurve Reverb;
         public readonly AnimationCurve Cutoff;
@@ -22,6 +24,9 @@ namespace Rubickanov.Audio
             float start = max * (1f - kind.FadeShare), w = max - start;
             Rolloff = SoundMath.Curve(d => SoundMath.Level(d, kind), max, 32, reference, kind.SpreadFarAt,
                 start, start + 0.25f * w, start + 0.5f * w, start + 0.75f * w);
+            if (kind.Binaural)
+                RolloffBinaural = SoundMath.Curve(d => SoundMath.LevelBinaural(d, kind), max, 32, reference,
+                    start, start + 0.25f * w, start + 0.5f * w, start + 0.75f * w);
             Spread = SoundMath.Curve(d => SoundMath.Spread(d, kind) / 360f, max, 16, reference, kind.SpreadFarAt);
             float cap = kind.ReverbAtReference > 0f ? reference * kind.ReverbMax / kind.ReverbAtReference : max;
             Reverb = SoundMath.Curve(d => SoundMath.ReverbSend(d, kind), max, 16, reference, cap);

@@ -80,6 +80,17 @@ namespace Rubickanov.Audio
         }
 
         /// <summary>
+        /// The rolloff of a binaural source at d: the distance law at the panned source's loudness. Steam Audio ignores
+        /// spread, so the per-distance compensation would only make it louder; what stays is the widest spread's loss
+        /// that every panned source of the kind has.
+        /// </summary>
+        public static float LevelBinaural(float d, SoundKind kind)
+        {
+            float law = kind.Law == DistanceLaw.External ? 1f : DistanceGain(d, kind.Reference, kind.Max, kind.FadeShare);
+            return law / SpreadCompensation(Mathf.Max(kind.SpreadNear, kind.SpreadFar));
+        }
+
+        /// <summary>
         /// Reverb-zone send: rises ∝ distance from Reference (the zone send is taken after the rolloff, so this keeps
         /// the wet level constant: a diffuse field), capped at ReverbMax.
         /// </summary>

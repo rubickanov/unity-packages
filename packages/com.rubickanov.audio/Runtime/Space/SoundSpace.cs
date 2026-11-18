@@ -189,17 +189,20 @@ namespace Rubickanov.Audio
             Gone.Clear();
             foreach (KeyValuePair<AudioSource, SoundKind> pair in Shaped)
                 if (pair.Key == null || pair.Value == null) Gone.Add(pair.Key!);
-                else Spatialize(pair.Key, pair.Value);
+                else if (pair.Value.Binaural && pair.Key.spatialize != Binaural.Applies(pair.Value)) Spatialize(pair.Key, pair.Value);
             foreach (AudioSource s in Gone) Shaped.Remove(s);
         }
 
         // HRTF takes the source after its filters, so the air low-pass and a voice chat's OnAudioFilterRead (which
-        // makes the sound over a flat clip) reach it; the rolloff curve still sets the level.
+        // makes the sound over a flat clip) reach it; the rolloff curve still sets the level, the binaural one on HRTF.
         private static void Spatialize(AudioSource source, SoundKind kind)
         {
             bool on = Binaural.Applies(kind);
             source.spatialize = on;
             source.spatializePostEffects = on;
+            if (!kind.Binaural) return;
+            KindCurves curves = KindCurves.Of(kind);
+            source.SetCustomCurve(AudioSourceCurveType.CustomRolloff, on ? curves.RolloffBinaural! : curves.Rolloff);
             if (on) Binaural.Configure(source);
         }
 

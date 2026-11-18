@@ -17,9 +17,17 @@ namespace Rubickanov.Audio
 
         private static readonly LogChannel Channel = LogChannel.Get("Audio");
 
+        // Steam's HRTF gain, so a binaural source sums as loud in both ears as the panned one (measured, README).
+        internal const float HrtfVolume = 1.12f;
+
+        // Kept alive for the context's life: native code calls it, and a collected delegate would crash it.
+        private static readonly Native.LogCallback LogKept = Log;
+
         private static IntPtr _context;
         private static IntPtr _hrtf;
+        private static bool _loaded;
         private static bool _on = true;
+        private static int _scopes;
 
         /// <summary>Steam Audio is up: its context and HRTF are handed to the spatializer.</summary>
         public static bool Ready { get; private set; }
@@ -43,40 +51,47 @@ namespace Rubickanov.Audio
         public static bool Applies(SoundKind kind) => Ready && _on && kind.Binaural;
 
         /// <summary>
-        /// Loads Steam Audio with its default HRTF and hands both to its spatializer. Safe to call again; false (and
-        /// <see cref="Error"/>) when the platform or the libraries are missing, in which case every kind stays panned.
-        /// The project must pick the spatializer (Audio settings, Spatializer Plugin): a player cannot, and reports no
-        /// name early, so it is not checked here.
+        /// Loads Steam Audio with its default HRTF and hands both to its spatializer, once per process: after
+        /// <see cref="Stop"/> it is reused. Safe to call again; false (and <see cref="Error"/>) when the platform or the
+        /// libraries are missing, in which case every kind stays panned. The project must pick the spatializer (Audio
+        /// settings, Spatializer Plugin): a player cannot, and reports no name early, so it is not checked here.
         /// </summary>
         public static bool Start()
         {
             if (Ready) return true;
-            try
+            if (!_loaded)
             {
-                var settings = new Native.ContextSettings
+                try
                 {
-                    Version = Native.Version,
-                    Log = Log,
-                    Simd = Native.SimdLevel.Avx2,
-                };
-                if (Native.iplContextCreate(ref settings, out _context) != Native.Status.Success)
-                    return Fail("context");
+                    // A context left by an earlier domain (an editor reload drops these statics, not the plugin's).
+                    Native.iplUnityTerminate();
+                    var settings = new Native.ContextSettings
+                    {
+                        Version = Native.Version,
+                        Log = LogKept,
+                        Simd = Native.SimdLevel.Avx2,
+                    };
+                    if (Native.iplContextCreate(ref settings, out _context) != Native.Status.Success)
+                        return Fail("context");
 
-                AudioSettings.GetDSPBufferSize(out int frame, out _);
-                var audio = new Native.AudioSettings { SamplingRate = AudioSettings.outputSampleRate, FrameSize = frame };
-                var hrtf = new Native.HrtfSettings { Type = Native.HrtfType.Default, Volume = 1f };
-                if (Native.iplHRTFCreate(_context, ref audio, ref hrtf, out _hrtf) != Native.Status.Success)
+                    AudioSettings.GetDSPBufferSize(out int frame, out _);
+                    var audio = new Native.AudioSettings { SamplingRate = AudioSettings.outputSampleRate, FrameSize = frame };
+                    var hrtf = new Native.HrtfSettings { Type = Native.HrtfType.Default, Volume = HrtfVolume, NormType = Native.HrtfNorm.None };
+                    if (Native.iplHRTFCreate(_context, ref audio, ref hrtf, out _hrtf) != Native.Status.Success)
+                    {
+                        Native.iplContextRelease(ref _context);
+                        return Fail("HRTF");
+                    }
+
+                    Native.iplUnityInitialize(_context);
+                    Native.iplUnitySetHRTF(_hrtf);
+                }
+                catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
                 {
-                    Native.iplContextRelease(ref _context);
-                    return Fail("HRTF");
+                    return Fail(e.Message);
                 }
 
-                Native.iplUnityInitialize(_context);
-                Native.iplUnitySetHRTF(_hrtf);
-            }
-            catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
-            {
-                return Fail(e.Message);
+                _loaded = true;
             }
 
             Ready = true;
@@ -85,22 +100,27 @@ namespace Rubickanov.Audio
             return true;
         }
 
-        /// <summary><see cref="Start"/> for a scope's life: disposing it calls <see cref="Stop"/>.</summary>
+        /// <summary>
+        /// <see cref="Start"/> for a scope's life: binaural while any scope lives, and the last one disposed calls
+        /// <see cref="Stop"/>.
+        /// </summary>
         public static IDisposable Begin()
         {
+            _scopes++;
             Start();
             return new Scope();
         }
 
-        /// <summary>Back to Unity's panner for every kind and Steam Audio released.</summary>
+        /// <summary>
+        /// Every kind back on Unity's panner and head shadow, playing sources too. Steam Audio stays loaded for the
+        /// next <see cref="Start"/>: the audio thread may still be inside the spatializer of a source just switched,
+        /// and releasing the HRTF under it would crash.
+        /// </summary>
         public static void Stop()
         {
             if (!Ready) return;
             Ready = false;
             SoundSpace.Reshape();
-            Native.iplUnityTerminate();
-            Native.iplHRTFRelease(ref _hrtf);
-            Native.iplContextRelease(ref _context);
         }
 
         /// <summary>The spatializer's parameters on a binaural source: HRTF on the direct path, nothing else.</summary>
@@ -115,7 +135,30 @@ namespace Rubickanov.Audio
 
         private sealed class Scope : IDisposable
         {
-            public void Dispose() => Stop();
+            private bool _done;
+
+            public void Dispose()
+            {
+                if (_done) return;
+                _done = true;
+                if (--_scopes == 0) Stop();
+            }
+        }
+
+        // Play Mode without a domain reload keeps statics: a new session starts with no scopes and the switch on.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetSession()
+        {
+            _scopes = 0;
+            _on = true;
+            Ready = false;
+        }
+
+        // Tests: Ready without the native plugin (a batch editor has no audio).
+        internal static void Pretend(bool ready)
+        {
+            Ready = ready;
+            SoundSpace.Reshape();
         }
 
         private static bool Fail(string what)
@@ -148,6 +191,7 @@ namespace Rubickanov.Audio
             public enum LogLevel { Info, Warning, Error, Debug }
             public enum SimdLevel { Sse2, Sse4, Avx, Avx2, Avx512 }
             public enum HrtfType { Default, Sofa }
+            public enum HrtfNorm { None, Rms }
 
             [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
             public delegate void LogCallback(LogLevel level, string message);
@@ -184,7 +228,7 @@ namespace Rubickanov.Audio
                 public IntPtr SofaData;
                 public int SofaDataSize;
                 public float Volume;
-                public int NormType;
+                public HrtfNorm NormType;
             }
 
             [DllImport("phonon")]
