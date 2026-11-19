@@ -1,0 +1,14 @@
+{
+    "name": "com.rubickanov.kinematics",
+    "version": "1.0.0",
+    "license": "MIT",
+    "displayName": "Kinematics",
+    "description": "Deterministic pose maths on double: DetMath (sin, atan2, exp and the rest from +, -, *, / and sqrt), quaternions, two-bone IK, foot contact and pinning, pelvis tilt, head look, turn lean, reach with speed, springs. Same bits under Mono, IL2CPP and Burst in deterministic mode.",
+    "unity": "6000.0",
+    "dependencies": {
+        "com.unity.mathematics": "1.3.2",
+        "com.unity.burst": "1.8.14"
+    },
+    "keywords": ["ik", "kinematics", "determinism", "animation"],
+    "author": { "name": "rubickanov" }
+}
