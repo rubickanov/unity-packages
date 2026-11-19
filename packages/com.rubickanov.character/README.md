@@ -7,14 +7,16 @@ game turns features on through hooks and its own config assets.
 
 ## Dependencies
 
-The package lists no dependencies in `package.json` (UPM cannot depend on git packages, and two of these are Asset
-Store code that must not be published). The game provides:
+`package.json` depends on `com.rubickanov.kinematics` (the IK, contact, pin and spring maths, on `double`); UPM
+cannot fetch a git package by itself, so the game lists it in its manifest next to this one. Two other dependencies are
+Asset Store code that must not be published. The game provides:
 
 | Assembly (by name) | What | Where in the game |
 |---|---|---|
 | `KCC` | Kinematic Character Controller (Asset Store) | e.g. `Assets/Plugins/KCC` with its own asmdef |
 | `Kybernetik.Animancer` | Animancer (Asset Store) | e.g. an embedded `Packages/com.kybernetik.animancer` |
 | `Rubickanov.Log.Runtime` | `com.rubickanov.log` | the game's `Packages/manifest.json` |
+| `Rubickanov.Kinematics` | `com.rubickanov.kinematics` (with `com.unity.mathematics`) | the game's `Packages/manifest.json` |
 
 Input System is not needed: the game reads its own input and hands the character a `CharacterInput`. Netcode for
 GameObjects is optional: with it the `Rubickanov.Characters.Netcode` module compiles (see Netcode (optional)). The package is
@@ -40,11 +42,11 @@ get-up hands the body back.
 
 | Assembly | References | Contents |
 |---|---|---|
-| `Rubickanov.Rig.Runtime` | UnityEngine only | Math: `TwoBoneIK`, `Spring`, `AimAngles`, `TurnOffset`, `LimbPin`, `SoleContact`, `RagdollMath`, `Inertia`, `GetUpSearch` |
-| `Rubickanov.Characters.Runtime` | `Rubickanov.Rig.Runtime`, `KCC`, `Kybernetik.Animancer`, `Rubickanov.Log.Runtime` | Motor, animator, ragdoll, rig, climbing, configs, hooks |
+| `Rubickanov.Rig.Runtime` | `Rubickanov.Kinematics`, `Unity.Mathematics` | Math: `RagdollMath`, `Inertia`, `GetUpSearch`, `Strides`; `KinematicsInterop`, the one place where float vectors and rotations become the kinematics package's `double3`/`double4` and back (two-bone IK on transforms, springs on floats) |
+| `Rubickanov.Characters.Runtime` | `Rubickanov.Rig.Runtime`, `Rubickanov.Kinematics`, `Unity.Mathematics`, `KCC`, `Kybernetik.Animancer`, `Rubickanov.Log.Runtime` | Motor, animator, ragdoll, rig, climbing, configs, hooks |
 | `Rubickanov.Characters.Netcode` | `Rubickanov.Characters.Runtime`, `Rubickanov.Rig.Runtime`, `Rubickanov.Log.Runtime`, `KCC`, `Unity.Netcode.Runtime`, `Unity.Collections` | Optional, only with NGO: `NetworkCharacter`, snapshots, playback, parts and sides |
 | `Rubickanov.Characters.Editor` | `Rubickanov.Characters.Runtime`, `Rubickanov.Rig.Runtime`, `Kybernetik.Animancer` | Editor only: `GaspImport` (Game Animation Sample clips as humanoids), `GetUpBaker` (nearest-frame get-up data) |
-| `Rubickanov.Rig.Tests` | `Rubickanov.Rig.Runtime`, NUnit | EditMode tests of the Rig math (inertialization, get-up search) |
+| `Rubickanov.Rig.Tests` | `Rubickanov.Rig.Runtime`, NUnit | EditMode tests of the Rig math (inertialization, get-up search, ragdoll maths, strides) and of the float boundary `KinematicsInterop`; the kinematics maths is tested in its own package |
 | `Rubickanov.Characters.Netcode.Tests` | the module, NGO, NUnit | EditMode: snapshot wire round trip, playback over a poor network |
 
 ## Layout
@@ -54,7 +56,7 @@ group files.
 
 ```text
 Runtime/
-├── Rig/                    math, no components
+├── Rig/                    math, no components; KinematicsInterop to com.rubickanov.kinematics
 └── Characters/
     ├── CharacterProportions.cs
     ├── Motor/              CharacterMotor, input, motion, MovementConfig

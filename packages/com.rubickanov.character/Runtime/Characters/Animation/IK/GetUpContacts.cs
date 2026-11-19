@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using Rubickanov.Kinematics;
 using Rubickanov.Rig;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Rubickanov.Characters
@@ -31,7 +33,7 @@ namespace Rubickanov.Characters
         private readonly Transform _body;
         private readonly Limb[] _limbs;
         private readonly RaycastHit[] _hits = new RaycastHit[8];
-        private FloatSpring _weight;
+        private ScalarSpring _weight;
         private bool _active;
 
         public bool IsValid => _limbs.Length > 0;
@@ -98,7 +100,7 @@ namespace Rubickanov.Characters
             {
                 foreach (Limb limb in _limbs)
                 {
-                    limb.Pin.Release(Settings(config, limb), Contact(limb), up);
+                    limb.Pin.Release(Settings(config, limb), Contact(limb).ToDouble3(), up.ToDouble3());
                 }
             }
 
@@ -106,11 +108,11 @@ namespace Rubickanov.Characters
             bool settling = false;
             foreach (Limb limb in _limbs)
             {
-                settling |= limb.Pin.IsStepping || limb.Pin.Shift.sqrMagnitude > 1e-6f;
+                settling |= limb.Pin.IsStepping || math.lengthsq(limb.Pin.Shift) > 1e-6;
             }
 
             float target = config.GetUpContacts && (active || settling) ? 1f : 0f;
-            weight *= Mathf.Clamp01(_weight.Step(target, config.ContactWeightSpring, deltaTime));
+            weight *= Mathf.Clamp01((float)_weight.Step(target, config.ContactWeightSpring, deltaTime));
             if (weight <= 1e-3f)
             {
                 return;
@@ -141,14 +143,14 @@ namespace Rubickanov.Characters
                 // The foot rolls onto its toes or back onto its heel: hold the new point where it is shown.
                 Vector3 from = Contact(limb);
                 limb.OnToes = onToes;
-                limb.Pin.Rebase(from, Contact(limb), up);
+                limb.Pin.Rebase(from.ToDouble3(), Contact(limb).ToDouble3(), up.ToDouble3());
             }
 
-            Vector3 shift = limb.Pin.Update(Contact(limb), Mathf.Max(0f, lift), up, Settings(config, limb),
-                deltaTime);
+            Vector3 shift = limb.Pin.Update(Contact(limb).ToDouble3(), Mathf.Max(0f, lift), up.ToDouble3(),
+                Settings(config, limb), deltaTime).ToVector3();
             Vector3 target = limb.AnimatedEnd + rise + shift;
             Vector3 hint = limb.Middle.position + limb.Bend;
-            TwoBoneIK.Solve(limb.Upper, limb.Middle, limb.End, target, hint, weight);
+            KinematicsInterop.Solve(limb.Upper, limb.Middle, limb.End, target, hint, weight);
             limb.End.rotation = Quaternion.Slerp(limb.End.rotation, limb.AnimatedEndRotation, weight);
         }
 

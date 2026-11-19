@@ -1,5 +1,5 @@
 using System;
-using Rubickanov.Rig;
+using Rubickanov.Kinematics;
 using UnityEngine;
 
 namespace Rubickanov.Characters
@@ -43,10 +43,10 @@ namespace Rubickanov.Characters
         [Tooltip("Steepest the sole tilts to the ground. Ground steeper than this between the ankle and " +
                  "the ball counts as a step edge, and the foot stands level on its higher side.")]
         [Range(0, 60)] public float MaxFootAngle = 30f;
-        public SpringSettings FootSpring = new(10f, 1f);
-        public SpringSettings PelvisSpring = new(6f, 1f);
+        public SpringSettings FootSpring = new(10, 1);
+        public SpringSettings PelvisSpring = new(6, 1);
         [Tooltip("How quickly the feet let go on leaving the ground and take hold on landing.")]
-        public SpringSettings FeetWeightSpring = new(4f, 1f);
+        public SpringSettings FeetWeightSpring = new(4, 1);
 
         [Header("Getting up")]
         [Tooltip("Hands and feet stay out of the ground and where they touch down while getting up.")]
@@ -55,10 +55,10 @@ namespace Rubickanov.Characters
         [Min(0)] public float HandClearance = 0.03f;
         [Tooltip("How far above the ground the toe bone sits when the foot stands on it, metres.")]
         [Min(0)] public float ToesClearance = 0.03f;
-        public LimbPinSettings FootPin = new(0.04f, 0.04f, 0.2f, 0.25f, 0.08f, 0.15f);
-        public LimbPinSettings HandPin = new(0.05f, 0.04f, 0.15f, 0.2f, 0.06f, 0.12f);
+        public LimbPinSettings FootPin = new(0.04, 0.04, 0.2, 0.25, 0.08, 0.15);
+        public LimbPinSettings HandPin = new(0.05, 0.04, 0.15, 0.2, 0.06, 0.12);
         [Tooltip("How quickly the contacts take hold as the get-up starts and let go after it.")]
-        public SpringSettings ContactWeightSpring = new(4f, 1f);
+        public SpringSettings ContactWeightSpring = new(4, 1);
 
         [Header("Riding")]
         [Tooltip("Hands and feet reach for the holds of the seat the character rides in, such as a sled's rope.")]
@@ -131,8 +131,8 @@ namespace Rubickanov.Characters
         [Range(0, 1)] public float StrideTwist = 1f;
         [Tooltip("Spring of the lowest bone. Bones up the chain blend toward Head Spring, " +
                  "so the head leads and the body follows.")]
-        public SpringSettings SpineSpring = new(2.5f, 0.75f);
-        public SpringSettings HeadSpring = new(6f, 0.75f);
+        public SpringSettings SpineSpring = new(2.5, 0.75);
+        public SpringSettings HeadSpring = new(6, 0.75);
 
         [Header("Lean")]
         public bool Lean = true;
@@ -145,9 +145,9 @@ namespace Rubickanov.Characters
         [Tooltip("Acceleration that leans the body 45 degrees. Lower leans more.")]
         [Min(0.01f)] public float LeanAcceleration = 9.81f;
         [Tooltip("Below 1 the body overshoots and sways back when a turn ends.")]
-        public SpringSettings LeanSpring = new(2f, 0.45f);
+        public SpringSettings LeanSpring = new(2, 0.45);
         [Tooltip("How quickly the speed that drives the forward lean is smoothed.")]
-        public SpringSettings SpeedSpring = new(3f, 1f);
+        public SpringSettings SpeedSpring = new(3, 1);
         [Tooltip("From the hips up.")]
         public LeanBone[] LeanBones =
         {

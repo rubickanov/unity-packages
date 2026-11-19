@@ -5,7 +5,9 @@
         "Rubickanov.Log.Runtime",
         "KCC",
         "Kybernetik.Animancer",
-        "Rubickanov.Rig.Runtime"
+        "Rubickanov.Rig.Runtime",
+        "Rubickanov.Kinematics",
+        "Unity.Mathematics"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

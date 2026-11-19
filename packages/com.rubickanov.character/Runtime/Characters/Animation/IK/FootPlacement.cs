@@ -1,3 +1,4 @@
+using Rubickanov.Kinematics;
 using Rubickanov.Rig;
 using UnityEngine;
 
@@ -24,8 +25,8 @@ namespace Rubickanov.Characters
             public Vector3 AnimatedToes;
             public Quaternion AnimatedFootRotation;
             public Vector3 KneeBend;
-            public FloatSpring Offset;
-            public Vector3Spring Normal;
+            public ScalarSpring Offset;
+            public VectorSpring Normal;
             public bool Grounded;
             public bool AnkleHit, BallHit;
             public Vector3 AnkleGround, BallGround;
@@ -47,8 +48,8 @@ namespace Rubickanov.Characters
         private readonly Leg _left;
         private readonly Leg _right;
         private readonly RaycastHit[] _hits = new RaycastHit[8];
-        private FloatSpring _pelvis;
-        private FloatSpring _weight;
+        private ScalarSpring _pelvis;
+        private ScalarSpring _weight;
         private Vector3 _lastRoot;
         private Vector3 _heading;
         // Prints with no pose to read: the body's place last frame, how far it walked since the last print, which
@@ -108,7 +109,7 @@ namespace Rubickanov.Characters
             foreach (Leg leg in new[] { _left, _right })
             {
                 leg.Offset.Reset(0f);
-                leg.Normal.Reset(_body.up);
+                leg.Normal.Reset(_body.up.ToDouble3());
             }
         }
 
@@ -197,7 +198,8 @@ namespace Rubickanov.Characters
 
         public void Apply(CharacterRigConfig config, bool grounded, float weight, float deltaTime)
         {
-            float feetWeight = _weight.Step(config.Feet && grounded ? 1f : 0f, config.FeetWeightSpring, deltaTime);
+            float feetWeight = (float)_weight.Step(config.Feet && grounded ? 1f : 0f, config.FeetWeightSpring,
+                deltaTime);
             weight *= Mathf.Clamp01(feetWeight);
             Vector3 up = _body.up;
             Vector3 root = _body.position;
@@ -214,7 +216,7 @@ namespace Rubickanov.Characters
             Step(_left, config, root, up, grounded, true);
             Step(_right, config, root, up, grounded, false);
             float reach = Mathf.Min(Reach(_left, up), Reach(_right, up));
-            float pelvis = _pelvis.Step(Mathf.Min(left, right, 0f, reach), config.PelvisSpring, deltaTime);
+            float pelvis = (float)_pelvis.Step(Mathf.Min(left, right, 0f, reach), config.PelvisSpring, deltaTime);
             // A placed foot is pinned: the hips never lag so far that its leg falls short of it.
             if (reach < 0f)
             {
@@ -244,7 +246,7 @@ namespace Rubickanov.Characters
                 }
 
                 Gizmos.color = leg.Grounded ? Color.cyan : Color.red;
-                Gizmos.DrawLine(leg.AnkleGround, leg.AnkleGround + leg.Normal.Value * 0.2f);
+                Gizmos.DrawLine(leg.AnkleGround, leg.AnkleGround + leg.Normal.Value.ToVector3() * 0.2f);
             }
         }
 
@@ -257,7 +259,7 @@ namespace Rubickanov.Characters
                 return 0f;
             }
 
-            Vector3 line = leg.AnimatedFoot + up * leg.Offset.Value - leg.Upper.position;
+            Vector3 line = leg.AnimatedFoot + up * (float)leg.Offset.Value - leg.Upper.position;
             float below = -Vector3.Dot(line, up);
             float across = Vector3.ProjectOnPlane(line, up).magnitude;
             float length = leg.Length * 0.97f;
@@ -316,7 +318,8 @@ namespace Rubickanov.Characters
             }
 
             leg.BallHit = ball.HasValue;
-            leg.Grounded = SoleContact.Fit(ankle, ball, length, config.MaxFootAngle, out float target, out float pitch);
+            leg.Grounded = SoleContact.Fit(ankle.HasValue, ankle ?? 0f, ball.HasValue, ball ?? 0f, length,
+                config.MaxFootAngle, out double target, out double pitch);
             Vector3 normal = up;
             if (leg.Grounded)
             {
@@ -329,12 +332,12 @@ namespace Rubickanov.Characters
                     along /= length;
                     Vector3 roll = Vector3.ProjectOnPlane(normal, along);
                     roll = roll.sqrMagnitude > 1e-6f ? roll.normalized : up;
-                    normal = Quaternion.AngleAxis(-pitch, Vector3.Cross(up, along)) * roll;
+                    normal = Quaternion.AngleAxis(-(float)pitch, Vector3.Cross(up, along)) * roll;
                 }
             }
 
-            leg.Normal.Step(normal, config.FootSpring, deltaTime);
-            return leg.Offset.Step(target, config.FootSpring, deltaTime);
+            leg.Normal.Step(normal.ToDouble3(), config.FootSpring, deltaTime);
+            return (float)leg.Offset.Step(target, config.FootSpring, deltaTime);
         }
 
         // Height of the ground straight under point relative to the character's base, or null if there is none
@@ -452,7 +455,7 @@ namespace Rubickanov.Characters
         private static void Place(Leg leg, CharacterRigConfig config, Vector3 root, Vector3 up, Vector3 forward,
             float weight)
         {
-            Vector3 target = leg.AnimatedFoot + up * leg.Offset.Value;
+            Vector3 target = leg.AnimatedFoot + up * (float)leg.Offset.Value;
             Vector3 hint = leg.Lower.position + leg.KneeBend;
             if (leg.Placed > 0f)
             {
@@ -472,12 +475,13 @@ namespace Rubickanov.Characters
                 hint = leg.Upper.position + 0.5f * line + bend;
             }
 
-            TwoBoneIK.Solve(leg.Upper, leg.Lower, leg.Foot, target, hint, weight);
+            KinematicsInterop.Solve(leg.Upper, leg.Lower, leg.Foot, target, hint, weight);
 
             // A planted foot lies on the surface; one in the air keeps its animated angle.
             float height = Vector3.Dot(leg.AnimatedFoot - root, up) - leg.SoleHeight;
             float planted = 1f - Mathf.Clamp01(height / config.PlantHeight);
-            Vector3 normal = leg.Normal.Value.sqrMagnitude > 1e-6f ? leg.Normal.Value.normalized : up;
+            Vector3 normal = leg.Normal.Value.ToVector3();
+            normal = normal.sqrMagnitude > 1e-6f ? normal.normalized : up;
             normal = Vector3.RotateTowards(up, normal, config.MaxFootAngle * Mathf.Deg2Rad, 0f);
             Quaternion tilt = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(up, normal), planted);
             leg.Foot.rotation = Quaternion.Slerp(leg.Foot.rotation, tilt * leg.AnimatedFootRotation, weight);

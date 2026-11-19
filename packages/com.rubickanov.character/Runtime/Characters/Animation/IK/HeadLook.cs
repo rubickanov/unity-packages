@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using Rubickanov.Kinematics;
 using Rubickanov.Rig;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Rubickanov.Characters
@@ -24,7 +26,7 @@ namespace Rubickanov.Characters
             public int Entry;
             // 0 at the lowest bone, 1 at the head: picks the spring between SpineSpring and HeadSpring.
             public float Height;
-            public FloatSpring Yaw, Pitch;
+            public ScalarSpring Yaw, Pitch;
         }
 
         private readonly Transform _body;
@@ -32,9 +34,9 @@ namespace Rubickanov.Characters
         // The head's facing in its own space, taken from the avatar's rest pose, where the model faces forward.
         private readonly Vector3 _headForward;
         private readonly List<Bone> _bones = new();
-        private FloatSpring _weight;
+        private ScalarSpring _weight;
         // Where the head points when aiming: the look through the head's spring.
-        private FloatSpring _aimYaw, _aimPitch;
+        private ScalarSpring _aimYaw, _aimPitch;
 
         public bool IsValid => _bones.Count > 0;
 
@@ -90,10 +92,10 @@ namespace Rubickanov.Characters
             }
 
             bool looking = config.Look && aim.sqrMagnitude > 1e-6f;
-            weight *= Mathf.Clamp01(_weight.Step(looking ? 1f : 0f, config.HeadSpring, deltaTime));
-            AimAngles angles = looking ? Limit(config, AimAngles.FromLocal(aim)) : default;
-            float aimYaw = _aimYaw.Step(angles.Yaw, config.HeadSpring, deltaTime);
-            float aimPitch = _aimPitch.Step(angles.Pitch, config.HeadSpring, deltaTime);
+            weight *= Mathf.Clamp01((float)_weight.Step(looking ? 1f : 0f, config.HeadSpring, deltaTime));
+            AimAngles angles = looking ? Limit(config, AimAngles.FromLocal(aim.ToDouble3())) : default;
+            float aimYaw = (float)_aimYaw.Step(angles.Yaw, config.HeadSpring, deltaTime);
+            float aimPitch = (float)_aimPitch.Step(angles.Pitch, config.HeadSpring, deltaTime);
 
             Vector3 up = _body.up;
             Quaternion facing = _body.rotation;
@@ -119,12 +121,12 @@ namespace Rubickanov.Characters
 
                 CharacterRigConfig.LookBone share = config.LookBones[bone.Entry];
                 var spring = new SpringSettings(
-                    Mathf.Lerp(config.SpineSpring.Frequency, config.HeadSpring.Frequency, bone.Height),
-                    Mathf.Lerp(config.SpineSpring.Damping, config.HeadSpring.Damping, bone.Height));
+                    math.lerp(config.SpineSpring.Frequency, config.HeadSpring.Frequency, bone.Height),
+                    math.lerp(config.SpineSpring.Damping, config.HeadSpring.Damping, bone.Height));
                 // The spine's own share scaled by Spine; the aiming bones take what it leaves.
                 float scale = share.Aims ? 1f : spine;
-                float yaw = bone.Yaw.Step(angles.Yaw * share.Yaw * scale, spring, deltaTime) * weight;
-                float pitch = bone.Pitch.Step(angles.Pitch * share.Pitch * scale, spring, deltaTime) * weight;
+                float yaw = (float)bone.Yaw.Step(angles.Yaw * share.Yaw * scale, spring, deltaTime) * weight;
+                float pitch = (float)bone.Pitch.Step(angles.Pitch * share.Pitch * scale, spring, deltaTime) * weight;
                 if (share.Aims && _head != null)
                 {
                     aimingYaw += share.Yaw;
@@ -148,8 +150,8 @@ namespace Rubickanov.Characters
 
             // What still separates the head, as animated and turned by the spine, from the look.
             AimAngles head = HeadAngles();
-            float missingYaw = Mathf.DeltaAngle(head.Yaw, aimYaw) * weight;
-            float missingPitch = (aimPitch - head.Pitch) * weight;
+            float missingYaw = Mathf.DeltaAngle((float)head.Yaw, aimYaw) * weight;
+            float missingPitch = (aimPitch - (float)head.Pitch) * weight;
             foreach (Bone bone in _bones)
             {
                 if (bone.Entry >= config.LookBones.Length)
@@ -163,9 +165,9 @@ namespace Rubickanov.Characters
                     continue;
                 }
 
-                float yaw = Mathf.Lerp(bone.Yaw.Value * weight,
+                float yaw = Mathf.Lerp((float)bone.Yaw.Value * weight,
                     aimingYaw > 0f ? missingYaw * share.Yaw / aimingYaw : 0f, config.HeadAim);
-                float pitch = Mathf.Lerp(bone.Pitch.Value * weight,
+                float pitch = Mathf.Lerp((float)bone.Pitch.Value * weight,
                     aimingPitch > 0f ? missingPitch * share.Pitch / aimingPitch : 0f, config.HeadAim);
                 // About the side axis of the head's own facing, pitch changes the head's pitch alone.
                 Vector3 forward = Vector3.ProjectOnPlane(_head.rotation * _headForward, up);
@@ -194,10 +196,10 @@ namespace Rubickanov.Characters
 
         private AimAngles Limit(CharacterRigConfig config, AimAngles look)
         {
-            float yaw = look.Yaw;
+            float yaw = (float)look.Yaw;
             // Near straight behind, stay over the shoulder the head is already turned to.
-            if (Mathf.Abs(yaw) > 180f - config.ShoulderHold && Mathf.Abs(_aimYaw.Value) > 1f
-                && Mathf.Sign(yaw) != Mathf.Sign(_aimYaw.Value))
+            if (Mathf.Abs(yaw) > 180f - config.ShoulderHold && Mathf.Abs((float)_aimYaw.Value) > 1f
+                && Mathf.Sign(yaw) != Mathf.Sign((float)_aimYaw.Value))
             {
                 yaw = -yaw;
             }
@@ -223,7 +225,7 @@ namespace Rubickanov.Characters
         }
 
         private AimAngles HeadAngles() =>
-            AimAngles.FromLocal(Quaternion.Inverse(_body.rotation) * (_head.rotation * _headForward));
+            AimAngles.FromLocal((Quaternion.Inverse(_body.rotation) * (_head.rotation * _headForward)).ToDouble3());
 
         // The avatar's skeleton holds the rest pose it was configured in, facing the model's forward.
         // Bones missing from it fall back to their current rotation.

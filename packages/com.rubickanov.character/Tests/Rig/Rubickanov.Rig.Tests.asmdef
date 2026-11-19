@@ -3,6 +3,8 @@
     "rootNamespace": "Rubickanov.Rig.Tests",
     "references": [
         "Rubickanov.Rig.Runtime",
+        "Rubickanov.Kinematics",
+        "Unity.Mathematics",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

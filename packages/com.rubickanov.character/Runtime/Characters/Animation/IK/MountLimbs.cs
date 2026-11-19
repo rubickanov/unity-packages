@@ -505,7 +505,7 @@ namespace Rubickanov.Characters
 
             if (hint.HasValue)
             {
-                TwoBoneIK.Solve(limb.Upper, limb.Middle, limb.End, target.position, hint.Value, weight);
+                KinematicsInterop.Solve(limb.Upper, limb.Middle, limb.End, target.position, hint.Value, weight);
             }
             else
             {
@@ -542,7 +542,7 @@ namespace Rubickanov.Characters
         {
             if (hint.HasValue)
             {
-                TwoBoneIK.Solve(limb.Upper, limb.Middle, limb.End, target, hint.Value, 1f);
+                KinematicsInterop.Solve(limb.Upper, limb.Middle, limb.End, target, hint.Value, 1f);
             }
             else
             {
@@ -560,7 +560,7 @@ namespace Rubickanov.Characters
                 ? Vector3.ProjectOnPlane(limb.Middle.position - root, line.normalized)
                 : limb.Upper.rotation * Vector3.forward;
             Vector3 hint = limb.Middle.position + bend;
-            TwoBoneIK.Solve(limb.Upper, limb.Middle, limb.End, target, hint, weight);
+            KinematicsInterop.Solve(limb.Upper, limb.Middle, limb.End, target, hint, weight);
         }
 
         private static Limb Create(Animator animator, HumanBodyBones upper, HumanBodyBones middle,

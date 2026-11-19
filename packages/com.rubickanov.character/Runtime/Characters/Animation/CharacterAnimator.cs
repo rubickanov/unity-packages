@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Animancer;
-using Rubickanov.Rig;
+using Rubickanov.Kinematics;
 using Rubickanov.Log;
 using Unity.Profiling;
 using UnityEngine;
@@ -119,7 +119,7 @@ namespace Rubickanov.Characters
         /// Degrees the model is turned from the body while it turns in place, positive to the right.
         /// Changes when a turn animation or settling turns the model, not when the body turns under it.
         /// </summary>
-        public float TurnOffset => _turn.Value;
+        public float TurnOffset => (float)_turn.Value;
 
         /// <summary>
         /// Degrees the model faces off the look onto the walk while facing it with a stride
@@ -668,14 +668,14 @@ namespace Rubickanov.Characters
             // into it (a get-up, a seat left) it turns there first.
             // A stride turns the hips onto the walk on top of the look.
             float facing = _aimYaw + _stride;
-            _facing = motion.FacesLook && (_facing || Mathf.Abs(_turn.ErrorTo(facing)) <= FacingCatch);
+            _facing = motion.FacesLook && (_facing || Mathf.Abs((float)_turn.ErrorTo(facing)) <= FacingCatch);
             if (_facing)
             {
-                _turn.Face(facing);
+                _turn.Turn(_turn.ErrorTo(facing));
             }
             else if (motion.FacesLook)
             {
-                _turn.Toward(facing, Smoothing(Animations.TurnSettleSharpness));
+                _turn.Turn(_turn.ErrorTo(facing) * Mathf.Clamp01(Smoothing(Animations.TurnSettleSharpness)));
             }
 
             // A rider faces the way the seat does, however the vehicle turns under it.
@@ -686,7 +686,7 @@ namespace Rubickanov.Characters
 
             if (canTurn && _phase == Phase.Grounded)
             {
-                float error = _turn.ErrorTo(_aimYaw);
+                float error = (float)_turn.ErrorTo(_aimYaw);
                 _turnPending = Mathf.Abs(error) >= Animations.TurnAngle ? _turnPending + Time.deltaTime : 0f;
                 if (_turnPending >= Animations.TurnDelay)
                 {
@@ -698,7 +698,7 @@ namespace Rubickanov.Characters
                 _turnPending = 0f;
             }
 
-            _model.rotation = Quaternion.AngleAxis(_turn.Value, body.up) * body.rotation * _modelRest;
+            _model.rotation = Quaternion.AngleAxis((float)_turn.Value, body.up) * body.rotation * _modelRest;
         }
 
         // Called in place of Unity applying root motion. A turn's rotation turns the model; a get-up's travel moves

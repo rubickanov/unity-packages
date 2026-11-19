@@ -1,7 +1,10 @@
 {
     "name": "Rubickanov.Rig.Runtime",
     "rootNamespace": "Rubickanov.Rig",
-    "references": [],
+    "references": [
+        "Rubickanov.Kinematics",
+        "Unity.Mathematics"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

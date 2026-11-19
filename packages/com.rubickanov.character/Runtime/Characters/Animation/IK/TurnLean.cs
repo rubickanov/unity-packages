@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Rubickanov.Rig;
+using Rubickanov.Kinematics;
 using UnityEngine;
 
 namespace Rubickanov.Characters
@@ -30,13 +30,13 @@ namespace Rubickanov.Characters
         private readonly Transform _chest;
         private readonly List<Bone> _bones = new();
         private Vector3 _lastForward;
-        private FloatSpring _speed;
-        private FloatSpring _roll;
-        private FloatSpring _pitch;
+        private ScalarSpring _speed;
+        private ScalarSpring _roll;
+        private ScalarSpring _pitch;
 
         public bool IsValid => _bones.Count > 0;
         /// <summary>Current sideways lean in degrees, positive to the right.</summary>
-        public float Roll => _roll.Value;
+        public float Roll => (float)_roll.Value;
 
         public TurnLean(Animator animator, Transform body, CharacterRigConfig.LeanBone[] bones)
         {
@@ -91,15 +91,15 @@ namespace Rubickanov.Characters
             }
 
             // Smoothed speed; its spring velocity is the forward acceleration, free of per-step jitter.
-            float speed = _speed.Step(planarSpeed, config.SpeedSpring, deltaTime);
+            float speed = (float)_speed.Step(planarSpeed, config.SpeedSpring, deltaTime);
             float sideways = turn / deltaTime * Mathf.Deg2Rad * speed;
-            float onward = _speed.Velocity;
+            float onward = (float)_speed.Velocity;
 
             bool leaning = config.Lean && grounded;
             float rollTarget = leaning ? LeanAngle(sideways, config.RollScale, config.MaxRoll, config) : 0f;
             float pitchTarget = leaning ? LeanAngle(onward, config.PitchScale, config.MaxPitch, config) : 0f;
-            float roll = _roll.Step(rollTarget, config.LeanSpring, deltaTime) * weight;
-            float pitch = _pitch.Step(pitchTarget, config.LeanSpring, deltaTime) * weight;
+            float roll = (float)_roll.Step(rollTarget, config.LeanSpring, deltaTime) * weight;
+            float pitch = (float)_pitch.Step(pitchTarget, config.LeanSpring, deltaTime) * weight;
             Vector3 right = Vector3.Cross(up, forward);
             bool swaying = !sway.IsZero;
             float swayRoll = 0f, swayPitch = 0f;
