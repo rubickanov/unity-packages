@@ -72,7 +72,8 @@ namespace Rubickanov.Audio
 
         private void Build()
         {
-            int rate = AudioSettings.outputSampleRate;
+            // The configuration reads 0 when the project turns Unity's audio off, where outputSampleRate logs an error.
+            int rate = AudioSettings.GetConfiguration().sampleRate;
             if (rate <= 0) return;
             TruePeakLimiter? old = _limiter;
             if (old != null && _rate == rate && old.Latency == TruePeakLimiter.LatencyFor(rate, _settings.LookaheadMs))

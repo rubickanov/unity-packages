@@ -490,6 +490,7 @@ foreach (var (param, volume) in settings.Volumes)
 - **3.5.1 fixes level** — a binaural source was 0.3–2 dB louder than panned (the spread compensation applied to a source with no spread), and `Begin` scopes nest.
 - **3.5.2 calibrates the HRTF in play** — 3.5.1's `HrtfVolume` 1.07 was measured right after a spread-0 voice; 1.46 matches in the state a game is in.
 - **3.5.3 pins Unity's spread state** — `MinSpread` everywhere, the scene sweep and the anchor voice (see «Binaural (HRTF)»), so the HRTF level no longer moves 3 dB with the last sound played; kind-less sources (an engine on its own curve) can go on HRTF too (`SourceSetup.Binaural`, `SoundSpace.ShapeBinaural`).
+- **3.5.4 stays quiet with audio off** — `OutputLimiter` reads the rate from `AudioSettings.GetConfiguration()`, 0 in a project with Unity's audio disabled, where `outputSampleRate` logs an error into every test that enters Play.
 - **3.5.0 is additive** — `Binaural` is off until a game starts it, and `SoundKind.Binaural` is false by default: nothing changes for a game that does neither.
 - **3.4.0 is additive** — the old API (`SoundConfig`, `PlaySFX*`, string loop slots) behaves as before except the pool rank of a `SoundConfig`, now `Default` + `Priority` (the same order among old sounds).
 - **3.2.0 is additive** — `IAudioService` is unchanged; nothing to migrate. Sounds without a kind and services without a space behave as in 3.1.
