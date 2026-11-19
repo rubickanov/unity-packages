@@ -17,6 +17,12 @@ namespace Rubickanov.Settings.Input
         public const string KeysHeading = "keys.heading.keys";
         public const string PadHeading = "keys.heading.pad";
 
+        /// <summary>
+        /// The question when the new key is another action's: {0} the key, {1} that action, {2} this row's action, {3} the
+        /// key this row has now (the other's on a swap).
+        /// </summary>
+        public const string SwapQuestion = "settings.swap.question";
+
         private readonly Dictionary<ControlScheme, SettingsRow[]> _rows = new();
         private readonly Subject<Unit> _changed = new();
         private readonly IDisposable _subscriptions;
@@ -40,6 +46,11 @@ namespace Rubickanov.Settings.Input
         public ControlNames Names { get; }
 
         public ActiveDevice Device { get; }
+
+        /// <summary>
+        /// The keys that pick among a row's several, for a scheme: the {1} of a row's line (<c>settings.keys.about.ways</c>).
+        /// </summary>
+        public Func<ControlScheme, string> Ways { get; set; } = scheme => scheme == ControlScheme.Pad ? "D-PAD" : "◀▶";
 
         /// <summary>The scheme of the device in hand.</summary>
         public ControlScheme InHand => Device.Scheme;

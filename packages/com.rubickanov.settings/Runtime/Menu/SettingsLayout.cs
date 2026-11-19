@@ -107,8 +107,14 @@ namespace Rubickanov.Settings
         /// <summary>Rows made again each time the section opens or is rebuilt (keys of the device in hand).</summary>
         public void Rows(Func<IEnumerable<SettingsRow>> rows) => _section.Add(rows ?? throw new ArgumentNullException(nameof(rows)));
 
-        /// <summary><c>settings.reset</c>: asks first, then puts every row of the section back, and the section's own reset.</summary>
-        public ActionRow ResetRow() => Add(new ActionRow(ResetId, menu => (menu as SettingsMenu)?.AskReset()));
+        /// <summary><c>settings.reset</c>: puts every row of the section back, and the section's own reset.</summary>
+        /// <param name="ask">Asks first; false resets on Enter at once.</param>
+        public ActionRow ResetRow(bool ask = true) => Add(new ActionRow(ResetId, menu =>
+        {
+            if (menu is not SettingsMenu settings) return;
+            if (ask) settings.AskReset();
+            else settings.ResetNow();
+        }));
 
         public const string ResetId = "settings.reset";
 

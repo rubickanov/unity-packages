@@ -1,0 +1,20 @@
+{
+    "name": "Rubickanov.Report.Runtime",
+    "rootNamespace": "Rubickanov.Report",
+    "references": [
+        "io.sentry.unity.runtime",
+        "Rubickanov.Log.Runtime",
+        "Rubickanov.Save.Runtime",
+        "Rubickanov.Save.Data",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

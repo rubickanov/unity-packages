@@ -92,6 +92,7 @@ namespace Rubickanov.Settings.Input.Tests
 
             ListenAndPress(_keyboard.eKey);
             Assert.That(_menu.QuestionText, Is.EqualTo("E IS ON INTERACT. SWAP?"));
+            Assert.That(_menu.Question!.Args[3], Is.EqualTo("SPACE"), "the key Jump has now, the other's on a swap");
             Assert.That(Current("jump"), Is.EqualTo("<Keyboard>/space"), "nothing changes before the answer");
             _menu.Step(SettingsStep.Right);
             _menu.Submit();

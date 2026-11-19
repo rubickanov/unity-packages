@@ -58,11 +58,19 @@ namespace Rubickanov.Settings
             return this;
         }
 
-        public SettingsRow KeepOrRevert()
+        /// <param name="hold">
+        /// True: a choice holds its picks until the section's APPLY. False: each change goes on at once and asks, as a
+        /// row of another kind does (a menu without an APPLY row).
+        /// </param>
+        public SettingsRow KeepOrRevert(bool hold = true)
         {
             IsKeepOrRevert = true;
+            HoldsPicks = hold;
             return this;
         }
+
+        /// <summary>A keep-or-revert choice waits for APPLY (<see cref="KeepOrRevert"/>).</summary>
+        internal bool HoldsPicks { get; private set; }
 
         /// <summary>Adds what the section's reset puts back for this row.</summary>
         public SettingsRow Resets(params IResettable[] values)
@@ -277,7 +285,7 @@ namespace Rubickanov.Settings
             if (_liveOptions != null) _options = _liveOptions() ?? Array.Empty<T>();
         }
 
-        protected internal override bool Holds => IsKeepOrRevert;
+        protected internal override bool Holds => IsKeepOrRevert && HoldsPicks;
 
         protected internal override bool Held => _holding;
 

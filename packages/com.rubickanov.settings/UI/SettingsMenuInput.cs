@@ -17,15 +17,19 @@ namespace Rubickanov.Settings.UI
         private readonly SettingsMenu _menu;
         private readonly MenuNavigation _navigation;
         private readonly MenuCue _sectionCue;
+        private readonly MenuCue _changeCue;
         private IDisposable? _claim;
         private IDisposable? _cues;
 
         /// <param name="sectionCue">The cue of another section; <see cref="MenuCue.Focus"/> when null.</param>
-        public SettingsMenuInput(SettingsMenu menu, MenuNavigation navigation, MenuCue? sectionCue = null)
+        /// <param name="changeCue">The cue of a changed value; <see cref="Change"/> when null.</param>
+        public SettingsMenuInput(SettingsMenu menu, MenuNavigation navigation, MenuCue? sectionCue = null,
+            MenuCue? changeCue = null)
         {
             _menu = menu ?? throw new ArgumentNullException(nameof(menu));
             _navigation = navigation ?? throw new ArgumentNullException(nameof(navigation));
             _sectionCue = sectionCue ?? MenuCue.Focus;
+            _changeCue = changeCue ?? Change;
             _cues = menu.Cues.Subscribe(cue => _navigation.Cue(Of(cue)));
             _claim = navigation.Claim(this);
         }
@@ -66,7 +70,7 @@ namespace Rubickanov.Settings.UI
 
         private MenuCue Of(SettingsCue cue) => cue switch
         {
-            SettingsCue.Change => Change,
+            SettingsCue.Change => _changeCue,
             SettingsCue.Select => MenuCue.Select,
             SettingsCue.Back => MenuCue.Back,
             SettingsCue.Denied => MenuCue.Denied,

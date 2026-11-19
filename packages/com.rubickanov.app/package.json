@@ -1,0 +1,13 @@
+{
+    "name": "com.rubickanov.app",
+    "version": "1.0.0",
+    "license": "MIT",
+    "displayName": "App",
+    "description": "No-DI glue for a game: services made by hand in an app scope and a scene scope, a Lifecycle that says what of theirs runs where in Unity's frame (time tick, early tick, start, tick, fixed and physics ticks, pre-late and late ticks) and disposes them last made first, a FrameLoop that puts those places into the player loop. A step that throws is logged once per kind and the others go on.",
+    "unity": "6000.0",
+    "dependencies": {
+        "com.rubickanov.log": "1.3.0"
+    },
+    "keywords": ["lifecycle", "player loop", "scopes", "services"],
+    "author": { "name": "rubickanov" }
+}

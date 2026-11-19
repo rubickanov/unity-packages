@@ -1,0 +1,14 @@
+{
+    "name": "com.rubickanov.report",
+    "version": "1.0.0",
+    "license": "MIT",
+    "displayName": "Report",
+    "description": "Bug reports over the Sentry Unity SDK: the SDK started by the game with its values (no IP, no machine name, a random install id), each kind of error once a session under a cap, the end of the log attached, hangs ignored while the game says it is busy, the moment's screenshot and a note as a feedback, the frame rate as metrics. Without a DSN it stays quietly off. The game provides io.sentry.unity and draws its own report window.",
+    "unity": "6000.0",
+    "dependencies": {
+        "com.rubickanov.log": "1.3.0",
+        "com.rubickanov.save": "1.3.0"
+    },
+    "keywords": ["bug report", "sentry", "crash", "feedback", "diagnostics"],
+    "author": { "name": "rubickanov" }
+}

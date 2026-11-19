@@ -440,6 +440,8 @@ namespace Rubickanov.Settings
             }, startOnNo: true));
         }
 
+        internal void ResetNow() => ResetSection();
+
         /// <summary>APPLY: the section's held picks go on together, then one keep question; false with nothing held.</summary>
         internal bool ApplyHeld()
         {

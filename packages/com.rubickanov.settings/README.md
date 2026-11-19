@@ -141,7 +141,7 @@ var layout = new SettingsLayout()
     }, onReset: () => statsPanel.ResetLayout());
 ```
 
-Rows: `Steps`, `Toggle`, `Choice` (keys of options, or shown as they are), `Action`, `Heading`, `Add` (a game's own kind), `Rows(() => …)` (made again on `Rebuild`), `ResetRow` (asks, then resets every row of the section and `onReset`), `ApplyRow` (puts the section's held picks on). On a row: `.Visible(when)`, `.Enabled(when)`, `.KeepOrRevert()`, `.Resets(values)`.
+Rows: `Steps`, `Toggle`, `Choice` (keys of options, or shown as they are), `Action`, `Heading`, `Add` (a game's own kind), `Rows(() => …)` (made again on `Rebuild`), `ResetRow` (asks, then resets every row of the section and `onReset`; `ResetRow(ask: false)` resets on Enter at once), `ApplyRow` (puts the section's held picks on). On a row: `.Visible(when)`, `.Enabled(when)`, `.KeepOrRevert()`, `.Resets(values)`.
 
 ### Driving the menu
 
@@ -155,6 +155,7 @@ menu.Refresh();                     // on whatever Visible/Enabled read (the dev
 
 menu.Changed.Subscribe(_ => Draw());
 menu.Cues.Subscribe(cue => PlayCue(cue));     // Focus, Change, Select, Back, Denied, Section
+// with com.rubickanov.ui: new SettingsMenuInput(menu, navigation, sectionCue, changeCue) sends them as MenuCues
 ```
 
 Drawing reads `Sections`, `SectionIndex`, `Rows`, `Focus`, `Question` and `QuestionText`, `Description`, `Listening`; a row's label is `text.Get(row.Id)`, a choice's options `choice.OptionTexts(text)`.
@@ -183,7 +184,7 @@ Classes: `settings` (`settings--asking` while a question is up), `settings__sect
 
 ### Keep or revert
 
-A `KeepOrRevert()` choice (window, resolution) only picks: the row shows the pick (`IsHeld`, class `settings__row--held`) and the screen stays as it is. The section's `ApplyRow` (`settings.apply`, off while nothing is held) puts every held pick on at once and asks `settings.keep.question`; it goes back after `SettingsMenu.KeepSeconds` (10) unanswered, on "revert", on Back and when the menu is disposed. Picks never applied are dropped when the section opens again or the rows are rebuilt. A section reset puts values on at once and asks too. A keep-or-revert row of a game's own kind (not a choice) still asks on each change. `DisplaySettings.AddRows` adds the APPLY row under its two.
+A `KeepOrRevert()` choice (window, resolution) only picks: the row shows the pick (`IsHeld`, class `settings__row--held`) and the screen stays as it is. The section's `ApplyRow` (`settings.apply`, off while nothing is held) puts every held pick on at once and asks `settings.keep.question`; it goes back after `SettingsMenu.KeepSeconds` (10) unanswered, on "revert", on Back and when the menu is disposed. Picks never applied are dropped when the section opens again or the rows are rebuilt. A section reset puts values on at once and asks too. A keep-or-revert row of a game's own kind (not a choice) still asks on each change, and so does a choice marked `KeepOrRevert(hold: false)`: the pick goes on at once and the same question asks to keep it. `DisplaySettings.AddRows` adds the APPLY row under its two; `AddRows(rows, modes, apply: false)` adds none and its two go on at once.
 
 ### Words
 
@@ -212,12 +213,12 @@ layout.Section("controls", s =>
 keys.Changed.Subscribe(_ => menu.Rebuild());   // device switched, key renamed or rebound
 ```
 
-Left and right pick one of a row's keys, Enter or a click on a key listens for its new one (`settings.listen` / `settings.listen.pad` under the rows). What comes of it:
+A row's line is `settings.keys.about` (`.pad`, `.ways` for a row of several): {0} the submit key, {1} the keys that pick a way (`keys.Ways`, ◀▶ or D-PAD by default). Left and right pick one of a row's keys, Enter or a click on a key listens for its new one (`settings.listen` / `settings.listen.pad` under the rows). What comes of it:
 
 | Result | The menu |
 |---|---|
 | Bound, Unchanged | the key shows, cue `Select` |
-| Taken | `settings.swap.question` ("E IS ON INTERACT. SWAP?", YES first); yes swaps the two keys |
+| Taken | `settings.swap.question` ("E IS ON INTERACT. SWAP?", YES first; `Question.Args`: the key, its action, this row's action, this row's key now); yes swaps the two keys |
 | Refused | nothing changes, cue `Denied` |
 | Cancelled (Esc, Start, Back, the menu's end) | nothing changes, cue `Back` |
 

@@ -42,19 +42,22 @@ namespace Rubickanov.Settings
         /// the sizes read when the section opens, native shown as the size it is now), vsync, and the frame cap (off
         /// while vsync is on).
         /// </summary>
-        public void AddRows(SectionBuilder section, IDisplayModes modes)
+        /// <param name="apply">
+        /// False: no APPLY row; a new window or size goes on at once and asks to be kept (each change, as it is made).
+        /// </param>
+        public void AddRows(SectionBuilder section, IDisplayModes modes, bool apply = true)
         {
             if (modes == null) throw new ArgumentNullException(nameof(modes));
             string windowKey = Window.Id + "/";
             section.Choice(Window.Id, Window, Windows, mode => windowKey + SettingFormats.Enum<WindowMode>().Show(mode))
                 .Resets(Window)
-                .KeepOrRevert();
+                .KeepOrRevert(apply);
 
             var shown = new ShownSize(Size, modes);
             section.Choice(Size.Id, shown, () => Offered(modes), (size, text) => Show(size, text))
                 .Resets(Size)
-                .KeepOrRevert();
-            section.ApplyRow();
+                .KeepOrRevert(apply);
+            if (apply) section.ApplyRow();
 
             section.Toggle(VSync);
             section.Choice(FrameCap.Id, FrameCap, FrameCaps, (cap, text) => ShowCap(cap, text))

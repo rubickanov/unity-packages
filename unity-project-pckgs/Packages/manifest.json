@@ -2,6 +2,7 @@
   "dependencies": {
     "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
+    "com.rubickanov.app": "file:../../packages/com.rubickanov.app",
     "com.rubickanov.audio": "file:../../packages/com.rubickanov.audio",
     "com.rubickanov.devconsole": "file:../../packages/com.rubickanov.devconsole",
     "com.rubickanov.input": "file:../../packages/com.rubickanov.input",
@@ -54,6 +55,7 @@
     "com.unity.modules.wind": "1.0.0"
   },
   "testables": [
+    "com.rubickanov.app",
     "com.rubickanov.audio",
     "com.rubickanov.devconsole",
     "com.rubickanov.input",

@@ -271,6 +271,43 @@ namespace Rubickanov.Settings.Tests
         }
 
         [Test]
+        public void KeepOrRevert_WithoutHold_GoesOnAtOnceAsksAndRunsOutBackToTheOldValue()
+        {
+            SettingsMenu menu = Menu(new SettingsLayout().Section("display", rows =>
+            {
+                rows.Choice(_window.Id, _window, new[] { WindowMode.Fullscreen, WindowMode.Windowed }, w => "display.window/" + w)
+                    .KeepOrRevert(hold: false);
+            }));
+
+            menu.Step(SettingsStep.Right);
+
+            Assert.That(_window.Value, Is.EqualTo(WindowMode.Windowed));
+            Assert.That(menu.Rows[0].IsHeld, Is.False);
+            Assert.That(menu.Question!.TextKey, Is.EqualTo("settings.keep.question"));
+            _now = 10f;
+            menu.Tick();
+            Assert.That(menu.Question, Is.Null);
+            Assert.That(_window.Value, Is.EqualTo(WindowMode.Fullscreen));
+        }
+
+        [Test]
+        public void ResetRow_WithoutAsking_ResetsOnEnter()
+        {
+            _master.Value = 2;
+            SettingsMenu menu = Menu(new SettingsLayout().Section("sound", rows =>
+            {
+                rows.Steps(_master);
+                rows.ResetRow(ask: false);
+            }));
+
+            menu.Click(IndexOf(menu, SectionBuilder.ResetId));
+
+            Assert.That(menu.Question, Is.Null);
+            Assert.That(_master.Value, Is.EqualTo(10));
+            Assert.That(_cues[_cues.Count - 1], Is.EqualTo(SettingsCue.Select));
+        }
+
+        [Test]
         public void Back_AnswersAQuestionNoElseLeavesTheMenuToItsOwner()
         {
             SettingsMenu menu = Menu(Sound, "display");

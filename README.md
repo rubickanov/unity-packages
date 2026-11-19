@@ -44,7 +44,8 @@ Which package needs what:
 | Needs | Packages |
 |---|---|
 | `R3` | `input`, `settings`, `ui` |
-| `UniTask` | `audio`, `input`, `save`, `settings`, `ui` |
+| `UniTask` | `audio`, `input`, `report`, `save`, `settings`, `ui` |
+| `io.sentry.unity` 4.11.0 (`https://github.com/getsentry/unity.git#4.11.0`) | `report` (not in `unity-project-pckgs`) |
 
 `unity-project-pckgs/Packages/manifest.json` is the reference — it has every one
 of these wired up and is the configuration all packages are developed against.
@@ -81,13 +82,16 @@ git commit && git push                    # 3. here
 
 | Package | Version | What |
 |---|---|---|
-| `audio` | 3.4.2 | Audio service: SFX pooling, music, mixer volume, 3D sound kinds, propagation delay, loudness, output true-peak limiter, mixer kit |
+| `app` | 1.0.0 | No-DI glue: app and scene scopes over the game's services, a lifecycle of ticks at fixed places in the player loop, disposal last made first |
+| `audio` | 3.5.4 | Audio service: SFX pooling, music, mixer volume, 3D sound kinds, propagation delay, loudness, output true-peak limiter, mixer kit |
 | `character` | 5.2.0 | Character body: KCC motor, Animancer animator, ragdoll and get-up, feet/head/seat IK (the game provides KCC and Animancer; not in `unity-project-pckgs`) |
 | `devconsole` | 5.1.0 | In-game dev console |
 | `input` | 1.2.0 | Input System helpers each game needs |
+| `kinematics` | 1.0.0 | Deterministic pose maths on double: DetMath, two-bone IK, foot contact, pelvis tilt, head look, springs |
 | `log` | 1.3.0 | Named log channels |
+| `report` | 1.0.0 | Bug reports over the Sentry Unity SDK: errors once a session, log tail, feedback with screenshot, frame-rate metrics, no personal data (the game provides Sentry; not in `unity-project-pckgs`) |
 | `save` | 1.3.0 | Player data store; versioned documents with migrations; world slots committed by generation |
-| `settings` | 1.1.0 | Player settings the game declares: display, volume, look, keys, and a menu model for a settings screen |
+| `settings` | 1.2.0 | Player settings the game declares: display, volume, look, keys, and a menu model for a settings screen |
 | `ui` | 4.1.0 | UI Toolkit framework |
 
 ## Running package tests from a consumer project

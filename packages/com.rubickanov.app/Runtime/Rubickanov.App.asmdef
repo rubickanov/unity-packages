@@ -1,0 +1,16 @@
+{
+    "name": "Rubickanov.App",
+    "rootNamespace": "Rubickanov.App",
+    "references": [
+        "Rubickanov.Log.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

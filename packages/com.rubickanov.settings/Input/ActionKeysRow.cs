@@ -47,7 +47,7 @@ namespace Rubickanov.Settings.Input
             if (text.TryGet(Id + ".about", out string own)) return own;
             string line = Count > 1 ? "settings.keys.about.ways"
                 : Scheme == ControlScheme.Pad ? "settings.keys.about.pad" : "settings.keys.about";
-            return string.Format(text.Get(line), _keys.SubmitText());
+            return string.Format(text.Get(line), _keys.SubmitText(), _keys.Ways(_keys.InHand));
         }
 
         protected override async UniTask ListenAsync(int key, ISettingsMenu menu, CancellationToken ct)
@@ -59,10 +59,11 @@ namespace Rubickanov.Settings.Input
                     menu.Cue(SettingsCue.Denied);
                     string taken = _keys.Names.Name(result.Path).Text;
                     string other = menu.Text.Get(ControlKeys.LabelKey(result.Other.Action));
-                    menu.Ask(new SettingsQuestion("settings.swap.question", "settings.yes", "settings.no", yes =>
+                    // {2} and {3}: this row's action and the key it has now, which the other gets on a swap.
+                    menu.Ask(new SettingsQuestion(ControlKeys.SwapQuestion, "settings.yes", "settings.no", yes =>
                     {
                         if (yes) _keys.Bindings.Swap(result);
-                    }, args: new object[] { taken, other }));
+                    }, args: new object[] { taken, other, menu.Text.Get(Id), KeyText(key) }));
                     break;
                 case RebindKind.Refused:
                 case RebindKind.Taken:

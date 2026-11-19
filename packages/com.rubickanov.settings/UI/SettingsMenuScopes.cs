@@ -14,13 +14,13 @@ namespace Rubickanov.Settings.UI
         /// _scope = ui.OpenSettingsScope(menu, navigation, Close);   // Close disposes _scope, the menu, saves the store
         /// </code></example>
         public static IDisposable OpenSettingsScope(this IUIService ui, SettingsMenu menu, MenuNavigation navigation,
-            Action close, MenuCue? sectionCue = null)
+            Action close, MenuCue? sectionCue = null, MenuCue? changeCue = null)
         {
             if (ui == null) throw new ArgumentNullException(nameof(ui));
             if (menu == null) throw new ArgumentNullException(nameof(menu));
             if (close == null) throw new ArgumentNullException(nameof(close));
 
-            var input = new SettingsMenuInput(menu, navigation, sectionCue);
+            var input = new SettingsMenuInput(menu, navigation, sectionCue, changeCue);
             IDisposable scope = ui.OpenInputScope(() =>
             {
                 if (!menu.Back()) close();
